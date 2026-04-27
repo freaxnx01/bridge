@@ -1037,7 +1037,7 @@ _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
   if [[ "$cur" == -* ]]; then
-    local flags="-r --remote --refresh -D --delete -w --worktree -h --help"
+    local flags="-r --remote --refresh -D --delete -w --worktree --no-sync --no-channel --slot --status --free -h --help"
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
