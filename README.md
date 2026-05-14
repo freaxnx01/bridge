@@ -8,9 +8,9 @@ A bash function that picks a repo under `~/projects/repos/` via fzf and launches
 
 | What | Path |
 |---|---|
-| Source file | `~/projects/repos/github/freaxnx01/public/config/shell/clrepo.sh` |
-| Repo | `github.com/freaxnx01/config` (public, branch `main`) |
-| bashrc source line | `~/.bashrc` lines 146–149 |
+| Source file | `~/projects/repos/github/freaxnx01/public/clrepo/clrepo.sh` |
+| Repo | `github.com/freaxnx01/clrepo` (public, branch `main`) |
+| bashrc source line | `~/.bashrc` (search for `clrepo:`) |
 | MRU + remote cache + metadata cache | `~/.cache/clrepo/` (`mru`, `remote.list`, `repo-meta.json`) |
 | Forgejo `.envrc` | `~/projects/repos/git-forgejo/.envrc` (not in a git repo, local-only artifact) |
 
@@ -144,10 +144,10 @@ Everything upstream of `_clrepo_launch` (picker, clone, create, delete, MRU, wor
 
 Slot tracking is the **default mode** — no setup required. `_clrepo_slots_init` creates `~/.cache/clrepo/slots.json` on first launch; allocation, status, reconciliation, and all other slot machinery just work. Opt out per-launch with `--no-channel`.
 
-Telegram pages are **opt-in**. `shell/setup-claude-channels.sh` is the interactive scaffold:
+Telegram pages are **opt-in**. `setup-claude-channels.sh` is the interactive scaffold:
 
 ```bash
-~/projects/repos/github/freaxnx01/public/config/shell/setup-claude-channels.sh
+~/projects/repos/github/freaxnx01/public/clrepo/setup-claude-channels.sh
 ```
 
 It prompts for the Telegram owner user_id and per-slot Passbolt resource IDs, validates each id against Passbolt, and writes the result. Idempotent — re-run anytime to add slots, rotate tokens, or update the owner.
@@ -168,7 +168,7 @@ When `slot-tokens.json` is absent, clrepo prints a one-time discoverability hint
 
 clrepo proactively pages each slot's Telegram bot when Claude is paused or
 hits the 5h usage limit, but only when the user is **away** from the slot's
-tmux session. See spec at `docs/superpowers/specs/2026-05-02-clrepo-presence-aware-telegram-pages-design.md`.
+tmux session. See spec at `docs/specs/2026-05-02-clrepo-presence-aware-telegram-pages-design.md`.
 
 ### Presence model
 
@@ -180,8 +180,8 @@ tmux session. See spec at `docs/superpowers/specs/2026-05-02-clrepo-presence-awa
 
 ### Event sources
 
-- **Notification hook** (per-slot `~/.claude-s<N>/settings.json`): `idle_prompt` (debounced 120s) and `elicitation_dialog` (immediate) trigger a page via `shell/clrepo-hooks/notify.sh`. `UserPromptSubmit` fires `shell/clrepo-hooks/clear-idle.sh` to cancel a pending idle page.
-- **Watcher daemon** (`shell/clrepo-watcher.sh`): polls every 30s for the usage-limit phrase in each active slot's tmux pane. Started by `_clrepo_slot_allocate`, self-exits when no slots are occupied.
+- **Notification hook** (per-slot `~/.claude-s<N>/settings.json`): `idle_prompt` (debounced 120s) and `elicitation_dialog` (immediate) trigger a page via `clrepo-hooks/notify.sh`. `UserPromptSubmit` fires `clrepo-hooks/clear-idle.sh` to cancel a pending idle page.
+- **Watcher daemon** (`clrepo-watcher.sh`): polls every 30s for the usage-limit phrase in each active slot's tmux pane. Started by `_clrepo_slot_allocate`, self-exits when no slots are occupied.
 
 Both event sources gate through `_clrepo_should_page` before sending. Pages go to the slot's existing per-slot bot (`@claude_freax_s<N>_bot`); replies route back via the existing `--channels plugin:telegram@...` mechanism.
 
@@ -245,7 +245,7 @@ References:
 
 Both subsystems run inside the same `claude` process and share that slot's `CLAUDE_CONFIG_DIR` (`~/.claude-s<N>`) and `TELEGRAM_BOT_TOKEN` env. They don't conflict at the launcher level: `--channels plugin:telegram@…` and `--remote-control` are independent flags wired together at line 1367 of `clrepo.sh`. Per-slot isolation holds (each slot's bot has its own token; RC sessions are scoped to the OAuth user).
 
-The lifecycle paths under `_clrepo_telegram_setup` / `_clrepo_telegram_cleanup` (`shell/clrepo.sh:822, 867`) fire identically under both tmux and foreground launches; reattaching a tmux'd RC session keeps the bot alive (no duplicate registrations, no dropped pages) because setup runs only on session create.
+The lifecycle paths under `_clrepo_telegram_setup` / `_clrepo_telegram_cleanup` (`clrepo.sh:822, 867`) fire identically under both tmux and foreground launches; reattaching a tmux'd RC session keeps the bot alive (no duplicate registrations, no dropped pages) because setup runs only on session create.
 
 ## Config variables
 

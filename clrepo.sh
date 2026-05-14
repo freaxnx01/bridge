@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.25.0"
+_CLREPO_VERSION="1.25.1"
 
 _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CLREPO_BASE="${CLREPO_BASE:-$HOME/projects/repos}"
@@ -30,7 +30,7 @@ _CLREPO_CACHE="${CLREPO_CACHE:-$HOME/.cache/clrepo}"
 _CLREPO_CONFIG="${CLREPO_CONFIG:-$HOME/.config/clrepo}"
 _CLREPO_REMOTE_TTL=600  # seconds
 _CLREPO_UPDATE_TTL=86400  # seconds; staleness for latest-version cache
-_CLREPO_RAW_URL="https://raw.githubusercontent.com/freaxnx01/config/main/shell/clrepo.sh"
+_CLREPO_RAW_URL="https://raw.githubusercontent.com/freaxnx01/clrepo/main/clrepo.sh"
 
 # Autosync function (opt-in commit & push on session close). Same file is
 # also exec'd from the tmux session-closed hook in script mode.
