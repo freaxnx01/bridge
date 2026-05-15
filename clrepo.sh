@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.25.1"
+_CLREPO_VERSION="1.26.0"
 
 _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CLREPO_BASE="${CLREPO_BASE:-$HOME/projects/repos}"
@@ -1857,7 +1857,7 @@ _clrepo_launch() {
   if [ "${_CLREPO_NO_CHANNEL:-0}" = 1 ]; then
     # User opted out: no slot, no Telegram, shared CLAUDE_CONFIG_DIR (~/.claude).
     echo "clrepo: --no-channel set: no slot, no Telegram, shared ~/.claude." >&2
-    local -a claude_args=(-n "$display_name")
+    local -a claude_args=(-n "$display_name" --dangerously-skip-permissions)
     [ -n "$worktree" ] && claude_args+=(--worktree "$worktree")
     [ "$remote_control" = 1 ] && claude_args+=(--remote-control)
     if [ -n "${SSH_CONNECTION:-}" ] && command -v tmux >/dev/null; then
