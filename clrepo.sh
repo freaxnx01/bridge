@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.26.0"
+_CLREPO_VERSION="1.26.1"
 
 _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CLREPO_BASE="${CLREPO_BASE:-$HOME/projects/repos}"
@@ -1095,8 +1095,9 @@ _clrepo_install_hooks() {
   exec {_lock_fd}>"$_CLREPO_CACHE/hooks.lock"
   flock "$_lock_fd"
   python3 -c "
-import json, os
+import json, os, re
 cfg = '$cfg'
+slot = '$slot'
 notify_cmd  = '$notify $slot'
 clear_cmd   = '$clear $slot'
 relabel_cmd = '$relabel $slot'
@@ -1112,20 +1113,31 @@ except json.JSONDecodeError:
 
 hooks = d.setdefault('hooks', {})
 
-def has_cmd(entries, cmd):
-    for e in entries or []:
-        for h in e.get('hooks', []) or []:
-            if h.get('command') == cmd: return True
-    return False
+# Match any prior entry that targets the same clrepo-hooks script for this
+# slot, regardless of where the script lived on disk. This makes installs
+# replace stale entries when the script path moves (e.g. when the hooks
+# get extracted into a new repo), instead of appending duplicates that
+# 404 every time the hook fires.
+def script_re(basename):
+    return re.compile(r'/clrepo-hooks/' + re.escape(basename) + r'(\s+' + re.escape(slot) + r')?\s*$')
 
-def add_cmd(key, cmd, matcher=''):
+def upsert(key, basename, cmd, matcher=''):
+    pat = script_re(basename)
     entries = hooks.setdefault(key, [])
-    if has_cmd(entries, cmd): return
-    entries.append({'matcher': matcher, 'hooks': [{'type': 'command', 'command': cmd}]})
+    pruned = []
+    for e in entries:
+        keep_hooks = [h for h in (e.get('hooks') or []) if not pat.search(h.get('command', ''))]
+        if not keep_hooks:
+            continue
+        if len(keep_hooks) != len(e.get('hooks') or []):
+            e = dict(e, hooks=keep_hooks)
+        pruned.append(e)
+    pruned.append({'matcher': matcher, 'hooks': [{'type': 'command', 'command': cmd}]})
+    hooks[key] = pruned
 
-add_cmd('Notification',      notify_cmd)
-add_cmd('UserPromptSubmit',  clear_cmd)
-add_cmd('SessionStart',      relabel_cmd, matcher='clear')
+upsert('Notification',      'notify.sh',     notify_cmd)
+upsert('UserPromptSubmit',  'clear-idle.sh', clear_cmd)
+upsert('SessionStart',      'relabel.sh',    relabel_cmd, matcher='clear')
 
 with open(cfg, 'w') as f: json.dump(d, f, indent=2)
 " 2>/dev/null
