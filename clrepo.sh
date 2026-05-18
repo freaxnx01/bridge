@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.26.2"
+_CLREPO_VERSION="1.27.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1737,6 +1737,17 @@ _clrepo_tmux_session_name() {
   printf '%s' "${s//[^A-Za-z0-9_-]/_}"
 }
 
+# Apply clrepo's tmux session defaults so wheel-scroll works and the
+# scrollback is deep enough to review long agent output. Scoped to the
+# session (not server-global) to avoid touching the user's other tmux
+# sessions. Hold Shift while dragging to bypass tmux's mouse capture and
+# fall back to the terminal emulator's native selection/clipboard.
+_clrepo_tmux_session_defaults() {
+  local session="$1"
+  tmux set-option -t "$session" mouse on >/dev/null 2>&1
+  tmux set-option -t "$session" history-limit 50000 >/dev/null 2>&1
+}
+
 # Fast-forward sync of the current branch with its upstream before launch.
 # Args: $1 = repo basename, $2 = optional worktree name.
 # Never fails the launch; every error path returns 0 after a stderr line.
@@ -1838,7 +1849,11 @@ _clrepo_launch() {
     if [ -n "${SSH_CONNECTION:-}" ] && command -v tmux >/dev/null; then
       local session
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
-      tmux new-session -A -s "$session" copilot --yolo
+      if ! tmux has-session -t "$session" 2>/dev/null; then
+        tmux new-session -d -s "$session" copilot --yolo
+        _clrepo_tmux_session_defaults "$session"
+      fi
+      tmux attach-session -t "$session"
     else
       copilot --yolo
     fi
@@ -1865,7 +1880,11 @@ _clrepo_launch() {
     if [ -n "${SSH_CONNECTION:-}" ] && command -v tmux >/dev/null; then
       local session
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
-      tmux new-session -A -s "$session" opencode
+      if ! tmux has-session -t "$session" 2>/dev/null; then
+        tmux new-session -d -s "$session" opencode
+        _clrepo_tmux_session_defaults "$session"
+      fi
+      tmux attach-session -t "$session"
     else
       opencode
     fi
@@ -1883,7 +1902,11 @@ _clrepo_launch() {
     if [ -n "${SSH_CONNECTION:-}" ] && command -v tmux >/dev/null; then
       local session
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
-      tmux new-session -A -s "$session" claude "${claude_args[@]}"
+      if ! tmux has-session -t "$session" 2>/dev/null; then
+        tmux new-session -d -s "$session" claude "${claude_args[@]}"
+        _clrepo_tmux_session_defaults "$session"
+      fi
+      tmux attach-session -t "$session"
     else
       claude "${claude_args[@]}"
     fi
@@ -1924,6 +1947,7 @@ _clrepo_launch() {
     # New tmux session
     _clrepo_telegram_setup "$_SLOT" "$repo" "$worktree" "$_SLOT_TOKEN"
     tmux new-session -d -s "$session"       -e "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"       -e "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"       claude "${claude_args[@]}"
+    _clrepo_tmux_session_defaults "$session"
     # Keep the pane visible on non-zero exit so the user actually sees claude's
     # startup error on attach instead of just `[exited]`. Auto-close on exit 0
     # so the success path stays clean (no dangling pane to dismiss).

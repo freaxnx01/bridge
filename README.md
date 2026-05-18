@@ -130,6 +130,26 @@ tmux new-session -A -s "<repo>[-<worktree>]" claude -n <repo> [--worktree <wt>]
 
 Session name = repo basename (+ `-<worktree>` if specified), sanitized to `[A-Za-z0-9_-]`.
 
+### Scrolling inside the tmux session
+
+clrepo applies two session-scoped tmux options on session create
+(`_clrepo_tmux_session_defaults`, applied to claude, copilot, and opencode
+launches alike):
+
+- `mouse on` — mouse wheel scrolls scrollback; click selects panes.
+- `history-limit 50000` — deep enough to review long agent runs.
+
+Both are set with `tmux set-option -t <session>`, so they only affect
+clrepo's sessions — your other tmux sessions and `~/.tmux.conf` are
+untouched. The keyboard fallback (`Ctrl-b [` to enter copy mode, then
+PgUp/PgDn/arrows, `q` to exit) works regardless.
+
+**Selecting text with the mouse:** with `mouse on`, click-drag goes through
+tmux and lands in tmux's paste buffer, not the system clipboard. Hold
+**Shift** while dragging to bypass tmux and use the terminal emulator's
+native selection (works in most terminals — iTerm2, GNOME Terminal,
+Alacritty, Kitty, Windows Terminal).
+
 ## Integration point for slot/telegram
 
 The slot/telegram spec (separate document) replaces `_clrepo_launch()` to add:

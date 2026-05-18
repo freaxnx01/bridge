@@ -5,6 +5,17 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.27.0] - 2026-05-18
+
+### Changed
+
+- Enable `mouse on` and `history-limit 50000` on every tmux session
+  clrepo creates (claude, copilot, opencode). Mouse wheel now scrolls
+  scrollback directly, and the buffer is deep enough to review long
+  agent runs. Options are scoped per-session, so the user's other tmux
+  sessions and `~/.tmux.conf` are untouched. README documents the
+  Shift-drag escape for native-clipboard text selection.
+
 ## [1.26.2] - 2026-05-18
 
 ### Fixed
