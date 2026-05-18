@@ -22,7 +22,15 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.26.1"
+_CLREPO_VERSION="1.26.2"
+
+# Disable alias expansion while sourcing so an existing `alias clrepo='...'`
+# (typical in interactive bashrc) doesn't get expanded inline at the
+# `clrepo() {` definition below and break re-sourcing (`source ~/.bashrc`).
+# Saved state is restored at the end of this file.
+_clrepo_saved_expand_aliases=0
+shopt -q expand_aliases && _clrepo_saved_expand_aliases=1
+shopt -u expand_aliases
 
 _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CLREPO_BASE="${CLREPO_BASE:-$HOME/projects/repos}"
@@ -2365,3 +2373,7 @@ _clrepo() {
   fi
 }
 complete -F _clrepo clrepo
+
+# Restore expand_aliases setting that was in effect before this file was sourced.
+[ "${_clrepo_saved_expand_aliases:-0}" = 1 ] && shopt -s expand_aliases
+unset _clrepo_saved_expand_aliases
