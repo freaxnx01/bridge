@@ -1,5 +1,5 @@
 {
-  "last_iteration": 7,
+  "last_iteration": 8,
   "last_completed_issue": 9,
   "issues_done": [6, 7, 3, 8],
   "issues_partial": [9],
@@ -11,6 +11,12 @@
     {"issue": 8, "pr_url": "https://github.com/freaxnx01/clrepo/pull/14"},
     {"issue": 9, "pr_url": "https://github.com/freaxnx01/clrepo/pull/15", "partial": true}
   ],
-  "blockers": [],
-  "updated_at": "2026-05-19T20:08:00Z"
+  "blockers": [
+    {
+      "issue": 4,
+      "reason": "PR #13 (issue #3) unmerged; #4 is best built on top of #3 per author. Also lacks a spec/plan doc for the deep refactor.",
+      "recommended_actions": ["merge PR #13", "optional: write spec/plan doc for multi-base"]
+    }
+  ],
+  "updated_at": "2026-05-19T20:09:00Z"
 }

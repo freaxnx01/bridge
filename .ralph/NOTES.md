@@ -33,3 +33,14 @@ iter 7 (2026-05-19): PR opened for #9 — **PARTIAL**, NOT closing the issue. La
 Scoping decision: #9 had no pre-existing plan doc (unlike #8). Implementing all 5 phases in one ~400+ LoC PR would be hard to review and would risk uncovered edge cases (caching invalidation correctness in particular). Better to land the foundation, let it bake, and tackle phases 3-5 with follow-up issues that the user can prioritize against other work. Marked the entry in PLAN.md with `[~]` to signal partial completion.
 
 Recommendation: spawn 3-4 follow-up issues from #9: (a) Forgejo focus support, (b) issue-count column in `-f`, (c) `~/.cache/clrepo/focus.json` caching layer, (d) tab completion + `-f <name>` open-by-name. Keep #9 open as the umbrella tracking issue, or close it once a/b/c/d are spawned and the MVP merges.
+
+iter 8 (2026-05-19): STOPPED without implementation. #4 is the next ready issue per PLAN.md, and its only dep (#3) is checked. But PR #13 (#3) is unmerged, and #4's author explicitly wrote "Best delivered on top of #3" — implementing #4 now means either (a) branching off main and duplicating #3's resolution code (big merge conflict expected), (b) branching off PR #13's branch (coupled to its fate), or (c) deviating from #3's precedence-chain design.
+
+Additionally, #4 is a deep refactor (~15+ call sites in clrepo.sh, picker display logic, error messages) with no pre-existing spec/plan doc — unlike #8, which executed cleanly because the plan was already committed. Pushing a half-implementation creates real technical debt.
+
+Recommended next moves for the user, before resuming the loop:
+1. Review and merge PR #13 (#3) so #4 can branch cleanly off updated main.
+2. Optionally: write a `docs/specs/2026-05-19-clrepo-multi-base-design.md` + matching plan doc for #4 (mirror the #8 pattern). The deep refactor benefits from a written design.
+3. Then re-run `/ralph-loop:ralph-loop ...` and iter 9 picks up #4.
+
+If the user prefers, they can also manually mark #4 as deferred (move to bottom of PLAN.md) so the loop picks #5 next — but #5 itself depends on both #3 and #4, so that just moves the same problem one issue down.
