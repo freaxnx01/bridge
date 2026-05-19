@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.33.0"
+_CLREPO_VERSION="1.34.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1764,6 +1764,63 @@ _clrepo_issues() {
   '
 }
 
+# Cross-repo dashboard: open-issue count + top 2 issue titles per repo.
+# Fans out `gh issue list` in parallel over every local repo under
+# $_CLREPO_BASE. Repos without a GitHub remote (or where gh fails for any
+# reason) are silently skipped — the existing `--issues` overview handles
+# cross-forge. Results sorted by open count descending.
+_clrepo_dashboard() {
+  local repos
+  repos=$(find "$_CLREPO_BASE" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$_CLREPO_BASE/||" | sort)
+  if [ -z "$repos" ]; then
+    echo "clrepo: no local repos found under $_CLREPO_BASE" >&2
+    return 1
+  fi
+
+  local tmpdir
+  tmpdir=$(mktemp -d) || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmpdir'" RETURN
+
+  while IFS= read -r rel; do
+    [ -z "$rel" ] && continue
+    (
+      cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit 0
+      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+      local json
+      json=$(gh issue list --state open --json number,title --limit 50 2>/dev/null) || exit 0
+      local count top
+      count=$(echo "$json" | jq 'length')
+      top=$(echo "$json" \
+        | jq -r '
+            sort_by(.number)
+            | .[:2]
+            | map("#\(.number) " + (.title | gsub("[\\t\\n\\r]"; " ")))
+            | join(", ")
+          ')
+      [ -z "$top" ] && top="—"
+      printf '%s\t%s\t%s\n' "$rel" "$count" "$top" \
+        > "$tmpdir/$(echo "$rel" | tr '/' '_')"
+    ) &
+  done <<< "$repos"
+  wait
+
+  local out
+  out=$(cat "$tmpdir"/* 2>/dev/null | sort -t$'\t' -k2,2nr -k1,1)
+  if [ -z "$out" ]; then
+    echo "clrepo: no GitHub repos with reachable issue API under $_CLREPO_BASE" >&2
+    return 1
+  fi
+
+  {
+    printf '%s\t%s\t%s\n' "REPO" "OPEN" "TOP ISSUES"
+    printf '%s\n' "$out"
+  } | awk -F'\t' '
+    NR==1 { printf "%-30s  %-5s  %s\n", $1, $2, $3; next }
+    { printf "%-30s  %-5s  %s\n", $1, $2, $3 }
+  '
+}
+
 # Pick a live tmux-backed session via fzf and reattach. Reads slots.json
 # (same source as --status), filters to records with a non-empty `session`
 # field. 0 live → error, 1 live → auto-attach (no picker), 2+ → fzf.
@@ -2481,6 +2538,7 @@ clrepo() {
       --doctor)       _clrepo_doctor; return ;;
       --worktree-status|--ws) _clrepo_worktree_status; return ;;
       --issues)       _clrepo_issues; return ;;
+      --dashboard)    _clrepo_dashboard; return ;;
       --setup-admin)
         [ -z "${2:-}" ] && { echo "clrepo: $1 requires a label" >&2; return 2; }
         _clrepo_setup_admin "$2"; return ;;
@@ -2536,6 +2594,8 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
                         show git status per local repo (branch, dirty,
                         ahead, extra worktrees)
   --issues              list open issues across GitHub + Forgejo forges
+  --dashboard           cross-repo table: open-issue count + top 2 titles
+                        per local GitHub repo under $_CLREPO_BASE
   --setup-admin LABEL   wire slot 0 (admin) for label-restore hook
   --install-admin-commands
                         symlink admin slash commands into ~/.claude-s0/commands/
