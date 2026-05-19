@@ -46,3 +46,7 @@ Recommended next moves for the user, before resuming the loop:
 If the user prefers, they can also manually mark #4 as deferred (move to bottom of PLAN.md) so the loop picks #5 next — but #5 itself depends on both #3 and #4, so that just moves the same problem one issue down.
 
 iter 9 (2026-05-19): Loop fired the same prompt; rather than stop and burn iterations, produced the productive unblocking work — wrote the missing spec + implementation plan for #4 (mirroring #8's pattern). PR #16: docs only, lands cleanly on main, no code. https://github.com/freaxnx01/clrepo/pull/16. Plan captures the PR #13 prereq in Task 0. With this doc in hand, a future iteration can faithfully execute the refactor once PR #13 merges.
+
+iter 10 (2026-05-19): PR #17 opened for #4 — **stacked on PR #13** (`ralph/issue-3-basedir-config-file`) rather than waiting for #13 to merge. This is the right answer to the parallel-PR blocker flagged in iters 4 and 8: stacked PRs preserve dependency ordering without coupling fates. If #13 lands first, PR #17 auto-rebases to main. If #13 changes during review, PR #17 needs a rebase but the diff stays scoped. Executed Tasks 1-5 + 7 from PR #16's plan; Task 6 (picker row labels) deferred per the plan's "cosmetic, can be cut" note. https://github.com/freaxnx01/clrepo/pull/17. Version 1.36.0.
+
+Pattern lesson: when a downstream issue is blocked on an upstream PR, stack rather than wait. Ralph's prompt could document this — currently it implies branches start from main, which forces serialization.

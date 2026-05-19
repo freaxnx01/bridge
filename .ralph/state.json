@@ -1,23 +1,18 @@
 {
-  "last_iteration": 9,
-  "last_completed_issue": 9,
-  "issues_done": [6, 7, 3, 8],
+  "last_iteration": 10,
+  "last_completed_issue": 4,
+  "issues_done": [6, 7, 3, 8, 4],
   "issues_partial": [9],
-  "issues_remaining": [4, 5],
+  "issues_remaining": [5],
   "prs_opened": [
     {"issue": 6, "pr_url": "https://github.com/freaxnx01/clrepo/pull/11"},
     {"issue": 7, "pr_url": "https://github.com/freaxnx01/clrepo/pull/12"},
     {"issue": 3, "pr_url": "https://github.com/freaxnx01/clrepo/pull/13"},
     {"issue": 8, "pr_url": "https://github.com/freaxnx01/clrepo/pull/14"},
     {"issue": 9, "pr_url": "https://github.com/freaxnx01/clrepo/pull/15", "partial": true},
-    {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/16", "docs_only": true}
+    {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/16", "docs_only": true},
+    {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/17", "stacked_on": "PR #13"}
   ],
-  "blockers": [
-    {
-      "issue": 4,
-      "reason": "Implementation blocked on PR #13 (#3) merging. Spec + plan doc now committed via PR #16; once #13 lands, iter 10+ can execute the 7-task plan.",
-      "recommended_actions": ["merge PR #13", "merge PR #16 (docs)", "resume loop"]
-    }
-  ],
-  "updated_at": "2026-05-19T20:13:30Z"
+  "blockers": [],
+  "updated_at": "2026-05-19T20:18:00Z"
 }
