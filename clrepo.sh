@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.27.0"
+_CLREPO_VERSION="1.28.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1267,74 +1267,45 @@ with open(f, 'w') as fh: json.dump(d, fh, indent=2)
 " 2>/dev/null
 }
 
-# Print slot status table.
+# Print unified session-status table.
+#
+# Row sources:
+#   1. slots.json — all slot rows 0..MAX (occupied or not).
+#   2. tmux-tagged sessions — every `tmux list-sessions` entry with
+#      @clrepo-repo set. Dedup: if its session name matches a slot row's
+#      .session, the slot row wins (richer metadata).
+#
+# Output: one table + optional "Remote Control URLs:" footer for rows
+# with an active bridgeSessionId. RC lookup mirrors the old --status-rc
+# logic: slot rows read ~/.claude-s<N>/sessions/<pid>.json; synthetic
+# no-channel rows read ~/.claude/sessions/<pid>.json. Other kinds get —.
 _clrepo_slot_status() {
   _clrepo_slots_init
   _clrepo_reconcile_slots
 
-  python3 -c "
-import json, time
-with open('$_CLREPO_SLOTS_FILE') as f: d = json.load(f)
-tokens = {}
-try:
-    with open('$_CLREPO_SLOT_TOKENS') as f: tokens = json.load(f)
-except: pass
-slots = d.get('slots', {})
-MAX = $_CLREPO_MAX_SLOTS
-# Slot 0 is the admin/bot 0 row — manually managed (BotFather + optional
-# Claude session in ~/.claude-s0). Include it unconditionally so the user
-# can see whether it's active. Slots 1..MAX are clrepo-allocated.
-keys = set(slots.keys()) | set(tokens.keys()) | {str(n) for n in range(0, MAX + 1)}
-# Drop non-numeric / out-of-range keys defensively, in case stale entries
-# slipped past reconcile (live records aren't pruned there).
-keys = {k for k in keys if k.isdigit() and 0 <= int(k) <= MAX}
-now = int(time.time())
-print(f\"{'SLOT':<5} {'REPO':<30} {'WORKTREE':<15} {'STARTED':<20} {'PID':<8} {'BOT'}\")
-print('-' * 95)
-for n in sorted(keys, key=int):
-    v = slots.get(n)
-    pb = tokens.get(n, '')
-    # Slots 1..N follow @claude_freax_sN_bot convention; slot 0 is the
-    # admin bot (BotFather-named, opaque here) so we just label it.
-    bot = '(admin bot)' if int(n) == 0 else f'@claude_freax_s{n}_bot'
-    has_token = '✓' if pb else '—'
-    if v:
-        repo = v.get('repo', '—')
-        wt = v.get('worktree') or '—'
-        pid = v.get('pid', '—')
-        sa = v.get('started_at', 0)
-        age = now - sa
-        h, m = divmod(age // 60, 60)
-        started = f'{h}h{m:02d}m ago' if sa else '—'
-        print(f's{n:<4} {repo:<30} {wt:<15} {started:<20} {pid:<8} {bot} {has_token}')
-    else:
-        print(f's{n:<4} {\"—\":<30} {\"—\":<15} {\"—\":<20} {\"—\":<8} {bot} {has_token}')
-" 2>/dev/null
-}
-
-# Print Remote Control status table. For each occupied slot, look up the
-# Claude session record under $CLAUDE_CONFIG_DIR/sessions/<pid>.json and
-# extract `bridgeSessionId` — the RC session id rendered as
-# https://claude.ai/code/<bridgeSessionId>. Empty bridge id means RC is
-# inactive for that session (e.g. launched with --no-rc).
-_clrepo_slot_status_rc() {
-  _clrepo_slots_init
-  _clrepo_reconcile_slots
+  # Enumerate tmux-tagged sessions. Tab-separated for parse safety.
+  # Format fields: name, created, repo, worktree, kind, slot, pid.
+  local tmux_rows
+  tmux_rows=$(tmux list-sessions -F \
+    '#{session_name}	#{session_created}	#{@clrepo-repo}	#{@clrepo-worktree}	#{@clrepo-kind}	#{@clrepo-slot}	#{@clrepo-pid}' \
+    2>/dev/null)
 
   python3 -c "
 import json, os, time
-with open('$_CLREPO_SLOTS_FILE') as f: d = json.load(f)
-slots = d.get('slots', {})
+
+slots_file = '$_CLREPO_SLOTS_FILE'
 MAX = $_CLREPO_MAX_SLOTS
-keys = set(slots.keys()) | {str(n) for n in range(0, MAX + 1)}
-keys = {k for k in keys if k.isdigit() and 0 <= int(k) <= MAX}
+tmux_rows_raw = '''$tmux_rows'''
+
+with open(slots_file) as f: d = json.load(f)
+slots = d.get('slots', {})
+
 now = int(time.time())
 
-def bridge_for(slot, pid):
-    # CLAUDE_CONFIG_DIR for slot 0 is ~/.claude-s0 (admin) by convention.
-    cfg = os.path.expanduser(f'~/.claude-s{slot}')
-    sess_dir = os.path.join(cfg, 'sessions')
-    if not pid or not os.path.isdir(sess_dir): return ''
+def bridge_for(cfg_dir, pid):
+    if not pid: return ''
+    sess_dir = os.path.join(os.path.expanduser(cfg_dir), 'sessions')
+    if not os.path.isdir(sess_dir): return ''
     p = os.path.join(sess_dir, f'{pid}.json')
     if not os.path.isfile(p): return ''
     try:
@@ -1343,30 +1314,105 @@ def bridge_for(slot, pid):
     except Exception:
         return ''
 
-print(f\"{'SLOT':<5} {'REPO':<30} {'STARTED':<14} {'RC':<10} {'URL'}\")
-print('-' * 110)
-for n in sorted(keys, key=int):
-    v = slots.get(n)
-    if not v:
-        print(f's{n:<4} {\"—\":<30} {\"—\":<14} {\"—\":<10} —')
-        continue
-    repo = v.get('repo', '—')
-    wt   = v.get('worktree') or ''
-    if wt: repo = f'{repo} [{wt}]'
-    pid  = v.get('pid', 0)
-    sa   = v.get('started_at', 0)
-    age  = now - sa if sa else 0
+def fmt_age(sa):
+    if not sa: return '—'
+    age = now - int(sa)
     h, m = divmod(age // 60, 60)
-    started = f'{h}h{m:02d}m ago' if sa else '—'
-    bridge = bridge_for(n, pid)
-    if bridge:
-        url = f'https://claude.ai/code/{bridge}'
-        rc = 'active'
+    return f'{h}h{m:02d}m ago'
+
+# --- Source 1: slot rows ---
+rows = []      # list of dicts in display order
+slot_sessions = set()  # tmux session names already covered by a slot row
+slot_keys = {str(n) for n in range(0, MAX + 1)}
+for n in sorted(slot_keys, key=int):
+    v = slots.get(n)
+    if v:
+        sess = v.get('session') or ''
+        if sess: slot_sessions.add(sess)
+        repo = v.get('repo', '')
+        wt = v.get('worktree') or ''
+        repo_disp = f'{repo} [{wt}]' if wt else repo
+        pid = v.get('pid', 0)
+        bot = '(admin bot)' if int(n) == 0 else f'@claude_freax_s{n}_bot'
+        cfg = f'~/.claude-s{n}'
+        bridge = bridge_for(cfg, pid)
+        rows.append({
+            'slot':    f's{n}',
+            'kind':    'slot',
+            'repo':    repo_disp or '—',
+            'started': fmt_age(v.get('started_at', 0)),
+            'pid':     str(pid) if pid else '—',
+            'tmux':    sess or '—',
+            'bot':     bot,
+            'bridge':  bridge,
+            'label':   f's{n}',
+        })
     else:
-        url = '—'
-        rc = 'inactive'
-    print(f's{n:<4} {repo:<30} {started:<14} {rc:<10} {url}')
+        bot = '(admin bot)' if int(n) == 0 else f'@claude_freax_s{n}_bot'
+        rows.append({
+            'slot': f's{n}', 'kind': 'slot', 'repo': '—',
+            'started': '—', 'pid': '—', 'tmux': '—', 'bot': bot,
+            'bridge': '', 'label': f's{n}',
+        })
+
+# --- Source 2: tmux-tagged rows (synthetic, non-slot) ---
+synth = []
+for line in tmux_rows_raw.strip().split('\n'):
+    if not line: continue
+    parts = line.split('\t')
+    if len(parts) < 7: continue
+    name, created, repo, wt, kind, slot, pid = parts[:7]
+    if not repo: continue                  # untagged tmux session, skip
+    if name in slot_sessions: continue      # dedup: slot row already has it
+    repo_disp = f'{repo} [{wt}]' if wt else repo
+    if kind == 'no-channel':
+        bridge = bridge_for('~/.claude', pid)
+    else:
+        bridge = ''  # code/opencode have no Claude session file
+    try: created_i = int(created)
+    except ValueError: created_i = 0
+    synth.append({
+        'slot':    '—',
+        'kind':    kind or '—',
+        'repo':    repo_disp,
+        'started': fmt_age(created_i),
+        'pid':     pid or '—',
+        'tmux':    name,
+        'bot':     '—',
+        'bridge':  bridge,
+        'label':   repo_disp,
+        'created': created_i,
+    })
+
+# Sort synthetic rows newest first, then append after slot rows.
+synth.sort(key=lambda r: -r.get('created', 0))
+rows.extend(synth)
+
+# --- Render table ---
+hdr = f\"{'SLOT':<5} {'KIND':<11} {'REPO':<28} {'STARTED':<13} {'PID':<8} {'TMUX':<20} {'BOT':<28} {'RC'}\"
+print(hdr)
+print('-' * len(hdr))
+for r in rows:
+    rc = '✓' if r['bridge'] else '—'
+    print(f\"{r['slot']:<5} {r['kind']:<11} {r['repo']:<28} {r['started']:<13} {r['pid']:<8} {r['tmux']:<20} {r['bot']:<28} {rc}\")
+
+# --- Render URL footer (only if at least one bridge is active) ---
+rc_rows = [r for r in rows if r['bridge']]
+if rc_rows:
+    print()
+    print('Remote Control URLs:')
+    for r in rc_rows:
+        url = f\"https://claude.ai/code/{r['bridge']}\"
+        print(f\"  {r['label']:<12} {url}\")
 " 2>/dev/null
+}
+
+# Deprecated. RC info is now merged into `clrepo --status`'s footer.
+# Kept for one release as an alias so muscle memory / scripts don't break;
+# scheduled for removal a minor release after 1.28.x.
+_clrepo_slot_status_rc() {
+  echo "clrepo: --status-rc is deprecated; use --status (RC URLs now shown in the footer)" >&2
+  _clrepo_slot_status
 }
 
 # Diagnose forge targets: list each, verify direnv exports the expected
@@ -1742,10 +1788,31 @@ _clrepo_tmux_session_name() {
 # session (not server-global) to avoid touching the user's other tmux
 # sessions. Hold Shift while dragging to bypass tmux's mouse capture and
 # fall back to the terminal emulator's native selection/clipboard.
+#
+# Also tags the session with @clrepo-* user-options so `clrepo --status`
+# can enumerate non-slot tmux sessions (--no-channel, --code, --opencode)
+# without a sidecar registry file. The tags are scoped per-session and
+# never collide with non-clrepo tmux sessions.
+#
+# Args:
+#   $1 session    tmux session name
+#   $2 repo       repo basename
+#   $3 worktree   worktree name or empty
+#   $4 kind       one of: slot, no-channel, code, copilot, opencode
+#   $5 slot       slot number for kind=slot; empty otherwise
 _clrepo_tmux_session_defaults() {
-  local session="$1"
+  local session="$1" repo="${2:-}" worktree="${3:-}" kind="${4:-}" slot="${5:-}"
   tmux set-option -t "$session" mouse on >/dev/null 2>&1
   tmux set-option -t "$session" history-limit 50000 >/dev/null 2>&1
+  # Tags for --status discovery. @clrepo-pid is read once from the pane
+  # right after creation so synthetic (non-slot) rows can resolve RC.
+  local pid
+  pid=$(tmux display-message -t "$session" -p '#{pane_pid}' 2>/dev/null || echo "")
+  tmux set-option -t "$session" '@clrepo-repo'     "$repo"     >/dev/null 2>&1
+  tmux set-option -t "$session" '@clrepo-worktree' "$worktree" >/dev/null 2>&1
+  tmux set-option -t "$session" '@clrepo-kind'     "$kind"     >/dev/null 2>&1
+  tmux set-option -t "$session" '@clrepo-slot'     "$slot"     >/dev/null 2>&1
+  tmux set-option -t "$session" '@clrepo-pid'      "$pid"      >/dev/null 2>&1
 }
 
 # Fast-forward sync of the current branch with its upstream before launch.
@@ -1851,7 +1918,7 @@ _clrepo_launch() {
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
       if ! tmux has-session -t "$session" 2>/dev/null; then
         tmux new-session -d -s "$session" copilot --yolo
-        _clrepo_tmux_session_defaults "$session"
+        _clrepo_tmux_session_defaults "$session" "$repo" "$worktree" copilot ""
       fi
       tmux attach-session -t "$session"
     else
@@ -1882,7 +1949,7 @@ _clrepo_launch() {
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
       if ! tmux has-session -t "$session" 2>/dev/null; then
         tmux new-session -d -s "$session" opencode
-        _clrepo_tmux_session_defaults "$session"
+        _clrepo_tmux_session_defaults "$session" "$repo" "$worktree" opencode ""
       fi
       tmux attach-session -t "$session"
     else
@@ -1904,7 +1971,7 @@ _clrepo_launch() {
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
       if ! tmux has-session -t "$session" 2>/dev/null; then
         tmux new-session -d -s "$session" claude "${claude_args[@]}"
-        _clrepo_tmux_session_defaults "$session"
+        _clrepo_tmux_session_defaults "$session" "$repo" "$worktree" no-channel ""
       fi
       tmux attach-session -t "$session"
     else
@@ -1947,7 +2014,7 @@ _clrepo_launch() {
     # New tmux session
     _clrepo_telegram_setup "$_SLOT" "$repo" "$worktree" "$_SLOT_TOKEN"
     tmux new-session -d -s "$session"       -e "CLAUDE_CONFIG_DIR=$CLAUDE_CONFIG_DIR"       -e "TELEGRAM_BOT_TOKEN=$TELEGRAM_BOT_TOKEN"       claude "${claude_args[@]}"
-    _clrepo_tmux_session_defaults "$session"
+    _clrepo_tmux_session_defaults "$session" "$repo" "$worktree" slot "$_SLOT"
     # Keep the pane visible on non-zero exit so the user actually sees claude's
     # startup error on attach instead of just `[exited]`. Auto-close on exit 0
     # so the success path stays clean (no dangling pane to dismiss).
@@ -2148,8 +2215,7 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   --no-channel          legacy mode, no slot allocation, no Telegram
   --no-sync             skip the upstream fast-forward pull on startup
   -a, --attach          fzf picker over live sessions; reattach to selection
-  --status              show slot status table
-  --status-rc           show Remote Control URL per occupied slot
+  --status              show session status table (slot + non-slot tmux + RC URLs)
   --doctor              diagnose forge targets (direnv, tokens, API access)
   --worktree-status, --ws
                         show git status per local repo (branch, dirty,

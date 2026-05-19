@@ -5,6 +5,29 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.28.0] - 2026-05-19
+
+### Added
+
+- `clrepo --status` now lists every clrepo-managed Claude session on the
+  host: slot sessions, `--no-channel` tmux sessions, and `--code` /
+  `--opencode` tmux sessions. Discovery uses `@clrepo-*` tmux
+  user-options set at session creation; no new persistent state file.
+- `clrepo --status` now merges Remote Control URLs into a footer block
+  when at least one session has an active `bridgeSessionId`.
+
+### Changed
+
+- `clrepo --status` output format: new `KIND`, `TMUX`, and `RC` columns;
+  the bot-token availability column moved out (it's surfaced by
+  `clrepo --doctor`).
+
+### Deprecated
+
+- `clrepo --status-rc` — RC info is now part of `clrepo --status`. The
+  flag still works and prints a deprecation notice; removal is planned
+  for a follow-up minor release.
+
 ## [1.27.0] - 2026-05-18
 
 ### Changed
