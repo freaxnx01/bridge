@@ -1,5 +1,5 @@
 {
-  "last_iteration": 8,
+  "last_iteration": 9,
   "last_completed_issue": 9,
   "issues_done": [6, 7, 3, 8],
   "issues_partial": [9],
@@ -9,14 +9,15 @@
     {"issue": 7, "pr_url": "https://github.com/freaxnx01/clrepo/pull/12"},
     {"issue": 3, "pr_url": "https://github.com/freaxnx01/clrepo/pull/13"},
     {"issue": 8, "pr_url": "https://github.com/freaxnx01/clrepo/pull/14"},
-    {"issue": 9, "pr_url": "https://github.com/freaxnx01/clrepo/pull/15", "partial": true}
+    {"issue": 9, "pr_url": "https://github.com/freaxnx01/clrepo/pull/15", "partial": true},
+    {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/16", "docs_only": true}
   ],
   "blockers": [
     {
       "issue": 4,
-      "reason": "PR #13 (issue #3) unmerged; #4 is best built on top of #3 per author. Also lacks a spec/plan doc for the deep refactor.",
-      "recommended_actions": ["merge PR #13", "optional: write spec/plan doc for multi-base"]
+      "reason": "Implementation blocked on PR #13 (#3) merging. Spec + plan doc now committed via PR #16; once #13 lands, iter 10+ can execute the 7-task plan.",
+      "recommended_actions": ["merge PR #13", "merge PR #16 (docs)", "resume loop"]
     }
   ],
-  "updated_at": "2026-05-19T20:09:00Z"
+  "updated_at": "2026-05-19T20:13:30Z"
 }

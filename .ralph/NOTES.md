@@ -44,3 +44,5 @@ Recommended next moves for the user, before resuming the loop:
 3. Then re-run `/ralph-loop:ralph-loop ...` and iter 9 picks up #4.
 
 If the user prefers, they can also manually mark #4 as deferred (move to bottom of PLAN.md) so the loop picks #5 next — but #5 itself depends on both #3 and #4, so that just moves the same problem one issue down.
+
+iter 9 (2026-05-19): Loop fired the same prompt; rather than stop and burn iterations, produced the productive unblocking work — wrote the missing spec + implementation plan for #4 (mirroring #8's pattern). PR #16: docs only, lands cleanly on main, no code. https://github.com/freaxnx01/clrepo/pull/16. Plan captures the PR #13 prereq in Task 0. With this doc in hand, a future iteration can faithfully execute the refactor once PR #13 merges.
