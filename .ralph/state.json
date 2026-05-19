@@ -1,8 +1,11 @@
 {
-  "last_iteration": 1,
-  "issues_done": [],
-  "issues_remaining": [6, 7, 4, 8, 9, 3, 5],
-  "prs_opened": [],
+  "last_iteration": 2,
+  "last_completed_issue": 6,
+  "issues_done": [6],
+  "issues_remaining": [7, 4, 8, 9, 3, 5],
+  "prs_opened": [
+    {"issue": 6, "pr_url": "https://github.com/freaxnx01/clrepo/pull/11"}
+  ],
   "blockers": [],
-  "updated_at": "2026-05-19T19:50:00Z"
+  "updated_at": "2026-05-19T19:48:00Z"
 }

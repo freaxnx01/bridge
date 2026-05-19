@@ -13,3 +13,5 @@ iter 1 (2026-05-19): Phase 1 (Planning) — wrote PLAN.md from 7 open issues. De
 Surprise: #9 outscored #8 by 1 point because #9's body is long and hits cross-platform keywords (WSL2 / execution-context language). Operator intuition was that #8 (Windows/PowerShell port) is the heaviest piece. If you agree, manually swap #8 and #9 in PLAN.md before Phase 2 picks #8. The rubric is a heuristic; manual override is allowed.
 
 iter 1: also added `.claude/` to `.gitignore` (the ralph-loop plugin writes session state there; should not be tracked).
+
+iter 2 (2026-05-19): PR opened for #6 — added `-i`/`--repo-issues [name]` flag to clrepo, thin wrapper over `gh issue list` — https://github.com/freaxnx01/clrepo/pull/11. No test framework in repo, falling back to `bash -n` and manual smoke checks per Ralph prompt step 6 (documenting this once for future iterations). Also added `.nfs*` to `.gitignore` (NFS silly-rename temps appear briefly on the dev container's NFS mount).
