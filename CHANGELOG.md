@@ -5,6 +5,23 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.36.0] - 2026-05-19
+
+### Added
+
+- Multi-base support (#4). `_CLREPO_BASE` becomes the first element of a new internal array `_CLREPO_BASES`; existing code reading `$_CLREPO_BASE` keeps working unchanged on single-base setups.
+  - `CLREPO_BASE` env var now accepts a `:`-separated list (PATH-style). Empty elements ignored.
+  - `$_CLREPO_CONFIG/base` config file (introduced in 1.33.0) now accepts one absolute path per line; every non-empty, non-`#` line becomes a base.
+  - Precedence is whole-list (sources never merged): env > file > `["$HOME/projects/repos"]` default.
+  - `~` / `$HOME` expansion, trailing-`/` normalisation, dedupe, and missing-dir warn-and-skip apply uniformly.
+  - Discovery (`_clrepo_targets`, picker-list, worktree-status) iterates every base. CWD launch finds the owning base. The `_clrepo_base_for_rel` helper resolves a rel path to its owning base for cd-style call sites.
+  - "No targets discovered" / "no repos found" messages now list every configured base.
+  - `clrepo --help` documents the list semantics.
+
+  Deferred to follow-ups (still tracked on #4): picker/`--status` row labels when multi-base is active (cosmetic — single-base output is unchanged either way); updating `clrepo-watcher.sh` / `clrepo-autosync.sh` to iterate `_CLREPO_BASES` (they read `_CLREPO_BASE` directly today and keep working for the first base).
+
+  Stacked on PR #13 (1.33.0); bump from 1.33.0 → 1.36.0 (reserving 1.34/1.35 for PRs #14/#15).
+
 ## [1.33.0] - 2026-05-19
 
 ### Added
