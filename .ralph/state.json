@@ -1,9 +1,9 @@
 {
-  "last_iteration": 10,
-  "last_completed_issue": 4,
-  "issues_done": [6, 7, 3, 8, 4],
-  "issues_partial": [9],
-  "issues_remaining": [5],
+  "last_iteration": 11,
+  "last_completed_issue": 5,
+  "issues_done": [6, 7, 3, 8, 4, 9, 5],
+  "issues_partial": [],
+  "issues_remaining": [],
   "prs_opened": [
     {"issue": 6, "pr_url": "https://github.com/freaxnx01/clrepo/pull/11"},
     {"issue": 7, "pr_url": "https://github.com/freaxnx01/clrepo/pull/12"},
@@ -11,8 +11,9 @@
     {"issue": 8, "pr_url": "https://github.com/freaxnx01/clrepo/pull/14"},
     {"issue": 9, "pr_url": "https://github.com/freaxnx01/clrepo/pull/15", "partial": true},
     {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/16", "docs_only": true},
-    {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/17", "stacked_on": "PR #13"}
+    {"issue": 4, "pr_url": "https://github.com/freaxnx01/clrepo/pull/17", "stacked_on": "PR #13"},
+    {"issue": 5, "pr_url": "https://github.com/freaxnx01/clrepo/pull/18", "stacked_on": "PR #17"}
   ],
   "blockers": [],
-  "updated_at": "2026-05-19T20:18:00Z"
+  "updated_at": "2026-05-19T20:25:00Z"
 }

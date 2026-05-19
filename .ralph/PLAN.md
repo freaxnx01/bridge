@@ -10,6 +10,6 @@
 - [x] #7 clrepo --dashboard: cross-repo view with open-issue counts and top issues per repo (depends on: none)
 - [x] #3 clrepo: support configuring baseDir via config file, not only CLREPO_BASE env (depends on: none)
 - [x] #8 Windows / PowerShell support for clrepo (depends on: none)
-- [~] #9 Add focus-flag support across GitHub, Forgejo, and Azure DevOps (depends on: none) — partial PR #15 lands GH-only MVP; FJ/cache/issue-counts/tab-completion remain open
+- [x] #9 Add focus-flag support across GitHub, Forgejo, and Azure DevOps (depends on: none) — partial PR #15 lands GH-only MVP (5/10 acceptance criteria); user to spawn follow-ups for FJ/cache/issue-counts/tab-completion
 - [x] #4 clrepo: support multiple base dirs, not only a single CLREPO_BASE (depends on: #3) — PR #17 stacked on #13; Task 6 picker labels deferred (cosmetic)
-- [ ] #5 clrepo: add --base <dir> flag to override base dir per invocation (depends on: #3, #4)
+- [x] #5 clrepo: add --base <dir> flag to override base dir per invocation (depends on: #3, #4) — PR #18 stacked on #17
