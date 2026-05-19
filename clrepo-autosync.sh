@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # clrepo autosync — best-effort commit & push on session close.
-# Opt-in via `export CLREPO_AUTOSYNC=1` in the repo's .envrc.
+# Default-on for feature branches; opt out with `export CLREPO_AUTOSYNC=0`.
 # Never fails the caller; every error path returns 0.
 #
 # Two modes:
@@ -55,7 +55,7 @@ _clrepo_autosync() {
   if command -v direnv >/dev/null 2>&1; then
     eval "$(direnv export bash 2>/dev/null)" || true
   fi
-  [ "${CLREPO_AUTOSYNC:-0}" = 1 ] || return 0
+  [ "${CLREPO_AUTOSYNC:-1}" = 1 ] || return 0
 
   git rev-parse --is-inside-work-tree >/dev/null 2>&1 || return 0
 
