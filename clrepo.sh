@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.30.0"
+_CLREPO_VERSION="1.33.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -33,9 +33,37 @@ shopt -q expand_aliases && _clrepo_saved_expand_aliases=1
 shopt -u expand_aliases
 
 _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_CLREPO_BASE="${CLREPO_BASE:-$HOME/projects/repos}"
 _CLREPO_CACHE="${CLREPO_CACHE:-$HOME/.cache/clrepo}"
 _CLREPO_CONFIG="${CLREPO_CONFIG:-$HOME/.config/clrepo}"
+
+# Base-dir resolution. Precedence:
+#   1. CLREPO_BASE env var
+#   2. $_CLREPO_CONFIG/base config file (first non-empty, non-`#` line)
+#   3. Default $HOME/projects/repos
+# In the config file, leading `~` and `$HOME` are expanded so users can
+# write `~/work/repos` literally. Multi-base support arrives in #4.
+_clrepo_read_base_file() {
+  local f="$_CLREPO_CONFIG/base" line
+  [ -r "$f" ] || return 1
+  while IFS= read -r line || [ -n "$line" ]; do
+    line="${line#"${line%%[![:space:]]*}"}"
+    line="${line%"${line##*[![:space:]]}"}"
+    [ -z "$line" ] && continue
+    case "$line" in '#'*) continue ;; esac
+    line="${line/#\~/$HOME}"
+    line="${line//\$HOME/$HOME}"
+    printf '%s\n' "$line"
+    return 0
+  done < "$f"
+  return 1
+}
+if [ -n "${CLREPO_BASE:-}" ]; then
+  _CLREPO_BASE="$CLREPO_BASE"
+elif _CLREPO_BASE=$(_clrepo_read_base_file 2>/dev/null); then
+  :
+else
+  _CLREPO_BASE="$HOME/projects/repos"
+fi
 _CLREPO_REMOTE_TTL=600  # seconds
 _CLREPO_UPDATE_TTL=86400  # seconds; staleness for latest-version cache
 _CLREPO_RAW_URL="https://raw.githubusercontent.com/freaxnx01/clrepo/main/clrepo.sh"
@@ -50,6 +78,10 @@ _CLREPO_RAW_URL="https://raw.githubusercontent.com/freaxnx01/clrepo/main/clrepo.
 # User config files (all under $_CLREPO_CONFIG, never committed to the repo):
 #   ado-projects  — one ADO project name per line; limits which projects are
 #                   listed/cloned. Empty file or absent = no filter (all projects).
+#   base          — single absolute path; the base dir clrepo scans for repos.
+#                   First non-empty, non-`#` line wins. `~` and `$HOME` are
+#                   expanded. Lower precedence than the CLREPO_BASE env var.
+#                   Multi-line support arrives with #4.
 
 # --- Slot / Telegram channel config ---
 _CLREPO_MAX_SLOTS="${CLREPO_MAX_SLOTS:-6}"
@@ -2516,6 +2548,10 @@ In picker:
 SSH persistence: when $SSH_CONNECTION is set, the Claude session is wrapped
 in `tmux new-session -A` so disconnecting doesn't kill it. Re-run the same
 clrepo command to reattach.
+Base dir (where clrepo scans for repos), in precedence order:
+  1. $CLREPO_BASE env var
+  2. $HOME/.config/clrepo/base file (single absolute path; ~ / $HOME expanded)
+  3. Default: $HOME/projects/repos
 EOF
         return 0 ;;
       --) shift; while [ $# -gt 0 ]; do pos+=("$1"); shift; done ;;
