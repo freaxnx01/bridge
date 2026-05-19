@@ -27,3 +27,9 @@ Lesson: when wiring dependency markers, also read the body for "Best delivered o
 iter 5 (2026-05-19): PR opened for #3 — added `$_CLREPO_CONFIG/base` config-file fallback with env > file > default precedence — https://github.com/freaxnx01/clrepo/pull/13. Version bumped to 1.33.0 (reserving 1.31.0 for PR #11, 1.32.0 for PR #12).
 
 iter 6 (2026-05-19): PR opened for #8 (the `epic`) — Windows/PowerShell support per docs/plans plan, all 7 tasks in one PR — https://github.com/freaxnx01/clrepo/pull/14. Version 1.34.0. First test file in the repo (tests/test_norm_path.sh, 11 assertions, all green). Expected merge conflict with PR #13 (same area modified — see PR description for resolution recipe). Plan execution went smoothly because the spec/plan docs were already in place; this is the pattern future epics should follow.
+
+iter 7 (2026-05-19): PR opened for #9 — **PARTIAL**, NOT closing the issue. Lands MVP (phases 1-2 of 5): GitHub-only `-f`, `--focus-add`, `--focus-rm`. Forgejo, issue counts, caching, `clrepo -f <name>` open-by-name, and tab completion remain open on #9 — https://github.com/freaxnx01/clrepo/pull/15. Version 1.35.0.
+
+Scoping decision: #9 had no pre-existing plan doc (unlike #8). Implementing all 5 phases in one ~400+ LoC PR would be hard to review and would risk uncovered edge cases (caching invalidation correctness in particular). Better to land the foundation, let it bake, and tackle phases 3-5 with follow-up issues that the user can prioritize against other work. Marked the entry in PLAN.md with `[~]` to signal partial completion.
+
+Recommendation: spawn 3-4 follow-up issues from #9: (a) Forgejo focus support, (b) issue-count column in `-f`, (c) `~/.cache/clrepo/focus.json` caching layer, (d) tab completion + `-f <name>` open-by-name. Keep #9 open as the umbrella tracking issue, or close it once a/b/c/d are spawned and the MVP merges.
