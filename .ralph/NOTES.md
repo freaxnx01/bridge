@@ -25,3 +25,5 @@ iter 4 (2026-05-19): STOPPED without implementation. Re-read #4's body and notic
 Lesson: when wiring dependency markers, also read the body for "Best delivered on top of #N" / "after #N lands" phrasing — these are the author's design intent and override gut judgments about which is foundational. Worth folding into the prompt's Phase 1 step 2 list of trigger phrases.
 
 iter 5 (2026-05-19): PR opened for #3 — added `$_CLREPO_CONFIG/base` config-file fallback with env > file > default precedence — https://github.com/freaxnx01/clrepo/pull/13. Version bumped to 1.33.0 (reserving 1.31.0 for PR #11, 1.32.0 for PR #12).
+
+iter 6 (2026-05-19): PR opened for #8 (the `epic`) — Windows/PowerShell support per docs/plans plan, all 7 tasks in one PR — https://github.com/freaxnx01/clrepo/pull/14. Version 1.34.0. First test file in the repo (tests/test_norm_path.sh, 11 assertions, all green). Expected merge conflict with PR #13 (same area modified — see PR description for resolution recipe). Plan execution went smoothly because the spec/plan docs were already in place; this is the pattern future epics should follow.
