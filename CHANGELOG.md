@@ -18,9 +18,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- `clrepo --status` output format: new `KIND`, `TMUX`, and `RC` columns;
-  the bot-token availability column moved out (it's surfaced by
-  `clrepo --doctor`).
+- `clrepo --status` output format: new `KIND`, `TMUX`, and
+  `RC` columns. The bot-token availability ✓/— column has been
+  removed — it was slot configuration state, not session state, and
+  not strictly tied to whether a Claude session is running.
 
 ### Deprecated
 
