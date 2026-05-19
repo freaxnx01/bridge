@@ -29,6 +29,7 @@ You are working autonomously in a loop on the `clrepo` repository (a shell helpe
 
    - `+3` if labels include `epic`, `breaking`, or `enhancement` with a body over 2000 chars
    - `+2` if the body mentions a new flag, new config file, schema change, or migration (grep for `--`, `CLREPO_`, `config file`, `schema`, `migration`)
+   - `+2` if the body mentions cross-platform scope (grep case-insensitive for `windows`, `powershell`, `cross-platform`, `port`, `shim`, `cygpath`) — these are reliably under-represented in body length
    - `+2` if the body length exceeds 1500 chars
    - `-2` if labels include `good first issue`, `docs`, or `chore`
    - `-1` if the body length is under 400 chars
