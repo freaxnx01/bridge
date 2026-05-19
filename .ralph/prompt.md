@@ -25,6 +25,16 @@ You are working autonomously in a loop on the `clrepo` repository (a shell helpe
 
 3. Build the dependency graph. Topologically sort so leaf issues (no open dependencies) come first. Closed dependencies don't count as blockers — verify with `gh issue view <N> --json state`.
 
+3b. **Tie-breaker — easy wins first within each ready frontier.** Topo sort defines layers (issues whose deps are all resolved at the same step). Within a layer, order by an effort score from cheapest to most expensive. Compute the score as the sum of:
+
+   - `+3` if labels include `epic`, `breaking`, or `enhancement` with a body over 2000 chars
+   - `+2` if the body mentions a new flag, new config file, schema change, or migration (grep for `--`, `CLREPO_`, `config file`, `schema`, `migration`)
+   - `+2` if the body length exceeds 1500 chars
+   - `-2` if labels include `good first issue`, `docs`, or `chore`
+   - `-1` if the body length is under 400 chars
+
+   Lower score = easier = goes first. Ties broken by issue number ascending. Deps still gate — never promote a blocked issue above its blockers.
+
 4. Write `.ralph/PLAN.md`:
 
    ```
@@ -49,7 +59,7 @@ You are working autonomously in a loop on the `clrepo` repository (a shell helpe
 
 ## Phase 2: Implementation (every subsequent iteration)
 
-1. Pick the FIRST unchecked issue in PLAN.md whose dependencies are all checked `[x]` OR closed on GitHub. If none qualify, document the blockage in NOTES.md and STOP.
+1. Pick the FIRST unchecked issue in PLAN.md whose dependencies are all checked `[x]` OR closed on GitHub. (PLAN.md is already sorted by topo layer and then effort score — see Phase 1 step 3b — so first-unchecked-and-ready is the right pick.) If none qualify, document the blockage in NOTES.md and STOP.
 
 2. Read the issue: `gh issue view <N> --json title,body,labels,comments,url`
 
