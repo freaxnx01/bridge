@@ -5,7 +5,7 @@
 <!-- Format: - [ ] #N Title (depends on: #X, #Y | none) -->
 
 - [x] #6 clrepo -i <repo>: list open issues for a repo before/instead of opening it (depends on: none)
-- [ ] #7 clrepo --dashboard: cross-repo view with open-issue counts and top issues per repo (depends on: none)
+- [x] #7 clrepo --dashboard: cross-repo view with open-issue counts and top issues per repo (depends on: none)
 - [ ] #4 clrepo: support multiple base dirs, not only a single CLREPO_BASE (depends on: none)
 - [ ] #8 Windows / PowerShell support for clrepo (depends on: none)
 - [ ] #9 Add focus-flag support across GitHub, Forgejo, and Azure DevOps (depends on: none)

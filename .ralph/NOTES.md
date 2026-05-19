@@ -15,3 +15,7 @@ Surprise: #9 outscored #8 by 1 point because #9's body is long and hits cross-pl
 iter 1: also added `.claude/` to `.gitignore` (the ralph-loop plugin writes session state there; should not be tracked).
 
 iter 2 (2026-05-19): PR opened for #6 — added `-i`/`--repo-issues [name]` flag to clrepo, thin wrapper over `gh issue list` — https://github.com/freaxnx01/clrepo/pull/11. No test framework in repo, falling back to `bash -n` and manual smoke checks per Ralph prompt step 6 (documenting this once for future iterations). Also added `.nfs*` to `.gitignore` (NFS silly-rename temps appear briefly on the dev container's NFS mount).
+
+iter 3 (2026-05-19): PR opened for #7 — added `--dashboard` cross-repo overview, parallel `gh issue list` fan-out — https://github.com/freaxnx01/clrepo/pull/12.
+
+Versioning convention for parallel Ralph PRs: each PR bumps the next minor relative to the previous open Ralph PR's version, not main's. PR #11 (issue #6) claims 1.31.0, this PR (#12) claims 1.32.0. If PRs merge out of order, the later-merging PR has to resolve a version-line conflict by re-bumping. Open to revisit if conflicts get noisy.
