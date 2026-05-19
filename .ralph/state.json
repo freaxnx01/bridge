@@ -1,12 +1,13 @@
 {
-  "last_iteration": 3,
+  "last_iteration": 4,
   "last_completed_issue": 7,
   "issues_done": [6, 7],
-  "issues_remaining": [4, 8, 9, 3, 5],
+  "issues_remaining": [3, 8, 9, 4, 5],
   "prs_opened": [
     {"issue": 6, "pr_url": "https://github.com/freaxnx01/clrepo/pull/11"},
     {"issue": 7, "pr_url": "https://github.com/freaxnx01/clrepo/pull/12"}
   ],
   "blockers": [],
-  "updated_at": "2026-05-19T19:52:00Z"
+  "notes": "iter 4 stopped without implementation; dep direction for #3 and #4 reversed after re-reading #4 body.",
+  "updated_at": "2026-05-19T19:55:00Z"
 }
