@@ -1,8 +1,8 @@
 {
-  "last_iteration": 0,
+  "last_iteration": 1,
   "issues_done": [],
-  "issues_remaining": [],
+  "issues_remaining": [6, 7, 4, 8, 9, 3, 5],
   "prs_opened": [],
   "blockers": [],
-  "updated_at": null
+  "updated_at": "2026-05-19T19:50:00Z"
 }
