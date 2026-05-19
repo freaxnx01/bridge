@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] - 2026-05-20
+
+### Added
+
+- `-i` / `--repo-issues [name]`: list open GitHub issues for one repo via `gh issue list`. With no name, resolves from `$PWD` when inside a repo under `$_CLREPO_BASE`. Thin wrapper — `gh` auto-detects the repo's remote once `cd`'d in, with direnv evaluated first so per-repo tokens load. Closes #6.
+
 ## [1.34.0] - 2026-05-20
 
 ### Added

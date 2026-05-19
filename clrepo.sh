@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.34.0"
+_CLREPO_VERSION="1.35.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -2520,7 +2520,7 @@ _clrepo_update() {
 }
 
 clrepo() {
-  local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0
+  local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0 mode_repo_issues=0
   local -a pos=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2539,6 +2539,7 @@ clrepo() {
       --worktree-status|--ws) _clrepo_worktree_status; return ;;
       --issues)       _clrepo_issues; return ;;
       --dashboard)    _clrepo_dashboard; return ;;
+      -i|--repo-issues) mode_repo_issues=1; shift ;;
       --setup-admin)
         [ -z "${2:-}" ] && { echo "clrepo: $1 requires a label" >&2; return 2; }
         _clrepo_setup_admin "$2"; return ;;
@@ -2596,6 +2597,9 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   --issues              list open issues across GitHub + Forgejo forges
   --dashboard           cross-repo table: open-issue count + top 2 titles
                         per local GitHub repo under $_CLREPO_BASE
+  -i, --repo-issues [name]
+                        list open GitHub issues for one repo via `gh issue
+                        list`; with no name, uses the repo at $PWD
   --setup-admin LABEL   wire slot 0 (admin) for label-restore hook
   --install-admin-commands
                         symlink admin slash commands into ~/.claude-s0/commands/
@@ -2705,7 +2709,8 @@ EOF
 
   # Launch current repo when invoked with "." or bare from inside a repo.
   # Skip when -r/--remote/--refresh is set: user explicitly wants the picker.
-  if [ "$mode_delete" = 0 ] && [ "$with_remote" = 0 ] && { [ "${1:-}" = "." ] || [ $# -eq 0 ]; }; then
+  # Skip when -i/--repo-issues is set: $# may be 0 (resolve repo from CWD).
+  if [ "$mode_delete" = 0 ] && [ "$with_remote" = 0 ] && [ "$mode_repo_issues" = 0 ] && { [ "${1:-}" = "." ] || [ $# -eq 0 ]; }; then
     local git_root=""
     git_root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)
     if [ -n "$git_root" ] && [ "${git_root#$_CLREPO_BASE/}" != "$git_root" ]; then
@@ -2720,6 +2725,35 @@ EOF
 
   local all
   all=$(find "$_CLREPO_BASE" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$_CLREPO_BASE/||")
+
+  # -i / --repo-issues [name]: print open issues for one repo via `gh issue list`.
+  # With no name, resolve from $PWD if inside a repo under $_CLREPO_BASE.
+  if [ "$mode_repo_issues" = 1 ]; then
+    local rel=""
+    if [ -n "${1:-}" ]; then
+      rel=$(printf '%s\n' "$all" | grep -Ei "(^|/)$1$" | head -1)
+      [ -z "$rel" ] && rel=$(printf '%s\n' "$all" | grep -Ei "(^|/)[^/]*$1[^/]*$" | head -1)
+      if [ -z "$rel" ]; then
+        echo "clrepo: no such repo: $1" >&2
+        return 1
+      fi
+    else
+      local git_root=""
+      git_root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)
+      if [ -n "$git_root" ] && [ "${git_root#$_CLREPO_BASE/}" != "$git_root" ]; then
+        rel="${git_root#$_CLREPO_BASE/}"
+      else
+        echo "clrepo: -i with no name requires CWD to be inside a repo under $_CLREPO_BASE" >&2
+        return 1
+      fi
+    fi
+    (
+      cd "$_CLREPO_BASE/$rel" || exit 1
+      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+      gh issue list --state open
+    )
+    return
+  fi
 
   # --delete <name> (non-interactive shortcut): match local repos by basename.
   if [ "$mode_delete" = 1 ] && [ -n "${1:-}" ]; then
