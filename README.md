@@ -267,6 +267,57 @@ Both subsystems run inside the same `claude` process and share that slot's `CLAU
 
 The lifecycle paths under `_clrepo_telegram_setup` / `_clrepo_telegram_cleanup` (`clrepo.sh:822, 867`) fire identically under both tmux and foreground launches; reattaching a tmux'd RC session keeps the bot alive (no duplicate registrations, no dropped pages) because setup runs only on session create.
 
+## Startup sync and recovery
+
+`clrepo <name>` runs a fast-forward sync on the current branch before launching the agent:
+
+```
+timeout ${CLREPO_SYNC_TIMEOUT:-20}s git fetch
+# then: ff-only merge if local is strictly behind upstream
+```
+
+The sync is silently skipped (with a one-line yellow warning) when any of the following hold:
+
+- `--no-sync` was passed.
+- The session is a tmux reattach (the agent is already running).
+- HEAD is detached.
+- The branch has no upstream.
+- The working tree is dirty.
+- `git fetch` failed or timed out.
+- The branch has diverged from its upstream.
+
+For the non-trivial cases (`fetch` failed, `no upstream`, `dirty`, `diverged`) clrepo now:
+
+- Writes the actual fetch stderr to `~/.cache/clrepo/sync.log` (auto-rotated at 400 lines).
+- Renders a structured note explaining the skip and suggested next commands.
+- Prints a yellow banner with the note's reason line right before the agent starts.
+- Writes the full note to `<repo>/.clrepo/sync-status.md` (gitignored via `.clrepo/.gitignore`, written on first use).
+- For Claude launches: passes the note via `claude --append-system-prompt`, so the agent knows the branch isn't current before the first user prompt.
+
+`CLREPO_SYNC_TIMEOUT` (seconds, default `20`) controls the fetch timeout. Bump it on slow links; lower it if you'd rather fail fast.
+
+## Session-exit autosync
+
+When a clrepo session closes, `clrepo-autosync.sh` (sourced from `clrepo.sh` and re-invoked by the tmux `session-closed` hook) commits any uncommitted changes and pushes them to the upstream branch.
+
+**Default: ON for feature branches.** To disable per-repo, add to the repo's `.envrc`:
+
+```bash
+export CLREPO_AUTOSYNC=0
+```
+
+`main` and `master` are protected. Autosync skips them with a warning unless you opt in explicitly:
+
+```bash
+export CLREPO_AUTOSYNC_ALLOW_MAIN=1
+```
+
+Caveats:
+
+- Autosync runs `git add -A` — anything not in `.gitignore` will be committed and pushed. Mind your `.gitignore` for `.env`, build artifacts, etc.
+- Push failures (no access, branch protection, etc.) emit a yellow warning and (if a slot token is set) a Telegram notification, but never block session exit.
+- The auto-commit message is `chore(autosync): wip from clrepo session (<timestamp>)`. Squash or amend before opening a PR.
+
 ## Config variables
 
 | Variable | Default | Purpose |
@@ -274,6 +325,9 @@ The lifecycle paths under `_clrepo_telegram_setup` / `_clrepo_telegram_cleanup` 
 | `_CLREPO_BASE` | `/home/freax/projects/repos` | Root of the repo tree |
 | `_CLREPO_CACHE` | `~/.cache/clrepo` | MRU, remote cache, (future: slots) |
 | `_CLREPO_REMOTE_TTL` | `600` (10 min) | Remote listing cache lifetime in seconds |
+| `CLREPO_SYNC_TIMEOUT` | `20` | Seconds before `git fetch` is killed at startup |
+| `CLREPO_AUTOSYNC` | `1` (on) | Commit-and-push uncommitted changes on session close; set to `0` per-repo to opt out |
+| `CLREPO_AUTOSYNC_ALLOW_MAIN` | `0` (off) | Allow autosync to push from `main`/`master` (off by default for safety) |
 
 ## Known limitations
 
