@@ -179,3 +179,11 @@ You are working autonomously in a loop on the `clrepo` repository (a shell helpe
 ## Completion criteria
 
 When every issue in PLAN.md is checked `[x]` AND `git status` on main is clean AND `.ralph/state.json` shows `issues_remaining: []` — and only then — the work is done.
+
+When all three conditions are TRUE, output exactly:
+
+```
+<promise>RALPH LOOP COMPLETE</promise>
+```
+
+This is the only way to exit the loop. Do NOT output the promise tag if any condition is false — the loop is designed to continue until the statement is genuinely true. If you're stuck or blocked, document it in `NOTES.md` and stop the iteration; the next iteration will retry. Never fake completion to escape.
