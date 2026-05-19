@@ -5,6 +5,21 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.29.0] - 2026-05-19
+
+### Added
+
+- `clrepo --pick` (alias `--connect`) — interactive fzf picker over the
+  unified `--status` overview. Selecting a row dispatches by transport:
+  tmux-backed rows attach via `tmux attach-session`; RC-only rows print
+  the `https://claude.ai/code/<bridgeSessionId>` URL (and copy it to the
+  clipboard via `xclip` or `wl-copy` when available). Sessions that have
+  neither tmux nor an RC bridge are listed with a ✗ marker; selecting
+  one prints "not attachable". Read-only `clrepo --status` is unchanged,
+  so scripts and status checks are unaffected. Sits alongside
+  `clrepo --attach` (which remains the zero-arg fast-path for slot-bound
+  tmux sessions). Closes #2.
+
 ## [1.28.0] - 2026-05-19
 
 ### Added

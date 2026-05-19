@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.28.0"
+_CLREPO_VERSION="1.29.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1767,6 +1767,162 @@ print('\n'.join(out))
   tmux attach-session -t "$session"
 }
 
+# Interactive picker over the unified `--status` overview. Same row sources
+# as _clrepo_slot_status (slot records + tmux-tagged sessions), filtered to
+# occupied sessions, presented in fzf. Selection dispatches by transport:
+#   - tmux session present  → tmux attach-session -t <session>
+#   - else bridgeSessionId  → print https://claude.ai/code/<id> (and copy
+#                             to clipboard if xclip/wl-copy is available)
+#   - neither               → row is shown with a ✗ marker but selecting it
+#                             prints a "not attachable" error
+# Standalone — no other flags, no positional args (validated by caller).
+_clrepo_status_pick() {
+  _clrepo_slots_init
+  _clrepo_reconcile_slots
+
+  local tmux_rows
+  tmux_rows=$(tmux list-sessions -F \
+    '#{session_name}	#{session_created}	#{@clrepo-repo}	#{@clrepo-worktree}	#{@clrepo-kind}	#{@clrepo-slot}	#{@clrepo-pid}' \
+    2>/dev/null)
+
+  # Emit one TSV row per occupied session. Fields (tab-separated):
+  #   1: pre-formatted display line (with leading ✗ for non-attachable)
+  #   2: action_type — one of: tmux, rc, none
+  #   3: action_target — session name (tmux) or bridge id (rc) or empty
+  local rows
+  rows=$(python3 -c "
+import json, os, time
+
+slots_file = '$_CLREPO_SLOTS_FILE'
+MAX = $_CLREPO_MAX_SLOTS
+tmux_rows_raw = '''$tmux_rows'''
+
+with open(slots_file) as f: d = json.load(f)
+slots = d.get('slots', {})
+now = int(time.time())
+
+def bridge_for(cfg_dir, pid):
+    if not pid: return ''
+    sess_dir = os.path.join(os.path.expanduser(cfg_dir), 'sessions')
+    if not os.path.isdir(sess_dir): return ''
+    p = os.path.join(sess_dir, f'{pid}.json')
+    if not os.path.isfile(p): return ''
+    try:
+        with open(p) as fh: sd = json.load(fh)
+        return sd.get('bridgeSessionId') or ''
+    except Exception:
+        return ''
+
+def fmt_age(sa):
+    if not sa: return '—'
+    age = now - int(sa)
+    h, m = divmod(age // 60, 60)
+    return f'{h}h{m:02d}m ago'
+
+rows = []
+slot_sessions = set()
+
+# --- Slot rows (occupied only) ---
+for n in sorted({str(x) for x in range(0, MAX + 1)}, key=int):
+    v = slots.get(n)
+    if not v: continue
+    sess = v.get('session') or ''
+    if sess: slot_sessions.add(sess)
+    repo = v.get('repo', '')
+    wt = v.get('worktree') or ''
+    repo_disp = f'{repo} [{wt}]' if wt else repo
+    pid = v.get('pid', 0)
+    bot = '(admin bot)' if int(n) == 0 else f'@claude_freax_s{n}_bot'
+    bridge = bridge_for(f'~/.claude-s{n}', pid)
+    rows.append({
+        'slot': f's{n}', 'kind': 'slot', 'repo': repo_disp or '—',
+        'started': fmt_age(v.get('started_at', 0)),
+        'tmux': sess, 'bot': bot, 'bridge': bridge, '_ts': 0,
+    })
+
+# --- Synthetic tmux-tagged rows ---
+for line in tmux_rows_raw.strip().split('\n'):
+    if not line: continue
+    parts = line.split('\t')
+    if len(parts) < 7: continue
+    name, created, repo, wt, kind, slot, pid = parts[:7]
+    if not repo: continue
+    if name in slot_sessions: continue
+    repo_disp = f'{repo} [{wt}]' if wt else repo
+    bridge = bridge_for('~/.claude', pid) if kind == 'no-channel' else ''
+    try: created_i = int(created)
+    except ValueError: created_i = 0
+    rows.append({
+        'slot': '—', 'kind': kind or '—', 'repo': repo_disp,
+        'started': fmt_age(created_i),
+        'tmux': name, 'bot': '—', 'bridge': bridge, '_ts': created_i,
+    })
+
+# Keep slots in slot order; sort synthetic newest first after.
+slot_rows  = [r for r in rows if r['slot'] != '—']
+synth_rows = sorted([r for r in rows if r['slot'] == '—'], key=lambda r: -r['_ts'])
+rows = slot_rows + synth_rows
+
+for r in rows:
+    if r['tmux']:
+        atype, atarget = 'tmux', r['tmux']
+    elif r['bridge']:
+        atype, atarget = 'rc', r['bridge']
+    else:
+        atype, atarget = 'none', ''
+    marker = '✗' if atype == 'none' else ' '
+    rc_marker = '✓' if r['bridge'] else '—'
+    tmux_disp = r['tmux'] or '—'
+    disp = f\"{marker} {r['slot']:<3} {r['kind']:<11} {r['repo']:<28} {r['started']:<13} {tmux_disp:<20} {r['bot']:<28} {rc_marker}\"
+    print(f'{disp}\t{atype}\t{atarget}')
+" 2>/dev/null)
+
+  if [ -z "$rows" ]; then
+    echo "clrepo: no live sessions" >&2
+    return 1
+  fi
+
+  local header
+  header=$(printf '  %-3s %-11s %-28s %-13s %-20s %-28s %s' \
+    "SLOT" "KIND" "REPO" "STARTED" "TMUX" "BOT" "RC")
+
+  local out
+  out=$(printf '%s\n' "$rows" \
+    | fzf --height=40% --reverse --prompt='session> ' \
+          --header="$header" \
+          -d $'\t' --with-nth=1) || return
+
+  local atype atarget
+  atype=$(printf '%s' "$out"   | awk -F'\t' '{print $2}')
+  atarget=$(printf '%s' "$out" | awk -F'\t' '{print $3}')
+
+  case "$atype" in
+    tmux)
+      [ -z "$atarget" ] && return
+      tmux attach-session -t "$atarget"
+      ;;
+    rc)
+      [ -z "$atarget" ] && return
+      local url="https://claude.ai/code/$atarget"
+      printf '%s\n' "$url"
+      if command -v xclip >/dev/null 2>&1; then
+        printf '%s' "$url" | xclip -selection clipboard 2>/dev/null \
+          && echo "clrepo: copied URL to clipboard" >&2
+      elif command -v wl-copy >/dev/null 2>&1; then
+        printf '%s' "$url" | wl-copy 2>/dev/null \
+          && echo "clrepo: copied URL to clipboard" >&2
+      fi
+      ;;
+    none)
+      echo "clrepo: this session has no tmux and no Remote Control URL — cannot attach" >&2
+      return 1
+      ;;
+    *)
+      return 1
+      ;;
+  esac
+}
+
 _clrepo_print_last() {
   local f="$_CLREPO_CACHE/last"
   [ -f "$f" ] || return
@@ -2151,7 +2307,7 @@ _clrepo_update() {
 }
 
 clrepo() {
-  local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0
+  local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0
   local -a pos=()
   while [ $# -gt 0 ]; do
     case "$1" in
@@ -2163,6 +2319,7 @@ clrepo() {
         [ -z "${2:-}" ] && { echo "clrepo: $1 requires a slot number" >&2; return 2; }
         _CLREPO_FORCED_SLOT="$2"; shift 2 ;;
       -a|--attach)    mode_attach=1; shift ;;
+      --pick|--connect) mode_pick=1; shift ;;
       --status)       _clrepo_slot_status; return ;;
       --status-rc)    _clrepo_slot_status_rc; return ;;
       --doctor)       _clrepo_doctor; return ;;
@@ -2215,6 +2372,8 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   --no-channel          legacy mode, no slot allocation, no Telegram
   --no-sync             skip the upstream fast-forward pull on startup
   -a, --attach          fzf picker over live sessions; reattach to selection
+      --pick, --connect fzf picker over the full --status overview; attach
+                        to tmux row, or print/copy URL for an RC-only row
   --status              show session status table (slot + non-slot tmux + RC URLs)
   --doctor              diagnose forge targets (direnv, tokens, API access)
   --worktree-status, --ws
@@ -2251,6 +2410,7 @@ EOF
     [ "$_CLREPO_NO_SYNC" = 1 ]        && bad="${bad:+$bad, }--no-sync"
     [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
     [ "$remote_control" != 1 ]        && bad="${bad:+$bad, }--no-rc"
+    [ "$mode_pick" = 1 ]              && bad="${bad:+$bad, }--pick/--connect"
     if [ -n "$bad" ]; then
       echo "clrepo: --attach takes no other flags (got: $bad). Run \`clrepo <repo>\` to launch." >&2
       return 2
@@ -2260,6 +2420,29 @@ EOF
       return 2
     fi
     _clrepo_attach_pick
+    return
+  fi
+
+  if [ "$mode_pick" = 1 ]; then
+    local bad=""
+    [ "$with_remote" = 1 ]            && bad="${bad:+$bad, }-r/--remote/--refresh"
+    [ "$mode_delete" = 1 ]            && bad="${bad:+$bad, }-D/--delete"
+    [ -n "$worktree" ]                && bad="${bad:+$bad, }-w/--worktree"
+    [ -n "$editor" ]                  && bad="${bad:+$bad, }-c/-p"
+    [ "$_CLREPO_NO_CHANNEL" = 1 ]     && bad="${bad:+$bad, }--no-channel"
+    [ "$_CLREPO_NO_SYNC" = 1 ]        && bad="${bad:+$bad, }--no-sync"
+    [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
+    [ "$remote_control" != 1 ]        && bad="${bad:+$bad, }--no-rc"
+    [ "$mode_attach" = 1 ]            && bad="${bad:+$bad, }-a/--attach"
+    if [ -n "$bad" ]; then
+      echo "clrepo: --pick takes no other flags (got: $bad)." >&2
+      return 2
+    fi
+    if [ ${#pos[@]} -gt 0 ]; then
+      echo "clrepo: --pick takes no positional args (got: ${pos[*]})." >&2
+      return 2
+    fi
+    _clrepo_status_pick
     return
   fi
 
@@ -2433,7 +2616,7 @@ _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
   if [[ "$cur" == -* ]]; then
-    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --setup-admin --install-admin-commands --free -a --attach -V --version -h --help"
+    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
