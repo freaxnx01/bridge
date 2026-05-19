@@ -27,7 +27,8 @@ You are working autonomously in a loop on the `clrepo` repository (a shell helpe
 
 3b. **Tie-breaker — easy wins first within each ready frontier.** Topo sort defines layers (issues whose deps are all resolved at the same step). Within a layer, order by an effort score from cheapest to most expensive. Compute the score as the sum of:
 
-   - `+3` if labels include `epic`, `breaking`, or `enhancement` with a body over 2000 chars
+   - `+4` if labels include `epic` or `breaking` (explicit human "this is huge" marker — should dominate length proxies)
+   - `+3` if labels include `enhancement` with a body over 2000 chars
    - `+2` if the body mentions a new flag, new config file, schema change, or migration (grep for `--`, `CLREPO_`, `config file`, `schema`, `migration`)
    - `+2` if the body mentions cross-platform scope (grep case-insensitive for `windows`, `powershell`, `cross-platform`, `port`, `shim`, `cygpath`) — these are reliably under-represented in body length
    - `+2` if the body length exceeds 1500 chars
