@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.36.0"
+_CLREPO_VERSION="1.37.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -84,6 +84,15 @@ _clrepo_collect_bases() {
   _CLREPO_BASE="${_CLREPO_BASES[0]}"
 }
 _clrepo_collect_bases
+
+# _clrepo_collect_bases_with <value> — re-resolve the bases as if CLREPO_BASE
+# were set to <value>. Used by --base/-B to give the flag the highest
+# precedence (above env var, config file, default) for one invocation.
+# Accepts `:`-separated lists just like the env var.
+_clrepo_collect_bases_with() {
+  _CLREPO_BASES=()
+  CLREPO_BASE="$1" _clrepo_collect_bases
+}
 
 # _clrepo_base_for_rel <rel> — return the first $base under which $base/$rel
 # exists. Falls back to _CLREPO_BASES[0] if no match (clone target).
@@ -2513,6 +2522,25 @@ _clrepo_update() {
 clrepo() {
   local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0
   local -a pos=()
+
+  # Pre-pass for -B/--base so the override applies even to flags that early-
+  # return inside the main dispatch loop (e.g. --status, --pick, --issues).
+  # The flag value can be `:`-separated like CLREPO_BASE itself.
+  local _override_base=""
+  local -a _passthrough=()
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      -B|--base)
+        if [ -z "${2:-}" ]; then
+          echo "clrepo: $1 requires a directory path" >&2; return 2
+        fi
+        _override_base="$2"; shift 2 ;;
+      *) _passthrough+=("$1"); shift ;;
+    esac
+  done
+  set -- "${_passthrough[@]}"
+  [ -n "$_override_base" ] && _clrepo_collect_bases_with "$_override_base"
+
   while [ $# -gt 0 ]; do
     case "$1" in
       -r|--remote)    with_remote=1; shift ;;
@@ -2572,6 +2600,9 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   -w, --worktree NAME   pass through to `claude --worktree NAME`
                         with -p: cd into the matching git worktree first
   -V, --version         print version and exit
+  -B, --base <dir>      override the base dir(s) for this invocation only
+                        (highest precedence, above env var and config file).
+                        Accepts a `:`-separated list like CLREPO_BASE.
   --slot N              force a specific slot (1..N)
   --no-channel          legacy mode, no slot allocation, no Telegram
   --no-sync             skip the upstream fast-forward pull on startup
@@ -2597,10 +2628,11 @@ SSH persistence: when $SSH_CONNECTION is set, the Claude session is wrapped
 in `tmux new-session -A` so disconnecting doesn't kill it. Re-run the same
 clrepo command to reattach.
 Base dir(s) (where clrepo scans for repos), in precedence order:
-  1. $CLREPO_BASE env var — `:`-separated list (PATH-style); empty = unset
-  2. $HOME/.config/clrepo/base file — one absolute path per line; `~`/`$HOME`
+  1. -B/--base <dir> flag — overrides for one invocation; `:`-separated OK
+  2. $CLREPO_BASE env var — `:`-separated list (PATH-style); empty = unset
+  3. $HOME/.config/clrepo/base file — one absolute path per line; `~`/`$HOME`
      expanded; `#` lines ignored
-  3. Default: $HOME/projects/repos
+  4. Default: $HOME/projects/repos
 Sources are not merged: whichever wins, wins as a whole list. Missing dirs
 are warned-and-skipped. Single-base setups behave identically to before.
 EOF

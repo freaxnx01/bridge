@@ -5,6 +5,14 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-05-19
+
+### Added
+
+- `-B` / `--base <dir>` flag: override the base dir(s) for one invocation. Precedence becomes flag > env > config file > default. Accepts a `:`-separated list (matching the env var and the multi-base support from #4), and works uniformly across every subcommand — including ones that early-return (`--status`, `--pick`, `--issues`, etc.) because the flag is extracted in a pre-pass before the main dispatch loop. Closes #5.
+
+  Bump from 1.36.0 → 1.37.0. Stacked on PR #17 (multi-base, 1.36.0).
+
 ## [1.36.0] - 2026-05-19
 
 ### Added
