@@ -5,6 +5,20 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.35.0] - 2026-05-19
+
+### Added
+
+- Focus repos (MVP of #9, GitHub only):
+  - `-f` / `--focus-list`: list repos tagged with the `focus` topic across every configured GitHub owner. Output includes a `[GH]` platform tag, `owner/repo`, and the repo URL. Per-owner `gh repo list --topic focus` calls run in parallel under each owner's direnv context so the right `$GH_TOKEN` loads.
+  - `--focus-add <name>`: append `focus` to a repo's GitHub topics via `gh api -X PUT /repos/:nwo/topics`. Idempotent (no-op + message if already focused).
+  - `--focus-rm <name>`: remove `focus` from the topic list.
+  - ADO repos exit with a clear "not supported" error pointing the user at `clrepo -c <name>`. Non-GitHub forges (e.g. Forgejo) exit with "deferred to follow-up — see #9".
+
+  Out of scope for this MVP, tracked back on #9: Forgejo support, open-issue counts + "assigned to me", `~/.cache/clrepo/focus.json` caching with TTL, `clrepo -f <name>` open-by-name, tab completion. The PR does NOT close #9 — it's a partial step.
+
+  Bump from 1.30.0 → 1.35.0 (reserving 1.31-1.34 for PRs #11/#12/#13/#14 to avoid same-version conflicts between concurrent Ralph PRs).
+
 ## [1.30.0] - 2026-05-19
 
 ### Added
