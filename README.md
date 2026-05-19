@@ -329,6 +329,36 @@ Caveats:
 | `CLREPO_AUTOSYNC` | `1` (on) | Commit-and-push uncommitted changes on session close; set to `0` per-repo to opt out |
 | `CLREPO_AUTOSYNC_ALLOW_MAIN` | `0` (off) | Allow autosync to push from `main`/`master` (off by default for safety) |
 
+## Windows / PowerShell
+
+`clrepo` is a Bash script. On Windows, run it under **Git Bash** (ships with [Git for Windows](https://gitforwindows.org/)). From PowerShell, use the included `clrepo.ps1` shim.
+
+**Prerequisites:**
+
+- Git for Windows installed (provides `bash.exe`, `cygpath`, `git`).
+- Optional: set `$env:CLREPO_BASH` to point at a non-default `bash.exe`.
+
+**Setup in PowerShell:**
+
+```powershell
+# Pick your base dir. Both Windows and POSIX forms are accepted.
+$env:CLREPO_BASE = 'C:\Develop\Repos'
+$env:GITHUB_TOKEN = '...'           # if you use GitHub
+$env:AZURE_DEVOPS_EXT_PAT = '...'   # if you use Azure DevOps
+
+# Run directly:
+. C:\path\to\clrepo\clrepo.ps1 --list
+
+# Or define a function in $PROFILE for a `clrepo` command:
+function clrepo { & "C:\path\to\clrepo\clrepo.ps1" @args }
+```
+
+Config lives under `$HOME/.config/clrepo/` — on Windows that resolves to `C:\Users\<you>\.config\clrepo\` (Git Bash sets `$HOME` to `%USERPROFILE%`).
+
+**Caveat — `cd` doesn't survive back to PowerShell:** `clrepo <repo>` changes directory inside the Bash subprocess but does not change your PowerShell session's working directory. Use Git Bash directly if you want `cd` to stick, or `cd` manually in PowerShell afterwards. A future PS-native wrapper could address this.
+
+**Caveat — tab completion:** Bash completion works inside Git Bash. PowerShell-native completion for `clrepo.ps1` is not implemented yet.
+
 ## Known limitations
 
 - GitHub API `per_page=100`: owners with 100+ repos in a single visibility will be truncated. Fix: add pagination.

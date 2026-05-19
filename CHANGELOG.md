@@ -5,6 +5,21 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] - 2026-05-19
+
+### Added
+
+- Windows / PowerShell support: `clrepo.ps1` shim invokes `clrepo.sh` under Git Bash, forwarding arguments and exit codes. Locates `bash.exe` via `$env:CLREPO_BASH`, `git --exec-path`, well-known Program Files paths, or `Get-Command`.
+- Path-normalization helpers (`_clrepo_is_windows`, `_clrepo_norm_path`, `_clrepo_display_path`) so `CLREPO_BASE=C:\Develop\Repos` and POSIX forms both work. Uses `cygpath` when present, pure-Bash fallback otherwise. No-ops on POSIX.
+- Self-contained test for the path helpers at `tests/test_norm_path.sh` (11 assertions covering platform detection, POSIX passthrough, Windows conversion via cygpath shim, and cygpath-less fallback).
+- README section documenting the Windows / PowerShell setup, prerequisites, and the `cd`-doesn't-survive-back-to-PS caveat.
+
+### Changed
+
+- User-facing "under \$_CLREPO_BASE" messages now show Windows-style paths on Windows (via `_clrepo_display_path`). No-op on POSIX. Closes #8.
+
+  Bump from 1.30.0 → 1.34.0 (reserving 1.31.0 for PR #11, 1.32.0 for PR #12, 1.33.0 for PR #13 to avoid same-version conflicts between concurrent Ralph PRs).
+
 ## [1.30.0] - 2026-05-19
 
 ### Added

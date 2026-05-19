@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.30.0"
+_CLREPO_VERSION="1.34.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -33,7 +33,70 @@ shopt -q expand_aliases && _clrepo_saved_expand_aliases=1
 shopt -u expand_aliases
 
 _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-_CLREPO_BASE="${CLREPO_BASE:-$HOME/projects/repos}"
+
+# --- Platform + path helpers (Windows/Git-Bash support) ---
+# _clrepo_is_windows: true (exit 0) when running under Git Bash / MSYS / Cygwin.
+# Detection is by $OSTYPE so callers can override in tests.
+_clrepo_is_windows() {
+  case "${OSTYPE:-}" in
+    msys*|cygwin*|mingw*) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# _clrepo_norm_path <path>
+#   POSIX hosts: echo the path unchanged.
+#   Windows hosts: convert C:\foo, C:/foo, or /c/foo to /c/foo using
+#   cygpath -u. Falls back to a pure-Bash conversion if cygpath is absent.
+_clrepo_norm_path() {
+  local p="$1"
+  if ! _clrepo_is_windows; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -u "$p"
+    return 0
+  fi
+  p="${p//\\//}"
+  if [[ "$p" =~ ^([A-Za-z]):(/.*)?$ ]]; then
+    local drive_lc rest
+    drive_lc=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:upper:]' '[:lower:]')
+    rest="${BASH_REMATCH[2]:-}"
+    printf '/%s%s\n' "$drive_lc" "$rest"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
+# _clrepo_display_path <posix-path>
+#   POSIX hosts: echo unchanged.
+#   Windows hosts: convert to Windows form (C:\foo) via cygpath -w for
+#   user-facing messages. Falls back to a pure-Bash conversion.
+_clrepo_display_path() {
+  local p="$1"
+  if ! _clrepo_is_windows; then
+    printf '%s\n' "$p"
+    return 0
+  fi
+  if command -v cygpath >/dev/null 2>&1; then
+    cygpath -w "$p"
+    return 0
+  fi
+  if [[ "$p" =~ ^/([A-Za-z])(/.*)?$ ]]; then
+    local drive_uc rest
+    drive_uc=$(printf '%s' "${BASH_REMATCH[1]}" | tr '[:lower:]' '[:upper:]')
+    rest="${BASH_REMATCH[2]:-}"
+    rest="${rest//\//\\}"
+    printf '%s:%s\n' "$drive_uc" "$rest"
+  else
+    printf '%s\n' "$p"
+  fi
+}
+
+# Normalize once at entry so all downstream code uses POSIX paths.
+# On Linux/macOS this is a no-op (see _clrepo_norm_path).
+_CLREPO_BASE="$(_clrepo_norm_path "${CLREPO_BASE:-$HOME/projects/repos}")"
 _CLREPO_CACHE="${CLREPO_CACHE:-$HOME/.cache/clrepo}"
 _CLREPO_CONFIG="${CLREPO_CONFIG:-$HOME/.config/clrepo}"
 _CLREPO_REMOTE_TTL=600  # seconds
@@ -1452,7 +1515,7 @@ _clrepo_doctor() {
   local targets
   targets=$(_clrepo_targets)
   if [ -z "$targets" ]; then
-    echo "clrepo: no forge targets discovered under $_CLREPO_BASE" >&2
+    echo "clrepo: no forge targets discovered under $(_clrepo_display_path "$_CLREPO_BASE")" >&2
     return 1
   fi
 
@@ -1580,7 +1643,7 @@ _clrepo_worktree_status() {
                   -o -type d -name .git -printf '%h\n' 2>/dev/null \
             | sort)
   if [ -z "$repos" ]; then
-    echo "clrepo: no repos found under $_CLREPO_BASE" >&2
+    echo "clrepo: no repos found under $(_clrepo_display_path "$_CLREPO_BASE")" >&2
     return 1
   fi
 
@@ -1640,7 +1703,7 @@ _clrepo_issues() {
   local targets
   targets=$(_clrepo_targets)
   if [ -z "$targets" ]; then
-    echo "clrepo: no forge targets discovered under $_CLREPO_BASE" >&2
+    echo "clrepo: no forge targets discovered under $(_clrepo_display_path "$_CLREPO_BASE")" >&2
     return 1
   fi
 
@@ -2617,7 +2680,7 @@ EOF
       return
     fi
     if [ "${1:-}" = "." ]; then
-      echo "clrepo: '.' requires current dir to be inside a repo under $_CLREPO_BASE" >&2
+      echo "clrepo: '.' requires current dir to be inside a repo under $(_clrepo_display_path "$_CLREPO_BASE")" >&2
       return 1
     fi
   fi
