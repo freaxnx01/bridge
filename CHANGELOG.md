@@ -5,6 +5,36 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.30.0] - 2026-05-19
+
+### Added
+
+- `_clrepo_sync` now captures `git fetch` stderr to
+  `~/.cache/clrepo/sync.log` (auto-rotated at 400 lines) whenever the
+  fetch fails, so opaque "fetch failed" messages can finally be
+  diagnosed (timeout vs. DNS vs. auth, etc.).
+- `CLREPO_SYNC_TIMEOUT` env var (default `20`s, up from a hardcoded
+  `10`s) tunes the fetch timeout for slow links.
+- When startup sync skips for a non-trivial reason (fetch failure, no
+  upstream, dirty tree, or divergence), clrepo now writes a structured
+  note to `<repo>/.clrepo/sync-status.md` (auto-gitignored via
+  `.clrepo/.gitignore`), prints a yellow banner to stderr, and — for
+  Claude launches — passes the note via `claude --append-system-prompt`
+  so the agent knows the branch state is off before the first prompt.
+
+### Changed
+
+- `CLREPO_AUTOSYNC` now defaults to **on** for feature branches. To opt
+  out, set `export CLREPO_AUTOSYNC=0` in your shell env or the repo's
+  `.envrc`. `main`/`master` protection is unchanged: pushes from those
+  branches still require `CLREPO_AUTOSYNC_ALLOW_MAIN=1`.
+
+### Fixed
+
+- The "fetch failed or timed out" warning was discarding the actual
+  error. The new log file + `rc=<N>` distinction in the stderr message
+  surface timeouts (`rc=124`), DNS errors, auth errors, etc.
+
 ## [1.29.0] - 2026-05-19
 
 ### Added

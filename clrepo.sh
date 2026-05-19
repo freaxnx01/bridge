@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.29.0"
+_CLREPO_VERSION="1.30.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -65,6 +65,35 @@ _CLREPO_PRESENCE_FILE="$_CLREPO_CACHE/presence"
 # Yellow-prefixed warning to stderr. Used by _clrepo_sync skip paths.
 _clrepo_warn() {
   printf '\033[33mclrepo: %s\033[0m\n' "$*" >&2
+}
+
+# Pretty-print a yellow bordered block summarising _CLREPO_SYNC_NOTE.
+# Called right before agent launch when the note is non-empty.
+_clrepo_sync_banner() {
+  [ -z "${_CLREPO_SYNC_NOTE:-}" ] && return 0
+  local reason_line suggested_line
+  reason_line=$(printf '%s' "$_CLREPO_SYNC_NOTE" | sed -n '1p')
+  suggested_line=$(printf '%s' "$_CLREPO_SYNC_NOTE" \
+    | awk '/^Suggested:/{flag=1;next} flag&&NF{print; exit}')
+  printf '\033[33m\n' >&2
+  printf '┌─ clrepo: startup sync was skipped ─────────────────────────────\n' >&2
+  printf '│ %s\n' "${reason_line#clrepo: startup sync was skipped — }" >&2
+  [ -n "$suggested_line" ] && printf '│ Suggested:%s\n' "${suggested_line#  -}" >&2
+  printf '│ Full note: .clrepo/sync-status.md\n' >&2
+  printf '└────────────────────────────────────────────────────────────────\n' >&2
+  printf '\033[0m\n' >&2
+}
+
+# Write _CLREPO_SYNC_NOTE to .clrepo/sync-status.md in the current repo.
+# Creates .clrepo/.gitignore on first write so artifacts never get committed.
+_clrepo_sync_write_marker() {
+  [ -z "${_CLREPO_SYNC_NOTE:-}" ] && return 0
+  mkdir -p .clrepo 2>/dev/null || return 0
+  [ -f .clrepo/.gitignore ] || printf '*\n' > .clrepo/.gitignore
+  {
+    printf '<!-- written by clrepo at %s -->\n\n' "$(date -Iseconds)"
+    printf '%s\n' "$_CLREPO_SYNC_NOTE"
+  } > .clrepo/sync-status.md 2>/dev/null || true
 }
 
 # Emit forge targets: TSV of rel_dir\tforge\towner\tvisibility
@@ -1971,11 +2000,82 @@ _clrepo_tmux_session_defaults() {
   tmux set-option -t "$session" '@clrepo-pid'      "$pid"      >/dev/null 2>&1
 }
 
+# Render the sync skip note into _CLREPO_SYNC_NOTE for downstream
+# consumption by _clrepo_launch (banner + marker file + agent injection).
+# Args: $1 = kind (fetch|no-upstream|dirty|diverged), $2.. = kind-specific.
+# Side effect: sets the global var _CLREPO_SYNC_NOTE. Empty kind clears it.
+_clrepo_sync_set_note() {
+  local kind="${1:-}"
+  local branch_v="${branch:-?}"
+  local upstream_v="${upstream:-?}"
+  local details="" suggested=""
+
+  case "$kind" in
+    fetch)
+      local err="${2:-}" rc="${3:-?}"
+      if [ "$rc" = "124" ]; then
+        details="git fetch timed out after ${CLREPO_SYNC_TIMEOUT:-20}s"
+      else
+        details=$(printf '%s' "$err" | head -n 5)
+      fi
+      suggested='  - direnv exec . git fetch
+  - if auth-related: verify GH_TOKEN/GITLAB_TOKEN/ADO PAT in .envrc
+  - then: git pull --ff-only'
+      _CLREPO_SYNC_NOTE="clrepo: startup sync was skipped — fetch failed.
+Branch: $branch_v  Upstream: $upstream_v
+$details
+Suggested:
+$suggested
+Before making changes, please bring the branch in sync."
+      ;;
+    no-upstream)
+      _CLREPO_SYNC_NOTE="clrepo: startup sync was skipped — no upstream.
+Branch: $branch_v  Upstream: (none)
+Branch $branch_v has no upstream configured.
+Suggested:
+  - when ready to share: git push -u origin $branch_v
+Before making changes, please bring the branch in sync."
+      ;;
+    dirty)
+      local porcelain
+      porcelain=$(git status --porcelain 2>/dev/null | head -5)
+      _CLREPO_SYNC_NOTE="clrepo: startup sync was skipped — dirty working tree.
+Branch: $branch_v  Upstream: $upstream_v
+Uncommitted changes (first 5):
+$porcelain
+Suggested:
+  - git status
+  - commit or stash before continuing
+Before making changes, please bring the branch in sync."
+      ;;
+    diverged)
+      local stats ahead behind
+      stats=$(git rev-list --left-right --count 'HEAD...@{u}' 2>/dev/null)
+      ahead=$(printf '%s' "$stats" | awk '{print $1}')
+      behind=$(printf '%s' "$stats" | awk '{print $2}')
+      _CLREPO_SYNC_NOTE="clrepo: startup sync was skipped — diverged from upstream.
+Branch: $branch_v  Upstream: $upstream_v
+Local ahead by ${ahead:-?}, behind by ${behind:-?}.
+Suggested:
+  - git log --oneline @{u}..HEAD     # inspect local commits
+  - git pull --rebase                # integrate (user judgment)
+Before making changes, please bring the branch in sync."
+      ;;
+    "")
+      _CLREPO_SYNC_NOTE=""
+      ;;
+    *)
+      _CLREPO_SYNC_NOTE=""
+      ;;
+  esac
+}
+
 # Fast-forward sync of the current branch with its upstream before launch.
 # Args: $1 = repo basename, $2 = optional worktree name.
 # Never fails the launch; every error path returns 0 after a stderr line.
 _clrepo_sync() {
   local repo="$1" worktree="${2:-}"
+  _CLREPO_SYNC_NOTE=""
   [ "${_CLREPO_NO_SYNC:-0}" = 1 ] && return 0
 
   # Skip if we're about to reattach an existing tmux session.
@@ -1989,13 +2089,30 @@ _clrepo_sync() {
   branch=$(git symbolic-ref --quiet --short HEAD) || {
     _clrepo_warn "detached HEAD, skipping sync"; return 0; }
   upstream=$(git rev-parse --abbrev-ref --symbolic-full-name '@{u}' 2>/dev/null) || {
+    _clrepo_sync_set_note no-upstream
     _clrepo_warn "no upstream for $branch, skipping sync"; return 0; }
   if ! git diff --quiet || ! git diff --cached --quiet; then
+    _clrepo_sync_set_note dirty
     _clrepo_warn "dirty working tree, skipping sync"; return 0
   fi
 
-  timeout 10 git fetch --quiet 2>/dev/null || {
-    _clrepo_warn "fetch failed or timed out, skipping sync"; return 0; }
+  local log="$_CLREPO_CACHE/sync.log"
+  mkdir -p "$_CLREPO_CACHE"
+  if [ -f "$log" ] && [ "$(wc -l < "$log")" -gt 400 ]; then
+    tail -n 200 "$log" > "$log.tmp" && mv "$log.tmp" "$log"
+  fi
+
+  local fetch_err fetch_rc
+  fetch_err=$(timeout "${CLREPO_SYNC_TIMEOUT:-20}" git fetch 2>&1)
+  fetch_rc=$?
+  if [ "$fetch_rc" -ne 0 ]; then
+    printf '[%s] %s on %s (rc=%d): %s\n' \
+      "$(date -Iseconds)" "$repo" "$branch" "$fetch_rc" \
+      "$(printf '%s' "$fetch_err" | tr '\n' ' ' | head -c 500)" >> "$log"
+    _clrepo_sync_set_note fetch "$fetch_err" "$fetch_rc"
+    _clrepo_warn "fetch failed (rc=$fetch_rc), see $log"
+    return 0
+  fi
 
   local local_sha upstream_sha base
   local_sha=$(git rev-parse HEAD)
@@ -2012,6 +2129,7 @@ _clrepo_sync() {
       "$(git rev-parse --short "$local_sha")" \
       "$(git rev-parse --short "$upstream_sha")" "$branch" >&2
   else
+    _clrepo_sync_set_note diverged
     _clrepo_warn "$branch diverged from $upstream, skipping sync"
   fi
 }
@@ -2024,6 +2142,10 @@ _clrepo_launch() {
   local mru="$_CLREPO_CACHE/mru"
   cd "$_CLREPO_BASE/$sel" || return
   _clrepo_sync "$(basename "$sel")" "$worktree"
+  if [ -n "${_CLREPO_SYNC_NOTE:-}" ]; then
+    _clrepo_sync_banner
+    _clrepo_sync_write_marker
+  fi
   { printf '%s
 ' "$sel"; grep -vxF "$sel" "$mru" 2>/dev/null; } | head -10 > "$mru.tmp" && mv "$mru.tmp" "$mru"
 
@@ -2122,6 +2244,7 @@ _clrepo_launch() {
     local -a claude_args=(-n "$display_name" --dangerously-skip-permissions)
     [ -n "$worktree" ] && claude_args+=(--worktree "$worktree")
     [ "$remote_control" = 1 ] && claude_args+=(--remote-control)
+    [ -n "${_CLREPO_SYNC_NOTE:-}" ] && claude_args+=(--append-system-prompt "$_CLREPO_SYNC_NOTE")
     if [ -n "${SSH_CONNECTION:-}" ] && command -v tmux >/dev/null; then
       local session
       session=$(_clrepo_tmux_session_name "$repo" "$worktree")
@@ -2143,6 +2266,7 @@ _clrepo_launch() {
   local -a claude_args=(-n "$display_name" --dangerously-skip-permissions --channels plugin:telegram@claude-plugins-official)
   [ -n "$worktree" ] && claude_args+=(--worktree "$worktree")
   [ "$remote_control" = 1 ] && claude_args+=(--remote-control)
+  [ -n "${_CLREPO_SYNC_NOTE:-}" ] && claude_args+=(--append-system-prompt "$_CLREPO_SYNC_NOTE")
 
   export CLAUDE_CONFIG_DIR="$HOME/.claude-s${_SLOT}"
   export TELEGRAM_BOT_TOKEN="$_SLOT_TOKEN"
