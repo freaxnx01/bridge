@@ -5,6 +5,21 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.1] - 2026-05-20
+
+### Fixed
+
+- `-B/--base` no longer leaks across invocations (#5). The flag was mutating the global `_CLREPO_BASES` / `_CLREPO_BASE` via `_clrepo_collect_bases_with` with no save/restore, so the override silently persisted across subsequent `clrepo` calls in the same shell — directly breaking the "for this invocation only" contract. Fix: `clrepo()` now shadows both names with `local` declarations on entry, so bash dynamic scoping confines the override (and any helper that touches the same names) to the function's own scope. Regression test at `tests/test_base_flag_scope.sh`.
+
+## [1.40.0] - 2026-05-20
+
+### Added
+
+- `-B` / `--base <dir>` — per-invocation override for the base dir(s) (#5). Highest precedence (above `CLREPO_BASE` env var, `$_CLREPO_CONFIG/base` config file, and the default), accepts a `:`-separated list like `CLREPO_BASE` itself. Affects every base-touching subcommand (`--status`, `--pick`, picker, `--clone`, `.`-launch, `--doctor`, `--worktree-status`, `--issues`, `--dashboard`, `-i`).
+  - Implemented as a pre-pass at the top of `clrepo()` that extracts the flag before the main dispatch loop runs — this matters because many flags early-return in the main loop, so processing `-B` there would leave the override too late for those paths.
+  - New `_clrepo_collect_bases_with <value>` helper resets `_CLREPO_BASES` and re-runs `_clrepo_collect_bases` as if `CLREPO_BASE` were the flag value. All the existing `~`/`$HOME` expansion, trailing-`/` normalisation, dedupe, and missing-dir warn-and-skip apply uniformly.
+  - `clrepo --help` updated to show the four-step precedence chain.
+
 ## [1.39.0] - 2026-05-20
 
 ### Added
