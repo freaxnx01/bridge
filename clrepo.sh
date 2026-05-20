@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.44.0"
+_CLREPO_VERSION="1.45.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -3461,8 +3461,21 @@ EOF
 _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
+  local prev="${COMP_WORDS[COMP_CWORD-1]:-}"
+  if [[ "$prev" == "-f" || "$prev" == "--focus-list" ]] && [[ "$cur" != -* ]]; then
+    if [ -f "$_CLREPO_FOCUS_CACHE" ]; then
+      local focus_names
+      focus_names=$(jq -r '.repos[].name | split("/")[-1]' \
+                    "$_CLREPO_FOCUS_CACHE" 2>/dev/null)
+      if [ -n "$focus_names" ]; then
+        COMPREPLY=($(compgen -W "$focus_names" -- "$cur"))
+        return
+      fi
+    fi
+    # fallthrough: no cache or empty → normal repo name completion below
+  fi
   if [[ "$cur" == -* ]]; then
-    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard -i --repo-issues -f --focus-list --focus-add --focus-rm -B --base --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
+    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard -i --repo-issues -f --focus-list --focus-add --focus-rm --no-cache -B --base --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
