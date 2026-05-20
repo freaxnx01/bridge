@@ -5,6 +5,18 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.39.0] - 2026-05-20
+
+### Added
+
+- Windows / PowerShell support (#8). `clrepo.sh` stays canonical and runs under Git Bash; PowerShell users invoke a thin shim.
+  - `clrepo.ps1` shim — locates `bash.exe` (via `$env:CLREPO_BASH`, `git --exec-path`, well-known Git for Windows install paths, then `Get-Command`), sources `clrepo.sh`, forwards `@args` faithfully, mirrors `$LASTEXITCODE`.
+  - Platform helpers `_clrepo_is_windows`, `_clrepo_norm_path`, `_clrepo_display_path` and `_clrepo_display_bases` — no-ops on POSIX hosts.
+  - `_clrepo_norm_path` is applied per-entry inside `_clrepo_collect_bases` so `CLREPO_BASE='C:\Develop\Repos'`, `'C:/Develop/Repos'`, and `'/c/Develop/Repos'` all resolve to the same POSIX path internally. The same normalization is extended to `_CLREPO_CACHE` and `_CLREPO_CONFIG` for symmetry on Windows.
+  - User-facing "under any of: …" / "under …" error messages route through `_clrepo_display_bases` / `_clrepo_display_path` so Windows users see `C:\…` paths in errors.
+  - Self-contained Bash test at `tests/test_norm_path.sh` covers POSIX passthrough, `cygpath`-driven Windows conversion, the pure-Bash cygpath-less fallback, and display normalization. 11 assertions, runs offline.
+  - README: new "Windows / PowerShell" section with prerequisites, PowerShell setup snippet, and the `cd`-doesn't-survive-back-to-PS caveat.
+
 ## [1.38.0] - 2026-05-20
 
 ### Added
