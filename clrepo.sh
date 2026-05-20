@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.35.0"
+_CLREPO_VERSION="1.36.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -36,13 +36,15 @@ _CLREPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 _CLREPO_CACHE="${CLREPO_CACHE:-$HOME/.cache/clrepo}"
 _CLREPO_CONFIG="${CLREPO_CONFIG:-$HOME/.config/clrepo}"
 
-# Base-dir resolution. Precedence:
-#   1. CLREPO_BASE env var
-#   2. $_CLREPO_CONFIG/base config file (first non-empty, non-`#` line)
-#   3. Default $HOME/projects/repos
-# In the config file, leading `~` and `$HOME` are expanded so users can
-# write `~/work/repos` literally. Multi-base support arrives in #4.
-_clrepo_read_base_file() {
+# Base-dir resolution. Precedence (whole-list, sources never merged):
+#   1. CLREPO_BASE env var — `:`-separated list (PATH-style)
+#   2. $_CLREPO_CONFIG/base config file — one absolute path per line
+#   3. Default ["$HOME/projects/repos"]
+# `~` and `$HOME` are expanded; trailing `/` stripped; duplicates dropped;
+# missing dirs warned-and-skipped. `_CLREPO_BASE` retained as the first
+# element for backward compat — existing code reading $_CLREPO_BASE keeps
+# working on single-base setups. See docs/specs/2026-05-19-clrepo-multi-base-design.md.
+_clrepo_read_base_file_all() {
   local f="$_CLREPO_CONFIG/base" line
   [ -r "$f" ] || return 1
   while IFS= read -r line || [ -n "$line" ]; do
@@ -53,17 +55,51 @@ _clrepo_read_base_file() {
     line="${line/#\~/$HOME}"
     line="${line//\$HOME/$HOME}"
     printf '%s\n' "$line"
-    return 0
   done < "$f"
+  return 0
+}
+_CLREPO_BASES=()
+_clrepo_collect_bases() {
+  local -a raw=()
+  local p seen=""
+  if [ -n "${CLREPO_BASE:-}" ]; then
+    IFS=':' read -r -a raw <<< "$CLREPO_BASE"
+  else
+    while IFS= read -r p; do raw+=("$p"); done < <(_clrepo_read_base_file_all 2>/dev/null)
+    [ "${#raw[@]}" -eq 0 ] && raw=("$HOME/projects/repos")
+  fi
+  for p in "${raw[@]}"; do
+    [ -z "$p" ] && continue
+    p="${p%/}"
+    p="${p/#\~/$HOME}"; p="${p//\$HOME/$HOME}"
+    case ":$seen:" in *":$p:"*) continue ;; esac
+    if [ ! -d "$p" ]; then
+      printf '\033[33mclrepo: base dir missing, skipping: %s\033[0m\n' "$p" >&2
+      continue
+    fi
+    _CLREPO_BASES+=("$p")
+    seen="$seen:$p"
+  done
+  [ "${#_CLREPO_BASES[@]}" -eq 0 ] && _CLREPO_BASES=("$HOME/projects/repos")
+  _CLREPO_BASE="${_CLREPO_BASES[0]}"
+}
+_clrepo_collect_bases
+
+# _clrepo_base_for_rel <rel> — return the first $base under which $base/$rel
+# exists. Falls back to _CLREPO_BASES[0] if no match (clone target).
+_clrepo_base_for_rel() {
+  local rel="$1" b
+  for b in "${_CLREPO_BASES[@]}"; do
+    [ -d "$b/$rel" ] && { printf '%s\n' "$b"; return 0; }
+  done
+  printf '%s\n' "${_CLREPO_BASES[0]}"
   return 1
 }
-if [ -n "${CLREPO_BASE:-}" ]; then
-  _CLREPO_BASE="$CLREPO_BASE"
-elif _CLREPO_BASE=$(_clrepo_read_base_file 2>/dev/null); then
-  :
-else
-  _CLREPO_BASE="$HOME/projects/repos"
-fi
+
+# Backward-compat: legacy reader, now wired to read just the first line.
+_clrepo_read_base_file() {
+  _clrepo_read_base_file_all | head -1
+}
 _CLREPO_REMOTE_TTL=600  # seconds
 _CLREPO_UPDATE_TTL=86400  # seconds; staleness for latest-version cache
 _CLREPO_RAW_URL="https://raw.githubusercontent.com/freaxnx01/clrepo/main/clrepo.sh"
@@ -130,32 +166,34 @@ _clrepo_sync_write_marker() {
 
 # Emit forge targets: TSV of rel_dir\tforge\towner\tvisibility
 _clrepo_targets() {
-  find "$_CLREPO_BASE" -type f -name .envrc -printf '%h\n' 2>/dev/null \
-    | sed "s|^$_CLREPO_BASE/||" \
-    | while IFS= read -r rel; do
-        case "$rel" in
-          github/*/public)
-            local o="${rel#github/}"; o="${o%/public}"
-            printf '%s\tgithub\t%s\tpublic\n' "$rel" "$o" ;;
-          github/*/private)
-            local o="${rel#github/}"; o="${o%/private}"
-            printf '%s\tgithub\t%s\tprivate\n' "$rel" "$o" ;;
-          github/*)
-            # Owner-level .envrc shared across public/private (direnv walks parents).
-            local o="${rel#github/}"
-            [ -d "$_CLREPO_BASE/$rel/public" ] && \
-              printf '%s/public\tgithub\t%s\tpublic\n' "$rel" "$o"
-            [ -d "$_CLREPO_BASE/$rel/private" ] && \
-              printf '%s/private\tgithub\t%s\tprivate\n' "$rel" "$o"
-            ;;
-          gitlab/*)
-            printf '%s\tgitlab\t%s\t-\n' "$rel" "${rel#gitlab/}" ;;
-          git-forgejo)
-            printf '%s\tforgejo\tfreax\t-\n' "$rel" ;;
-          ado)
-            printf '%s\tado\tbossinfo\t-\n' "$rel" ;;
-        esac
-      done
+  local base
+  for base in "${_CLREPO_BASES[@]}"; do
+    find "$base" -type f -name .envrc -printf '%h\n' 2>/dev/null \
+      | sed "s|^$base/||" \
+      | while IFS= read -r rel; do
+          case "$rel" in
+            github/*/public)
+              local o="${rel#github/}"; o="${o%/public}"
+              printf '%s\tgithub\t%s\tpublic\n' "$rel" "$o" ;;
+            github/*/private)
+              local o="${rel#github/}"; o="${o%/private}"
+              printf '%s\tgithub\t%s\tprivate\n' "$rel" "$o" ;;
+            github/*)
+              local o="${rel#github/}"
+              [ -d "$base/$rel/public" ] && \
+                printf '%s/public\tgithub\t%s\tpublic\n' "$rel" "$o"
+              [ -d "$base/$rel/private" ] && \
+                printf '%s/private\tgithub\t%s\tprivate\n' "$rel" "$o"
+              ;;
+            gitlab/*)
+              printf '%s\tgitlab\t%s\t-\n' "$rel" "${rel#gitlab/}" ;;
+            git-forgejo)
+              printf '%s\tforgejo\tfreax\t-\n' "$rel" ;;
+            ado)
+              printf '%s\tado\tbossinfo\t-\n' "$rel" ;;
+          esac
+        done
+  done
 }
 
 # Fetch remote repo names for one target (loaded via direnv in a subshell).
@@ -165,7 +203,7 @@ _clrepo_targets() {
 _clrepo_fetch_target() {
   local rel="$1" forge="$2" owner="$3" vis="$4"
   (
-    cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit
+    cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit
     command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
     case "$forge" in
       github)
@@ -501,10 +539,13 @@ _clrepo_delete() {
   local rel="${raw#↓ }"
   [ -z "$rel" ] && return 1
 
-  local name parent local_path has_local=0 dirty=0
+  local name parent local_path owning_base has_local=0 dirty=0
   name=$(basename "$rel")
   parent=$(dirname "$rel")
-  local_path="$_CLREPO_BASE/$rel"
+  # Resolve which base owns this rel so multi-base setups delete from the
+  # right tree (and read the right per-dir credentials .envrc).
+  owning_base=$(_clrepo_base_for_rel "$rel")
+  local_path="$owning_base/$rel"
   [ -d "$local_path/.git" ] && has_local=1
 
   # Classify forge + owner from the path.
@@ -576,10 +617,10 @@ _clrepo_delete() {
     (
       local creds_dir
       case "$forge" in
-        github)  creds_dir="$_CLREPO_BASE/$parent" ;;
-        gitlab)  creds_dir="$_CLREPO_BASE/gitlab/$owner" ;;
-        forgejo) creds_dir="$_CLREPO_BASE/git-forgejo" ;;
-        ado)     creds_dir="$_CLREPO_BASE/ado" ;;
+        github)  creds_dir="$owning_base/$parent" ;;
+        gitlab)  creds_dir="$owning_base/gitlab/$owner" ;;
+        forgejo) creds_dir="$owning_base/git-forgejo" ;;
+        ado)     creds_dir="$owning_base/ado" ;;
       esac
       cd "$creds_dir" 2>/dev/null || { echo "ERR: creds dir missing: $creds_dir" >&2; exit 1; }
       command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
@@ -1484,7 +1525,7 @@ _clrepo_doctor() {
   local targets
   targets=$(_clrepo_targets)
   if [ -z "$targets" ]; then
-    echo "clrepo: no forge targets discovered under $_CLREPO_BASE" >&2
+    echo "clrepo: no forge targets discovered under any of: ${_CLREPO_BASES[*]}" >&2
     return 1
   fi
 
@@ -1500,7 +1541,7 @@ _clrepo_doctor() {
 
     local result
     result=$(
-      cd "$_CLREPO_BASE/$rel" 2>/dev/null || { echo "ERR: target dir missing"; exit 1; }
+      cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || { echo "ERR: target dir missing"; exit 1; }
       if ! command -v direnv >/dev/null; then
         echo "ERR: direnv not on PATH"; exit 1
       fi
@@ -1608,11 +1649,13 @@ _clrepo_doctor() {
 # at a glance.
 _clrepo_worktree_status() {
   local repos
-  repos=$(find "$_CLREPO_BASE" -type d -name '_archive' -prune \
-                  -o -type d -name .git -printf '%h\n' 2>/dev/null \
-            | sort)
+  repos=$(
+    for _b in "${_CLREPO_BASES[@]}"; do
+      find "$_b" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null
+    done | sort
+  )
   if [ -z "$repos" ]; then
-    echo "clrepo: no repos found under $_CLREPO_BASE" >&2
+    echo "clrepo: no repos found under any of: ${_CLREPO_BASES[*]}" >&2
     return 1
   fi
 
@@ -1623,7 +1666,13 @@ _clrepo_worktree_status() {
   while IFS= read -r repo; do
     [ -z "$repo" ] && continue
     total=$((total + 1))
-    local rel="${repo#$_CLREPO_BASE/}"
+    # Strip whichever base owns this repo. With one base configured this is
+    # identical to the old `${repo#$_CLREPO_BASE/}`; with multiple, picks the
+    # first matching prefix (matches the precedence order of _CLREPO_BASES).
+    local rel="$repo" _b
+    for _b in "${_CLREPO_BASES[@]}"; do
+      [[ "$repo" == "$_b/"* ]] && { rel="${repo#$_b/}"; break; }
+    done
     local short
     short=$(basename "$rel")
 
@@ -1672,7 +1721,7 @@ _clrepo_issues() {
   local targets
   targets=$(_clrepo_targets)
   if [ -z "$targets" ]; then
-    echo "clrepo: no forge targets discovered under $_CLREPO_BASE" >&2
+    echo "clrepo: no forge targets discovered under any of: ${_CLREPO_BASES[*]}" >&2
     return 1
   fi
 
@@ -1696,7 +1745,7 @@ _clrepo_issues() {
     [ -z "$rel" ] && continue
     local rows
     rows=$(
-      cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit
+      cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit
       command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
       case "$forge" in
         github)
@@ -2229,7 +2278,9 @@ _clrepo_launch() {
   local editor="${3:-}"
   local remote_control="${4:-1}"
   local mru="$_CLREPO_CACHE/mru"
-  cd "$_CLREPO_BASE/$sel" || return
+  local base
+  base=$(_clrepo_base_for_rel "$sel")
+  cd "$base/$sel" || return
   _clrepo_sync "$(basename "$sel")" "$worktree"
   if [ -n "${_CLREPO_SYNC_NOTE:-}" ]; then
     _clrepo_sync_banner
@@ -2612,10 +2663,13 @@ In picker:
 SSH persistence: when $SSH_CONNECTION is set, the Claude session is wrapped
 in `tmux new-session -A` so disconnecting doesn't kill it. Re-run the same
 clrepo command to reattach.
-Base dir (where clrepo scans for repos), in precedence order:
-  1. $CLREPO_BASE env var
-  2. $HOME/.config/clrepo/base file (single absolute path; ~ / $HOME expanded)
+Base dir(s) (where clrepo scans for repos), in precedence order:
+  1. $CLREPO_BASE env var — `:`-separated list (PATH-style); empty = unset
+  2. $HOME/.config/clrepo/base file — one absolute path per line; `~`/`$HOME`
+     expanded; `#` lines ignored
   3. Default: $HOME/projects/repos
+Sources are not merged: whichever wins, wins as a whole list. Missing dirs
+are warned-and-skipped. Single-base setups behave identically to before.
 EOF
         return 0 ;;
       --) shift; while [ $# -gt 0 ]; do pos+=("$1"); shift; done ;;
@@ -2711,20 +2765,32 @@ EOF
   # Skip when -r/--remote/--refresh is set: user explicitly wants the picker.
   # Skip when -i/--repo-issues is set: $# may be 0 (resolve repo from CWD).
   if [ "$mode_delete" = 0 ] && [ "$with_remote" = 0 ] && [ "$mode_repo_issues" = 0 ] && { [ "${1:-}" = "." ] || [ $# -eq 0 ]; }; then
-    local git_root=""
+    local git_root="" _b _rel=""
     git_root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)
-    if [ -n "$git_root" ] && [ "${git_root#$_CLREPO_BASE/}" != "$git_root" ]; then
-      _clrepo_launch "${git_root#$_CLREPO_BASE/}" "$worktree" "$editor" "$remote_control"
+    if [ -n "$git_root" ]; then
+      for _b in "${_CLREPO_BASES[@]}"; do
+        if [[ "$git_root" == "$_b/"* ]]; then
+          _rel="${git_root#$_b/}"
+          break
+        fi
+      done
+    fi
+    if [ -n "$_rel" ]; then
+      _clrepo_launch "$_rel" "$worktree" "$editor" "$remote_control"
       return
     fi
     if [ "${1:-}" = "." ]; then
-      echo "clrepo: '.' requires current dir to be inside a repo under $_CLREPO_BASE" >&2
+      echo "clrepo: '.' requires current dir to be inside a repo under any of: ${_CLREPO_BASES[*]}" >&2
       return 1
     fi
   fi
 
   local all
-  all=$(find "$_CLREPO_BASE" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$_CLREPO_BASE/||")
+  all=$(
+    for _b in "${_CLREPO_BASES[@]}"; do
+      find "$_b" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$_b/||"
+    done
+  )
 
   # -i / --repo-issues [name]: print open issues for one repo via `gh issue list`.
   # With no name, resolve from $PWD if inside a repo under $_CLREPO_BASE.
@@ -2874,8 +2940,11 @@ _clrepo() {
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
-  local names name
-  names=$(find "$_CLREPO_BASE" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | xargs -n1 basename)
+  local names name _b
+  names=""
+  for _b in "${_CLREPO_BASES[@]}"; do
+    names+=$(find "$_b" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | xargs -n1 basename)$'\n'
+  done
   shopt -s nocasematch
   while IFS= read -r name; do
     [[ "$name" == *"$cur"* ]] && COMPREPLY+=("$name")
