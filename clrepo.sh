@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.42.0"
+_CLREPO_VERSION="1.43.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -2135,21 +2135,20 @@ _clrepo_focus_rm() {
   rm -f "$_CLREPO_FOCUS_CACHE"
 }
 
-# List focus-tagged repos across all configured GitHub owners. Dedupes
-# targets by (forge, owner) — matches the _clrepo_issues pattern, so an
-# owner with both public/ and private/ subdirs spawns one job, not two.
-# Tmpfiles use a monotonic counter to avoid sanitization collisions.
-# Forgejo, issue counts, and caching are out of scope for the MVP — see #9.
+# List focus-tagged repos across configured GH owners and Forgejo. Reads from
+# the JSON cache when fresh; fetches and writes a new cache when stale.
+# $1 = 1 to bypass cache (--no-cache); omit or 0 to use cache.
 _clrepo_focus_list() {
-  local pairs
-  pairs=$(_clrepo_targets \
-    | awk -F'\t' '$2=="github" {
-        key = $2 "\t" $3
-        if (!(key in seen)) { seen[key] = 1; print $1 "\t" $3 }
-      }')
-  if [ -z "$pairs" ]; then
-    echo "clrepo: no GitHub forge targets discovered under any of: ${_CLREPO_BASES[*]}" >&2
-    return 1
+  local force_refresh="${1:-0}"
+
+  # --- Cache read ---
+  if [ -f "$_CLREPO_FOCUS_CACHE" ] && [ "$force_refresh" != "1" ]; then
+    local _age
+    _age=$(( $(date +%s) - $(jq '.fetched_at // 0' "$_CLREPO_FOCUS_CACHE" 2>/dev/null || echo 0) ))
+    if [ "$_age" -lt "$_CLREPO_FOCUS_TTL" ]; then
+      _clrepo_focus_display_cache
+      return
+    fi
   fi
 
   local tmpdir
@@ -2157,39 +2156,164 @@ _clrepo_focus_list() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmpdir'" RETURN
 
+  # --- Phase 1: fetch focus repo lists ---
+  local pairs first_rel="" first_owner=""
+  pairs=$(_clrepo_targets \
+    | awk -F'\t' '$2=="github" {
+        key = $2 "\t" $3
+        if (!(key in seen)) { seen[key] = 1; print $1 "\t" $3 }
+      }')
+  [ -n "$pairs" ] && IFS=$'\t' read -r first_rel first_owner \
+    <<< "$(printf '%s\n' "$pairs" | head -1)"
+
   local i=0
-  while IFS=$'\t' read -r rel owner; do
-    [ -z "$owner" ] && continue
+  if [ -n "$pairs" ]; then
+    while IFS=$'\t' read -r rel owner; do
+      [ -z "$owner" ] && continue
+      i=$((i + 1))
+      (
+        cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 0
+        command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+        gh repo list "$owner" --topic focus --json nameWithOwner,url --limit 50 2>/dev/null \
+          | jq -r '.[] | "GH\t\(.nameWithOwner)\t\(.url)"' \
+          > "$tmpdir/$i"
+      ) &
+    done <<< "$pairs"
+  fi
+
+  local fj_rel
+  fj_rel=$(_clrepo_targets | awk -F'\t' '$2=="forgejo" { print $1; exit }')
+  if [ -n "$fj_rel" ]; then
     i=$((i + 1))
+    local fj_file="$tmpdir/$i"
     (
-      cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 0
+      cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
       command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-      gh repo list "$owner" --topic focus --json nameWithOwner,url --limit 50 2>/dev/null \
-        | jq -r '.[] | "GH\t\(.nameWithOwner)\t\(.url)"' \
-        > "$tmpdir/$i"
+      if [ -z "${FORGEJO_TOKEN:-}" ]; then
+        printf 'Forgejo: skipped (no FORGEJO_TOKEN)\n' > "$tmpdir/warn_fj"
+        exit 0
+      fi
+      local result
+      result=$(curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
+        "https://git.home.freaxnx01.ch/api/v1/repos/search?topic=true&q=focus&limit=50" \
+        2>/dev/null) || {
+          printf 'Forgejo: skipped (curl error)\n' > "$tmpdir/warn_fj"
+          exit 0
+        }
+      printf '%s\n' "$result" \
+        | jq -r '.data[] | "FJ\t\(.full_name)\t\(.html_url)"' \
+        > "$fj_file"
     ) &
-  done <<< "$pairs"
+  fi
+
   wait
 
-  local out
-  out=$(cat "$tmpdir"/* 2>/dev/null | sort -u)
-  if [ -z "$out" ]; then
+  local repos
+  repos=$(cat "$tmpdir"/[0-9]* 2>/dev/null | grep -v '^[[:space:]]*$' | sort -u)
+
+  local warn_list=()
+  [ -f "$tmpdir/warn_fj" ] && warn_list+=("$(cat "$tmpdir/warn_fj")")
+
+  if [ -z "$repos" ]; then
     echo "clrepo: no focus repos found." >&2
-    echo "       Tag a repo via 'clrepo --focus-add <name>' or set the 'focus' topic in the GitHub UI." >&2
+    echo "       Tag a repo via 'clrepo --focus-add <name>' or set the 'focus' topic in the platform UI." >&2
     return 0
   fi
 
-  printf 'FOCUS REPOS\n'
-  printf -- '─%.0s' {1..56}; printf '\n'
-  printf '%s\n' "$out" | awk -F'\t' '{ printf "[%s]  %-36s  %s\n", $1, $2, $3 }'
-  printf -- '─%.0s' {1..56}; printf '\n'
-  local n
-  n=$(printf '%s\n' "$out" | wc -l)
-  if [ "$n" = 1 ]; then
-    printf '1 focus repo\n'
-  else
-    printf '%d focus repos\n' "$n"
+  # --- Phase 2: resolve current users (once each) ---
+  local gh_user="" fj_user=""
+  if [ -n "$first_rel" ]; then
+    gh_user=$(
+      cd "$(_clrepo_base_for_rel "$first_rel")/$first_rel" 2>/dev/null || exit 0
+      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+      gh api user --jq .login 2>/dev/null || true
+    )
   fi
+  if [ -n "$fj_rel" ]; then
+    fj_user=$(
+      cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
+      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+      [ -z "${FORGEJO_TOKEN:-}" ] && exit 0
+      curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
+        "https://git.home.freaxnx01.ch/api/v1/user" 2>/dev/null \
+        | jq -r '.login // empty' || true
+    )
+  fi
+
+  # --- Phase 3: per-repo issue counts (parallel) ---
+  local count_idx=0
+  while IFS=$'\t' read -r platform nwo url; do
+    [ -z "$platform" ] && continue
+    count_idx=$((count_idx + 1))
+    (
+      case "$platform" in
+        GH)
+          if [ -n "$first_rel" ]; then
+            cd "$(_clrepo_base_for_rel "$first_rel")/$first_rel" 2>/dev/null || exit 0
+            command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+          fi
+          local r
+          r=$(gh issue list --repo "$nwo" --state open \
+            --json number,assignees --limit 100 2>/dev/null) \
+            || { printf '%s\n' "-1 -1"; exit 0; }
+          printf '%s\n' "$r" | jq -r --arg me "$gh_user" '
+            (length | tostring) + " " +
+            ([.[] | select(any(.assignees[]; .login == $me))] | length | tostring)
+          ' 2>/dev/null || printf '%s\n' "-1 -1"
+          ;;
+        FJ)
+          if [ -n "$fj_rel" ]; then
+            cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
+            command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+          fi
+          [ -z "${FORGEJO_TOKEN:-}" ] && { printf '%s\n' "-1 -1"; exit 0; }
+          local name="${nwo#*/}"
+          local r
+          r=$(curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
+            "https://git.home.freaxnx01.ch/api/v1/repos/freax/$name/issues?state=open&type=issues&limit=50" \
+            2>/dev/null) || { printf '%s\n' "-1 -1"; exit 0; }
+          printf '%s\n' "$r" | jq -r --arg me "$fj_user" '
+            (length | tostring) + " " +
+            ([.[] | select(.assignee.login == $me)] | length | tostring)
+          ' 2>/dev/null || printf '%s\n' "-1 -1"
+          ;;
+      esac
+    ) > "$tmpdir/count_$count_idx" &
+  done <<< "$repos"
+  wait
+
+  # --- Phase 4: assemble cache JSON ---
+  local json_repos=() count_idx=0
+  while IFS=$'\t' read -r platform nwo url; do
+    [ -z "$platform" ] && continue
+    count_idx=$((count_idx + 1))
+    local open=-1 mine=-1
+    [ -f "$tmpdir/count_$count_idx" ] && read -r open mine < "$tmpdir/count_$count_idx" || true
+    json_repos+=("$(jq -n \
+      --arg p "$platform" --arg n "$nwo" --arg u "$url" \
+      --argjson o "${open:--1}" --argjson m "${mine:--1}" \
+      '{"platform":$p,"name":$n,"url":$u,"open":$o,"mine":$m}')")
+  done <<< "$repos"
+
+  local json_warnings_arr="[]"
+  for w in "${warn_list[@]}"; do
+    json_warnings_arr=$(printf '%s' "$json_warnings_arr" \
+      | jq --arg w "$w" '. + [$w]')
+  done
+
+  local repos_json
+  repos_json=$(printf '%s\n' "${json_repos[@]}" | jq -s '.')
+
+  local cache_tmp="$_CLREPO_FOCUS_CACHE.tmp"
+  jq -n \
+    --argjson repos "$repos_json" \
+    --argjson warnings "$json_warnings_arr" \
+    --argjson ts "$(date +%s)" \
+    '{"fetched_at":$ts,"repos":$repos,"warnings":$warnings}' \
+    > "$cache_tmp" 2>/dev/null \
+    && mv -f "$cache_tmp" "$_CLREPO_FOCUS_CACHE"
+
+  _clrepo_focus_display_cache
 }
 
 # Pick a live tmux-backed session via fzf and reattach. Reads slots.json
