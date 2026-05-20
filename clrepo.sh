@@ -3159,12 +3159,12 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   -i, --repo-issues [name]
                         list open GitHub issues for one repo via `gh issue
                         list`; with no name, uses the repo at $PWD
-  -f, --focus-list      list repos tagged with the 'focus' topic across
-                        configured GitHub owners. (MVP — Forgejo, issue
-                        counts, caching, and tab completion are pending
-                        follow-ups of #9.)
-  --focus-add <name>    add the 'focus' topic to a GitHub repo
-  --focus-rm <name>     remove the 'focus' topic from a GitHub repo
+  -f [name]             list focus repos (all platforms) or open <name>.
+      --focus-list      explicit form of -f with no <name>.
+      --no-cache        force refresh, bypassing the 1-hour cache (only
+                        meaningful with -f).
+  --focus-add <name>    tag repo with the 'focus' topic on its platform
+  --focus-rm <name>     remove the 'focus' topic
   --setup-admin LABEL   wire slot 0 (admin) for label-restore hook
   --install-admin-commands
                         symlink admin slash commands into ~/.claude-s0/commands/
