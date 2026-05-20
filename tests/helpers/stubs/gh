@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Minimal `gh` stub for clrepo tests.
+#
+# Extend cases as the test suite grows. Unknown calls fail loudly so a test
+# accidentally hitting the network is obvious in CI output.
+#
+# Optional env knobs:
+#   CLREPO_STUB_GH_REPO_LIST  path to a file whose contents are returned
+#                             verbatim for `gh repo list ...`
+
+set -u
+
+case "${1:-}" in
+  --version)
+    echo "gh stub 0.0.0"
+    exit 0
+    ;;
+  auth)
+    case "${2:-}" in
+      status)
+        echo "Logged in to github.com as test-user"
+        exit 0
+        ;;
+    esac
+    ;;
+  repo)
+    case "${2:-}" in
+      list)
+        if [ -n "${CLREPO_STUB_GH_REPO_LIST:-}" ] && [ -r "$CLREPO_STUB_GH_REPO_LIST" ]; then
+          cat "$CLREPO_STUB_GH_REPO_LIST"
+        fi
+        exit 0
+        ;;
+    esac
+    ;;
+esac
+
+echo "gh stub: unhandled args: $*" >&2
+exit 1
