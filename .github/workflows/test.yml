@@ -17,7 +17,7 @@ jobs:
           sudo apt-get install -y shellcheck bats
 
       - name: Smoke (shellcheck + --version / --help)
-        run: tests/smoke.sh
+        run: make smoke
 
       - name: Unit tests (bats)
-        run: bats tests/unit
+        run: make test
