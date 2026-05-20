@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.2] - 2026-05-20
+
+### Fixed
+
+- Tab completion now offers `-i` / `--repo-issues`. The flag was added in 1.35.0 (#11) but never made it into the `_clrepo()` completion's flag string, so `clrepo --r<TAB>` only offered `--remote` / `--remote-control` / `--refresh`. Pre-existing gap.
+
 ## [1.40.1] - 2026-05-20
 
 ### Fixed
