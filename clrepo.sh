@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.37.0"
+_CLREPO_VERSION="1.38.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1870,6 +1870,156 @@ _clrepo_dashboard() {
   '
 }
 
+# Focus repos — MVP scope (GitHub only; Forgejo, issue counts, caching, and
+# tab completion are deferred follow-ups of issue #9). Source of truth is
+# the `focus` repository topic on the source platform.
+
+# _clrepo_regex_escape <string>
+#   Escape ERE metacharacters in <string> so it can be embedded in a
+#   `grep -E` pattern as a literal. Used by the focus name resolver so
+#   repo names containing `.`, `+`, etc. don't match unintended rows.
+_clrepo_regex_escape() {
+  printf '%s' "$1" | sed 's/[][\\.*^$+?(){}|/]/\\&/g'
+}
+
+# Resolve a local repo <name> to its rel path across every base in
+# _CLREPO_BASES, using the same basename matcher as the launch path
+# (case-insensitive: exact first, then substring). Echos the rel on
+# stdout, or returns 1 with a stderr message.
+_clrepo_focus_resolve() {
+  local name="$1" _b all rel name_re
+  all=$(
+    for _b in "${_CLREPO_BASES[@]}"; do
+      find "$_b" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null \
+        | sed "s|^$_b/||"
+    done
+  )
+  name_re=$(_clrepo_regex_escape "$name")
+  rel=$(printf '%s\n' "$all" | grep -Ei "(^|/)${name_re}\$" | head -1)
+  [ -z "$rel" ] && rel=$(printf '%s\n' "$all" | grep -Ei "(^|/)[^/]*${name_re}[^/]*\$" | head -1)
+  if [ -z "$rel" ]; then
+    echo "clrepo: no local repo named '$name'" >&2
+    return 1
+  fi
+  printf '%s\n' "$rel"
+}
+
+# Add or remove the 'focus' topic on a GitHub repo. $1 = rel path,
+# $2 = "add" or "rm". Loads per-dir credentials via direnv.
+_clrepo_focus_toggle_gh() {
+  local rel="$1" action="$2"
+  (
+    cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 1
+    command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+    local nwo
+    nwo=$(gh repo view --json nameWithOwner -q .nameWithOwner 2>/dev/null) || {
+      echo "clrepo: could not resolve nameWithOwner for $rel" >&2; exit 1
+    }
+    local current
+    current=$(gh api "repos/$nwo/topics" --jq '.names' 2>/dev/null) || {
+      echo "clrepo: GitHub API error fetching topics for $nwo" >&2; exit 1
+    }
+    local has_focus
+    has_focus=$(echo "$current" | jq 'index("focus") != null')
+    if [ "$action" = "add" ]; then
+      if [ "$has_focus" = "true" ]; then
+        echo "clrepo: $nwo already has 'focus' topic"; exit 0
+      fi
+      echo "$current" | jq '{names: (. + ["focus"])}' \
+        | gh api -X PUT "repos/$nwo/topics" --input - >/dev/null || {
+            echo "clrepo: GitHub API error setting topics on $nwo" >&2; exit 1
+          }
+      echo "clrepo: added 'focus' topic to $nwo"
+    else
+      if [ "$has_focus" = "false" ]; then
+        echo "clrepo: $nwo has no 'focus' topic"; exit 0
+      fi
+      echo "$current" | jq '{names: (. - ["focus"])}' \
+        | gh api -X PUT "repos/$nwo/topics" --input - >/dev/null || {
+            echo "clrepo: GitHub API error setting topics on $nwo" >&2; exit 1
+          }
+      echo "clrepo: removed 'focus' topic from $nwo"
+    fi
+  )
+}
+
+_clrepo_focus_add() {
+  local rel
+  rel=$(_clrepo_focus_resolve "$1") || return 1
+  case "$rel" in
+    github/*) _clrepo_focus_toggle_gh "$rel" add ;;
+    ado/*)    echo "clrepo: focus is unsupported for Azure DevOps. Open via 'clrepo -c $1'." >&2; return 1 ;;
+    *)        echo "clrepo: focus not yet supported for '$rel' (Forgejo support deferred — see #9)." >&2; return 1 ;;
+  esac
+}
+
+_clrepo_focus_rm() {
+  local rel
+  rel=$(_clrepo_focus_resolve "$1") || return 1
+  case "$rel" in
+    github/*) _clrepo_focus_toggle_gh "$rel" rm ;;
+    ado/*)    echo "clrepo: focus is unsupported for Azure DevOps." >&2; return 1 ;;
+    *)        echo "clrepo: focus not yet supported for '$rel' (Forgejo support deferred — see #9)." >&2; return 1 ;;
+  esac
+}
+
+# List focus-tagged repos across all configured GitHub owners. Dedupes
+# targets by (forge, owner) — matches the _clrepo_issues pattern, so an
+# owner with both public/ and private/ subdirs spawns one job, not two.
+# Tmpfiles use a monotonic counter to avoid sanitization collisions.
+# Forgejo, issue counts, and caching are out of scope for the MVP — see #9.
+_clrepo_focus_list() {
+  local pairs
+  pairs=$(_clrepo_targets \
+    | awk -F'\t' '$2=="github" {
+        key = $2 "\t" $3
+        if (!(key in seen)) { seen[key] = 1; print $1 "\t" $3 }
+      }')
+  if [ -z "$pairs" ]; then
+    echo "clrepo: no GitHub forge targets discovered under any of: ${_CLREPO_BASES[*]}" >&2
+    return 1
+  fi
+
+  local tmpdir
+  tmpdir=$(mktemp -d) || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmpdir'" RETURN
+
+  local i=0
+  while IFS=$'\t' read -r rel owner; do
+    [ -z "$owner" ] && continue
+    i=$((i + 1))
+    (
+      cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 0
+      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+      gh repo list "$owner" --topic focus --json nameWithOwner,url --limit 50 2>/dev/null \
+        | jq -r '.[] | "GH\t\(.nameWithOwner)\t\(.url)"' \
+        > "$tmpdir/$i"
+    ) &
+  done <<< "$pairs"
+  wait
+
+  local out
+  out=$(cat "$tmpdir"/* 2>/dev/null | sort -u)
+  if [ -z "$out" ]; then
+    echo "clrepo: no focus repos found." >&2
+    echo "       Tag a repo via 'clrepo --focus-add <name>' or set the 'focus' topic in the GitHub UI." >&2
+    return 0
+  fi
+
+  printf 'FOCUS REPOS\n'
+  printf -- '─%.0s' {1..56}; printf '\n'
+  printf '%s\n' "$out" | awk -F'\t' '{ printf "[%s]  %-36s  %s\n", $1, $2, $3 }'
+  printf -- '─%.0s' {1..56}; printf '\n'
+  local n
+  n=$(printf '%s\n' "$out" | wc -l)
+  if [ "$n" = 1 ]; then
+    printf '1 focus repo\n'
+  else
+    printf '%d focus repos\n' "$n"
+  fi
+}
+
 # Pick a live tmux-backed session via fzf and reattach. Reads slots.json
 # (same source as --status), filters to records with a non-empty `session`
 # field. 0 live → error, 1 live → auto-attach (no picker), 2+ → fzf.
@@ -2612,6 +2762,13 @@ clrepo() {
       --issues)       _clrepo_issues; return ;;
       --dashboard)    _clrepo_dashboard; return ;;
       -i|--repo-issues) mode_repo_issues=1; shift ;;
+      -f|--focus-list) _clrepo_focus_list; return ;;
+      --focus-add)
+        [ -z "${2:-}" ] && { echo "clrepo: $1 requires <name>" >&2; return 2; }
+        _clrepo_focus_add "$2"; return ;;
+      --focus-rm)
+        [ -z "${2:-}" ] && { echo "clrepo: $1 requires <name>" >&2; return 2; }
+        _clrepo_focus_rm "$2"; return ;;
       --setup-admin)
         [ -z "${2:-}" ] && { echo "clrepo: $1 requires a label" >&2; return 2; }
         _clrepo_setup_admin "$2"; return ;;
@@ -2674,6 +2831,12 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   -i, --repo-issues [name]
                         list open GitHub issues for one repo via `gh issue
                         list`; with no name, uses the repo at $PWD
+  -f, --focus-list      list repos tagged with the 'focus' topic across
+                        configured GitHub owners. (MVP — Forgejo, issue
+                        counts, caching, and tab completion are pending
+                        follow-ups of #9.)
+  --focus-add <name>    add the 'focus' topic to a GitHub repo
+  --focus-rm <name>     remove the 'focus' topic from a GitHub repo
   --setup-admin LABEL   wire slot 0 (admin) for label-restore hook
   --install-admin-commands
                         symlink admin slash commands into ~/.claude-s0/commands/
@@ -2959,7 +3122,7 @@ _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
   if [[ "$cur" == -* ]]; then
-    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
+    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard -f --focus-list --focus-add --focus-rm --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
