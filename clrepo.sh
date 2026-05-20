@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.43.0"
+_CLREPO_VERSION="1.44.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -3038,7 +3038,7 @@ _clrepo_update() {
 }
 
 clrepo() {
-  local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0 mode_repo_issues=0
+  local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0 mode_repo_issues=0 mode_focus=0 focus_no_cache=0
   local -a pos=()
 
   # Shadow the global base-dir state so any in-function mutation (notably
@@ -3086,7 +3086,8 @@ clrepo() {
       --issues)       _clrepo_issues; return ;;
       --dashboard)    _clrepo_dashboard; return ;;
       -i|--repo-issues) mode_repo_issues=1; shift ;;
-      -f|--focus-list) _clrepo_focus_list; return ;;
+      -f|--focus-list) mode_focus=1; shift ;;
+      --no-cache)      focus_no_cache=1; shift ;;
       --focus-add)
         [ -z "${2:-}" ] && { echo "clrepo: $1 requires <name>" >&2; return 2; }
         _clrepo_focus_add "$2"; return ;;
@@ -3203,6 +3204,7 @@ EOF
     [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
     [ "$remote_control" != 1 ]        && bad="${bad:+$bad, }--no-rc"
     [ "$mode_pick" = 1 ]              && bad="${bad:+$bad, }--pick/--connect"
+    [ "$mode_focus" = 1 ]             && bad="${bad:+$bad, }-f/--focus-list"
     if [ -n "$bad" ]; then
       echo "clrepo: --attach takes no other flags (got: $bad). Run \`clrepo <repo>\` to launch." >&2
       return 2
@@ -3226,6 +3228,7 @@ EOF
     [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
     [ "$remote_control" != 1 ]        && bad="${bad:+$bad, }--no-rc"
     [ "$mode_attach" = 1 ]            && bad="${bad:+$bad, }-a/--attach"
+    [ "$mode_focus" = 1 ]             && bad="${bad:+$bad, }-f/--focus-list"
     if [ -n "$bad" ]; then
       echo "clrepo: --pick takes no other flags (got: $bad)." >&2
       return 2
@@ -3278,7 +3281,7 @@ EOF
   # Launch current repo when invoked with "." or bare from inside a repo.
   # Skip when -r/--remote/--refresh is set: user explicitly wants the picker.
   # Skip when -i/--repo-issues is set: $# may be 0 (resolve repo from CWD).
-  if [ "$mode_delete" = 0 ] && [ "$with_remote" = 0 ] && [ "$mode_repo_issues" = 0 ] && { [ "${1:-}" = "." ] || [ $# -eq 0 ]; }; then
+  if [ "$mode_delete" = 0 ] && [ "$with_remote" = 0 ] && [ "$mode_repo_issues" = 0 ] && [ "$mode_focus" = 0 ] && { [ "${1:-}" = "." ] || [ $# -eq 0 ]; }; then
     local git_root="" _b _rel=""
     git_root=$(git -C "$PWD" rev-parse --show-toplevel 2>/dev/null)
     if [ -n "$git_root" ]; then
@@ -3305,6 +3308,15 @@ EOF
       find "$_b" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$_b/||"
     done
   )
+
+  # -f / --focus-list [name]: list focus repos, or open a named repo.
+  if [ "$mode_focus" = 1 ]; then
+    if [ -z "${1:-}" ]; then
+      _clrepo_focus_list "$focus_no_cache"
+      return
+    fi
+    # name provided — fall through to the existing positional-arg launch path below
+  fi
 
   # -i / --repo-issues [name]: print open issues for one repo via `gh issue list`.
   # With no name, resolve from $PWD if inside a repo under $_CLREPO_BASE.

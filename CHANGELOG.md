@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.44.0] - 2026-05-20
+
+### Added
+
+- `-f`/`--focus-list` is now a mode flag instead of an early-return dispatch; supports `--no-cache` to bypass cache and a positional `<name>` to fall through to the normal launch path (#9).
+
 ## [1.43.0] - 2026-05-20
 
 ### Added
