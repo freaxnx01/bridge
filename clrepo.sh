@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.0"
+_CLREPO_VERSION="1.42.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -2084,24 +2084,55 @@ _clrepo_focus_toggle_gh() {
   )
 }
 
+# Add or remove the 'focus' topic on a Forgejo repo. $1 = rel path under
+# git-forgejo/, $2 = "add" or "rm". Uses PUT/DELETE /api/v1/repos/freax/<name>/topics/focus.
+_clrepo_focus_toggle_fj() {
+  local rel="$1" action="$2"
+  (
+    cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 1
+    command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+    [ -z "${FORGEJO_TOKEN:-}" ] && { echo "clrepo: no FORGEJO_TOKEN for Forgejo repo" >&2; exit 1; }
+    local name method code
+    name=$(basename "$rel")
+    [ "$action" = "add" ] && method=PUT || method=DELETE
+    code=$(curl -sf -o /dev/null -w '%{http_code}' -X "$method" \
+      -H "Authorization: token $FORGEJO_TOKEN" \
+      "https://git.home.freaxnx01.ch/api/v1/repos/freax/$name/topics/focus" 2>/dev/null)
+    case "$code" in
+      20[04]) ;;
+      404) echo "clrepo: Forgejo repo 'freax/$name' not found" >&2; exit 1 ;;
+      *)   echo "clrepo: Forgejo API error (HTTP $code) on freax/$name" >&2; exit 1 ;;
+    esac
+    if [ "$action" = "add" ]; then
+      echo "clrepo: added 'focus' topic to freax/$name"
+    else
+      echo "clrepo: removed 'focus' topic from freax/$name"
+    fi
+  )
+}
+
 _clrepo_focus_add() {
   local rel
   rel=$(_clrepo_focus_resolve "$1") || return 1
   case "$rel" in
-    github/*) _clrepo_focus_toggle_gh "$rel" add ;;
+    github/*)      _clrepo_focus_toggle_gh "$rel" add || return 1 ;;
+    git-forgejo/*) _clrepo_focus_toggle_fj "$rel" add || return 1 ;;
     ado/*)    echo "clrepo: focus is unsupported for Azure DevOps. Open via 'clrepo -c $1'." >&2; return 1 ;;
-    *)        echo "clrepo: focus not yet supported for '$rel' (Forgejo support deferred — see #9)." >&2; return 1 ;;
+    *)        echo "clrepo: focus not supported for platform of '$rel'." >&2; return 1 ;;
   esac
+  rm -f "$_CLREPO_FOCUS_CACHE"
 }
 
 _clrepo_focus_rm() {
   local rel
   rel=$(_clrepo_focus_resolve "$1") || return 1
   case "$rel" in
-    github/*) _clrepo_focus_toggle_gh "$rel" rm ;;
+    github/*)      _clrepo_focus_toggle_gh "$rel" rm || return 1 ;;
+    git-forgejo/*) _clrepo_focus_toggle_fj "$rel" rm || return 1 ;;
     ado/*)    echo "clrepo: focus is unsupported for Azure DevOps." >&2; return 1 ;;
-    *)        echo "clrepo: focus not yet supported for '$rel' (Forgejo support deferred — see #9)." >&2; return 1 ;;
+    *)        echo "clrepo: focus not supported for platform of '$rel'." >&2; return 1 ;;
   esac
+  rm -f "$_CLREPO_FOCUS_CACHE"
 }
 
 # List focus-tagged repos across all configured GitHub owners. Dedupes

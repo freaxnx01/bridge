@@ -5,6 +5,13 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.42.0] - 2026-05-20
+
+### Added
+
+- `_clrepo_focus_toggle_fj`: Forgejo focus topic toggle via `PUT`/`DELETE /api/v1/repos/freax/<name>/topics/focus` (#9).
+- `_clrepo_focus_add` and `_clrepo_focus_rm` now dispatch to `_clrepo_focus_toggle_fj` for `git-forgejo/*` repos and invalidate `$_CLREPO_FOCUS_CACHE` on success (#9).
+
 ## [1.41.0] - 2026-05-20
 
 ### Added
