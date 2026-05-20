@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.40.2"
+_CLREPO_VERSION="1.41.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -185,6 +185,8 @@ _clrepo_read_base_file() {
 }
 _CLREPO_REMOTE_TTL=600  # seconds
 _CLREPO_UPDATE_TTL=86400  # seconds; staleness for latest-version cache
+_CLREPO_FOCUS_CACHE="$_CLREPO_CACHE/focus.json"
+_CLREPO_FOCUS_TTL="${CLREPO_FOCUS_TTL:-3600}"
 _CLREPO_RAW_URL="https://raw.githubusercontent.com/freaxnx01/clrepo/main/clrepo.sh"
 
 # Autosync function (opt-in commit & push on session close). Same file is
@@ -1956,6 +1958,62 @@ _clrepo_dashboard() {
 # Focus repos — MVP scope (GitHub only; Forgejo, issue counts, caching, and
 # tab completion are deferred follow-ups of issue #9). Source of truth is
 # the `focus` repository topic on the source platform.
+
+# Render the focus list from the JSON cache file. Called from
+# _clrepo_focus_list (cache hit path) and directly in tests.
+_clrepo_focus_display_cache() {
+  local data n total_open total_mine warnings_out
+  data=$(jq -r '
+    .repos[] |
+    [.platform, .name, .url, (.open | tostring), (.mine | tostring)] | @tsv
+  ' "$_CLREPO_FOCUS_CACHE" 2>/dev/null)
+
+  if [ -z "$data" ]; then
+    echo "clrepo: no focus repos found." >&2
+    echo "       Tag a repo via 'clrepo --focus-add <name>' or set the 'focus' topic in the platform UI." >&2
+    return 0
+  fi
+
+  printf 'FOCUS REPOS\n'
+  printf -- '─%.0s' {1..56}; printf '\n'
+
+  n=0; total_open=0; total_mine=0
+  while IFS=$'\t' read -r platform name url open mine; do
+    n=$((n + 1))
+    local count_str
+    if [ "${open:--1}" -lt 0 ] 2>/dev/null; then
+      count_str="? open"
+    elif [ "${mine:-0}" -gt 0 ] 2>/dev/null; then
+      count_str="$open open · $mine yours"
+      total_open=$((total_open + open))
+      total_mine=$((total_mine + mine))
+    else
+      count_str="$open open"
+      total_open=$((total_open + ${open:-0}))
+    fi
+    printf '[%s]  %-36s  %s\n' "$platform" "$name" "$count_str"
+    printf '      %s\n' "$url"
+  done <<< "$data"
+
+  printf -- '─%.0s' {1..56}; printf '\n'
+  if [ "$n" -eq 1 ]; then
+    printf '1 focus repo'
+  else
+    printf '%d focus repos' "$n"
+  fi
+  if [ "$total_open" -gt 0 ]; then
+    printf ' · %d open issues' "$total_open"
+    [ "$total_mine" -gt 0 ] && printf ' · %d assigned to you' "$total_mine"
+  fi
+  printf '\n'
+
+  warnings_out=$(jq -r '.warnings[]?' "$_CLREPO_FOCUS_CACHE" 2>/dev/null)
+  if [ -n "$warnings_out" ]; then
+    while IFS= read -r w; do
+      printf '  [!] %s\n' "$w"
+    done <<< "$warnings_out"
+  fi
+}
 
 # _clrepo_regex_escape <string>
 #   Escape ERE metacharacters in <string> so it can be embedded in a
