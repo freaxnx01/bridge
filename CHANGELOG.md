@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.37.0] - 2026-05-20
+
+### Added
+
+- `--cd`: pure-navigation mode. Resolves a repo through the normal picker / fuzzy-lookup / MRU / `.` path, cd's into it (and into the matching git worktree if `-w NAME` is passed), and returns to the shell prompt — no claude / VS Code / copilot / opencode / slot / Telegram / tmux. Sibling of `-c` / `-p` / `-o` in the editor switch; mutually exclusive with them. MRU and `~/.cache/clrepo/last` are still updated. Closes #20.
+
 ## [1.36.0] - 2026-05-20
 
 ### Added
