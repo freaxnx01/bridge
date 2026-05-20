@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.36.0"
+_CLREPO_VERSION="1.37.0"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -2346,6 +2346,27 @@ _clrepo_launch() {
     return
   fi
 
+  # --cd mode — pure navigation. Honors -w by cd'ing into the matching
+  # git worktree (lookup by basename in `git worktree list`). Skips
+  # slot/Telegram/tmux/agent entirely — leaves the shell in the resolved
+  # directory and returns. Sync/MRU/`last` are unaffected (handled above).
+  if [ "$editor" = "cd" ]; then
+    if [ -n "$worktree" ]; then
+      local wt_path=""
+      while IFS= read -r p; do
+        [ "$(basename "$p")" = "$worktree" ] && { wt_path="$p"; break; }
+      done < <(git worktree list --porcelain 2>/dev/null | awk '/^worktree / {print $2}')
+      if [ -z "$wt_path" ]; then
+        echo "clrepo: no worktree named '$worktree' under $sel" >&2
+        return 1
+      fi
+      cd "$wt_path" || return 1
+      printf '%s\n%s\n' "$PWD" "$_remote_url" > "$_CLREPO_CACHE/last"
+    fi
+    _clrepo_print_last
+    return
+  fi
+
   # OpenCode mode — run `opencode`. Honors -w by cd'ing into the matching
   # git worktree (lookup by basename in `git worktree list`). Skips slot/Telegram
   # but keeps the tmux SSH wrap so disconnects don't kill the session.
@@ -2599,9 +2620,10 @@ clrepo() {
         [ -z "${2:-}" ] && { echo "clrepo: $1 requires a slot number" >&2; return 2; }
         _clrepo_slot_free "$2"; echo "clrepo: slot $2 freed"; return ;;
       -D|--delete)    mode_delete=1; shift ;;
-      -c|--code)      editor=code; shift ;;
-      -p|--copilot)   editor=copilot; shift ;;
-      -o|--opencode)  editor=opencode; shift ;;
+      -c|--code)      [ "$editor" = "cd" ] && { echo "clrepo: --cd and -c/-p/-o are mutually exclusive" >&2; return 2; }; editor=code; shift ;;
+      -p|--copilot)   [ "$editor" = "cd" ] && { echo "clrepo: --cd and -c/-p/-o are mutually exclusive" >&2; return 2; }; editor=copilot; shift ;;
+      -o|--opencode)  [ "$editor" = "cd" ] && { echo "clrepo: --cd and -c/-p/-o are mutually exclusive" >&2; return 2; }; editor=opencode; shift ;;
+      --cd)           [ -n "$editor" ] && { echo "clrepo: --cd and -c/-p/-o are mutually exclusive" >&2; return 2; }; editor=cd; shift ;;
       --remote-control|--rc) remote_control=1; shift ;;
       --no-remote-control|--no-rc) remote_control=0; shift ;;
       -w|--worktree)
@@ -2625,14 +2647,15 @@ Usage: clrepo [options] [repo-name|.|update|away|back|here|presence]
   -c, --code            open repo in VS Code instead of Claude Code CLI
   -p, --copilot         launch `copilot --yolo` instead of Claude Code CLI
   -o, --opencode        launch `opencode` instead of Claude Code CLI
+      --cd              just cd into the repo dir; don't launch any agent
       --remote-control, --rc
                         pass `--remote-control` to claude (steer session from
                         claude.ai/code or mobile app); on by default, requires
-                        claude.ai OAuth login. Ignored with -c and -p.
+                        claude.ai OAuth login. Ignored with -c, -p, -o, --cd.
       --no-remote-control, --no-rc
                         opt out of `--remote-control` for this launch.
   -w, --worktree NAME   pass through to `claude --worktree NAME`
-                        with -p: cd into the matching git worktree first
+                        with -p, -o, or --cd: cd into the matching git worktree first
   -V, --version         print version and exit
   --slot N              force a specific slot (1..N)
   --no-channel          legacy mode, no slot allocation, no Telegram
@@ -2683,7 +2706,7 @@ EOF
     [ "$with_remote" = 1 ]            && bad="${bad:+$bad, }-r/--remote/--refresh"
     [ "$mode_delete" = 1 ]            && bad="${bad:+$bad, }-D/--delete"
     [ -n "$worktree" ]                && bad="${bad:+$bad, }-w/--worktree"
-    [ -n "$editor" ]                  && bad="${bad:+$bad, }-c/-p"
+    [ -n "$editor" ]                  && bad="${bad:+$bad, }-c/-p/-o/--cd"
     [ "$_CLREPO_NO_CHANNEL" = 1 ]     && bad="${bad:+$bad, }--no-channel"
     [ "$_CLREPO_NO_SYNC" = 1 ]        && bad="${bad:+$bad, }--no-sync"
     [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
@@ -2706,7 +2729,7 @@ EOF
     [ "$with_remote" = 1 ]            && bad="${bad:+$bad, }-r/--remote/--refresh"
     [ "$mode_delete" = 1 ]            && bad="${bad:+$bad, }-D/--delete"
     [ -n "$worktree" ]                && bad="${bad:+$bad, }-w/--worktree"
-    [ -n "$editor" ]                  && bad="${bad:+$bad, }-c/-p"
+    [ -n "$editor" ]                  && bad="${bad:+$bad, }-c/-p/-o/--cd"
     [ "$_CLREPO_NO_CHANNEL" = 1 ]     && bad="${bad:+$bad, }--no-channel"
     [ "$_CLREPO_NO_SYNC" = 1 ]        && bad="${bad:+$bad, }--no-sync"
     [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
@@ -2936,7 +2959,7 @@ _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
   if [[ "$cur" == -* ]]; then
-    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
+    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
