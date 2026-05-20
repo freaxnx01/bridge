@@ -5,14 +5,18 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.34.0] - 2026-05-20
+
+### Added
+
+- `--dashboard`: cross-repo overview. Fans out `gh issue list` over every local repo under `$_CLREPO_BASE` and prints a table with open-issue count and top 2 issue titles per repo, sorted by count descending. Repos without a GitHub remote are silently skipped — use `--issues` for the cross-forge overview. Closes #7.
+
 ## [1.33.0] - 2026-05-19
 
 ### Added
 
 - `$_CLREPO_CONFIG/base` config file: a single absolute path that overrides the default `$HOME/projects/repos` base dir. Precedence: `CLREPO_BASE` env var > config file > default. `~` and `$HOME` are expanded so users can write `~/work/repos` literally; lines starting with `#` and blank lines are ignored. The first non-empty, non-comment line wins. Foundation for multi-base support (#4). Closes #3.
 - `clrepo --help` now documents the base-dir precedence chain (previously undocumented — see #3).
-
-  Bump from 1.30.0 → 1.33.0 (reserving 1.31.0 for PR #11 and 1.32.0 for PR #12 to avoid same-version conflicts between concurrent Ralph PRs).
 
 ## [1.30.0] - 2026-05-19
 
