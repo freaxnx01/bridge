@@ -5,6 +5,20 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.38.0] - 2026-05-20
+
+### Added
+
+- Focus topic MVP (#9). New flags scope a repository's `focus` topic on GitHub as the source of truth — no local index file.
+  - `-f` / `--focus-list`: enumerate every configured GitHub owner via `_clrepo_targets`, run `gh repo list <owner> --topic focus` in parallel under each owner's direnv context, print a `[GH]`-tagged table.
+  - `--focus-add <name>` / `--focus-rm <name>`: resolve `<name>` locally, then `gh api -X PUT /repos/:nwo/topics` with the merged or filtered topic list. Idempotent.
+  - ADO repos surface a clear unsupported-error pointing at `clrepo -c <name>`; Forgejo repos show a deferred-to-#9 message.
+  - Smoke test at `tests/test_focus_dedup.sh` covers the (forge, owner) dedup so an owner with both `public/` and `private/` subdirs spawns one job, not two.
+
+### Fixed
+
+- `_clrepo_focus_list` dedupes targets on (forge, owner) — matching the sibling `_clrepo_issues` helper — so an owner with both visibility prefixes no longer double-fans-out and concurrently overwrites the same tmpfile. Tmpfile naming uses a monotonic counter, eliminating any `/` or ` ` collapse-to-`_` collision risk. Name resolution escapes ERE metacharacters before grep so repo names containing `.`, `+`, etc. don't match unintended rows.
+
 ## [1.37.0] - 2026-05-20
 
 ### Added
