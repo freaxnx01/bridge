@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.40.1"
+_CLREPO_VERSION="1.40.2"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -3237,7 +3237,7 @@ _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
   if [[ "$cur" == -* ]]; then
-    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard -f --focus-list --focus-add --focus-rm -B --base --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
+    local flags="-r --remote --refresh -D --delete -c --code -p --copilot -o --opencode --cd --remote-control --rc -w --worktree --no-sync --no-channel --slot --status --status-rc --doctor --worktree-status --ws --issues --dashboard -i --repo-issues -f --focus-list --focus-add --focus-rm -B --base --setup-admin --install-admin-commands --free -a --attach --pick --connect -V --version -h --help"
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
