@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.40.1] - 2026-05-20
+
+### Fixed
+
+- `-B/--base` no longer leaks across invocations (#5). The flag was mutating the global `_CLREPO_BASES` / `_CLREPO_BASE` via `_clrepo_collect_bases_with` with no save/restore, so the override silently persisted across subsequent `clrepo` calls in the same shell — directly breaking the "for this invocation only" contract. Fix: `clrepo()` now shadows both names with `local` declarations on entry, so bash dynamic scoping confines the override (and any helper that touches the same names) to the function's own scope. Regression test at `tests/test_base_flag_scope.sh`.
+
 ## [1.40.0] - 2026-05-20
 
 ### Added

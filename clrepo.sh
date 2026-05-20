@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.40.0"
+_CLREPO_VERSION="1.40.1"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -2827,6 +2827,14 @@ _clrepo_update() {
 clrepo() {
   local with_remote=0 force_refresh=0 mode_delete=0 worktree="" editor="" remote_control=1 _CLREPO_NO_CHANNEL=0 _CLREPO_FORCED_SLOT="" _CLREPO_NO_SYNC=0 mode_attach=0 mode_pick=0 mode_repo_issues=0
   local -a pos=()
+
+  # Shadow the global base-dir state so any in-function mutation (notably
+  # -B/--base via _clrepo_collect_bases_with) dies when clrepo() returns.
+  # Bash dynamic scoping makes helpers called from here hit the local
+  # binding, not the global — so the "for this invocation only" contract
+  # on -B is enforced without explicit save/restore.
+  local -a _CLREPO_BASES=("${_CLREPO_BASES[@]}")
+  local _CLREPO_BASE="$_CLREPO_BASE"
 
   # Pre-pass for -B/--base so the override applies even to flags that early-
   # return inside the main dispatch loop (e.g. --status, --pick, --issues,
