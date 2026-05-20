@@ -5,37 +5,19 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.45.0] - 2026-05-20
-
-### Added
-
-- Tab completion for `_clrepo()` now completes focus repo names (basename) from the focus cache after `-f`/`--focus-list`; adds `--no-cache` to the completable flags list (#9).
-
-## [1.44.0] - 2026-05-20
-
-### Added
-
-- `-f`/`--focus-list` is now a mode flag instead of an early-return dispatch; supports `--no-cache` to bypass cache and a positional `<name>` to fall through to the normal launch path (#9).
-
-## [1.43.0] - 2026-05-20
-
-### Added
-
-- `_clrepo_focus_list`: rewritten with Forgejo support, per-repo open/mine issue counts, and JSON caching (`$_CLREPO_FOCUS_CACHE` / `$_CLREPO_FOCUS_TTL`); bypasses cache when stale or when `$1=1` (#9).
-
-## [1.42.0] - 2026-05-20
-
-### Added
-
-- `_clrepo_focus_toggle_fj`: Forgejo focus topic toggle via `PUT`/`DELETE /api/v1/repos/freax/<name>/topics/focus` (#9).
-- `_clrepo_focus_add` and `_clrepo_focus_rm` now dispatch to `_clrepo_focus_toggle_fj` for `git-forgejo/*` repos and invalidate `$_CLREPO_FOCUS_CACHE` on success (#9).
-
 ## [1.41.0] - 2026-05-20
 
 ### Added
 
-- `_CLREPO_FOCUS_CACHE` and `_CLREPO_FOCUS_TTL` constants for the focus feature (#9).
-- `_clrepo_focus_display_cache` helper that renders the focus repo list from a JSON cache file; used by the cache-hit path and tests.
+- Focus topic — full implementation (#9). Completes all remaining acceptance criteria from the feature issue on top of the MVP (PR #23).
+  - **Forgejo support:** `--focus-add` and `--focus-rm` now work on Forgejo repos (`git-forgejo/*`) via `PUT/DELETE /api/v1/repos/freax/<name>/topics/focus`. `clrepo -f` fetches focus repos from Forgejo via `/api/v1/repos/search?topic=true&q=focus`.
+  - **Open-issue counts:** `-f` output shows `N open · M yours` per repo. Counts fetched in parallel via `gh issue list --repo` (GH) and `/api/v1/repos/.../issues` (FJ). Current user resolved once per run via `gh api user` / `GET /api/v1/user`.
+  - **JSON cache:** focus list cached at `~/.cache/clrepo/focus.json` with 1-hour TTL (tunable via `CLREPO_FOCUS_TTL`). Cache written atomically. `--focus-add` and `--focus-rm` invalidate it on success.
+  - **`--no-cache`:** bypass the cache for one run; only meaningful with `-f`.
+  - **`clrepo -f <name>`:** opens any local repo by name (tab-completes only focus repos; resolution is against all local repos).
+  - **Tab completion:** `clrepo -f <TAB>` completes from the cached focus basenames. Falls back to all-repo completion when cache is absent.
+  - **Partial-failure handling:** if Forgejo is unreachable or `FORGEJO_TOKEN` is missing, GH results are still shown and a `[!]` warning appears in the footer. Per-repo count failures show `? open` for that row.
+  - **Output format:** two lines per repo — name + count row, then URL. Summary footer with totals.
 
 ## [1.40.2] - 2026-05-20
 
