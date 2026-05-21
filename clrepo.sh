@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.3"
+_CLREPO_VERSION="1.41.4"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1898,11 +1898,9 @@ _clrepo_issues() {
   '
 }
 
-# Cross-repo dashboard: open-issue count + top 2 issue titles per repo.
+# Cross-repo dashboard: one row per open issue, sorted PLAT → REPO → issue#.
 # Fans out `gh issue list` in parallel over every local repo under
-# $_CLREPO_BASE. Repos without a GitHub remote (or where gh fails for any
-# reason) are silently skipped — the existing `--issues` overview handles
-# cross-forge. Results sorted by open count descending.
+# $_CLREPO_BASE. Repos without a reachable GitHub remote are silently skipped.
 _clrepo_dashboard() {
   local repos
   repos=$(find "$_CLREPO_BASE" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$_CLREPO_BASE/||" | sort)
@@ -1922,50 +1920,46 @@ _clrepo_dashboard() {
       (
         cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit 0
         command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-        local json
         json=$(gh issue list --state open --json number,title --limit 50 2>/dev/null) || exit 0
-        local count top
-        count=$(echo "$json" | jq 'length')
-        top=$(echo "$json" \
-          | jq -r '
-              sort_by(.number)
-              | .[:2]
-              | map("#\(.number) " + (.title | gsub("[\\t\\n\\r]"; " ")))
-              | join(", ")
-            ')
-        [ -z "$top" ] && top="—"
-        printf '%s\t%s\t%s\n' "$rel" "$count" "$top" \
-          > "$tmpdir/$(echo "$rel" | tr '/' '_')"
+        IFS='/' read -ra p <<< "$rel"
+        n=${#p[@]}
+        case "${p[0]}" in
+          github)      plat=GH  ;;
+          git-forgejo) plat=FJ  ;;
+          ado)         plat=ADO ;;
+          *)           plat="${p[0]}" ;;
+        esac
+        name="${p[$((n-1))]}"
+        if   [ "$n" -ge 4 ] && [ "${p[$((n-2))]}" = "private" ]; then vis=pri
+        elif [ "$n" -ge 4 ]; then vis=pub
+        else vis=""
+        fi
+        printf '%s\n' "$json" \
+          | jq -r --arg plat "$plat" --arg vis "$vis" --arg name "$name" '
+              sort_by(.number) | .[]
+              | [$plat, $vis, $name, (.number | tostring), (.title | gsub("[\\t\\n\\r]"; " "))]
+              | @tsv
+            ' 2>/dev/null \
+          > "$tmpdir/$(printf '%s' "$rel" | tr '/' '_')"
       ) &
     done <<< "$repos"
     wait
   )
 
   local out
-  out=$(cat "$tmpdir"/* 2>/dev/null | sort -t$'\t' -k2,2nr -k1,1)
+  out=$(cat "$tmpdir"/* 2>/dev/null | grep -v '^[[:space:]]*$' \
+        | sort -t$'\t' -k1,1 -k3,3 -k4,4n)
   if [ -z "$out" ]; then
-    echo "clrepo: no GitHub repos with reachable issue API under $(_clrepo_display_path "$_CLREPO_BASE")" >&2
+    echo "clrepo: no open issues found under $(_clrepo_display_path "$_CLREPO_BASE")" >&2
     return 1
   fi
 
   printf '%s\n' "$out" | awk -F'\t' '
-    $2 + 0 == 0 { next }
+    BEGIN { printf "%-4s  %-3s  %-28s  %-5s  %s\n", "PLAT", "VIS", "REPO", "#", "TITLE" }
     {
-      n = split($1, p, "/")
-      if      (p[1] == "github")      plat = "GH"
-      else if (p[1] == "git-forgejo") plat = "FJ"
-      else if (p[1] == "ado")         plat = "ADO"
-      else                            plat = p[1]
-      name = p[n]
-      if (n >= 4 && p[n-1] == "private") vis = "priv"
-      else if (n >= 4)                    vis = "pub"
-      else                                vis = ""
-      rows[++r] = sprintf("%-4s  %-4s  %-28s  %3d  %s", plat, vis, name, $2+0, $3)
-    }
-    END {
-      if (!r) { print "(no repos with open issues)"; exit }
-      printf "%-4s  %-4s  %-28s  %3s  %s\n", "PLAT", "VIS", "REPO", "OPEN", "TOP ISSUES"
-      for (i = 1; i <= r; i++) print rows[i]
+      title = $5
+      if (length(title) > 60) title = substr(title, 1, 57) "..."
+      printf "%-4s  %-3s  %-28s  #%-4s  %s\n", $1, $2, $3, $4, title
     }
   '
 }

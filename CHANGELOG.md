@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.4] - 2026-05-21
+
+### Changed
+
+- `--dashboard` now shows one row per open issue instead of one row per repo. Columns: `PLAT` / `VIS` (`pub`/`pri`) / `REPO` / `#` / `TITLE` (truncated to 60 chars). Sorted PLAT ASC → REPO ASC → issue number ASC. The `OPEN` count column is gone — issue count is now implicit from the number of rows per repo.
+
 ## [1.41.3] - 2026-05-21
 
 ### Fixed
