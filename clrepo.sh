@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.1"
+_CLREPO_VERSION="1.41.2"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1948,12 +1948,25 @@ _clrepo_dashboard() {
     return 1
   fi
 
-  {
-    printf '%s\t%s\t%s\n' "REPO" "OPEN" "TOP ISSUES"
-    printf '%s\n' "$out"
-  } | awk -F'\t' '
-    NR==1 { printf "%-30s  %-5s  %s\n", $1, $2, $3; next }
-    { printf "%-30s  %-5s  %s\n", $1, $2, $3 }
+  printf '%s\n' "$out" | awk -F'\t' '
+    $2 + 0 == 0 { next }
+    {
+      n = split($1, p, "/")
+      if      (p[1] == "github")      plat = "GH"
+      else if (p[1] == "git-forgejo") plat = "FJ"
+      else if (p[1] == "ado")         plat = "ADO"
+      else                            plat = p[1]
+      name = p[n]
+      if (n >= 4 && p[n-1] == "private") vis = "priv"
+      else if (n >= 4)                    vis = "pub"
+      else                                vis = ""
+      rows[++r] = sprintf("%-4s  %-4s  %-28s  %3d  %s", plat, vis, name, $2+0, $3)
+    }
+    END {
+      if (!r) { print "(no repos with open issues)"; exit }
+      printf "%-4s  %-4s  %-28s  %3s  %s\n", "PLAT", "VIS", "REPO", "OPEN", "TOP ISSUES"
+      for (i = 1; i <= r; i++) print rows[i]
+    }
   '
 }
 

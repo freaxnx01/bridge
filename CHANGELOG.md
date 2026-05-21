@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.2] - 2026-05-21
+
+### Changed
+
+- `--dashboard` output is now a compact table. Repos with zero open issues are hidden. The full repo path is replaced by three short columns — `PLAT` (GH / FJ / ADO), `VIS` (pub / priv), and `REPO` (basename only).
+
 ## [1.41.1] - 2026-05-21
 
 ### Fixed
