@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.0"
+_CLREPO_VERSION="1.41.1"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1916,28 +1916,30 @@ _clrepo_dashboard() {
   # shellcheck disable=SC2064
   trap "rm -rf '$tmpdir'" RETURN
 
-  while IFS= read -r rel; do
-    [ -z "$rel" ] && continue
-    (
-      cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit 0
-      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-      local json
-      json=$(gh issue list --state open --json number,title --limit 50 2>/dev/null) || exit 0
-      local count top
-      count=$(echo "$json" | jq 'length')
-      top=$(echo "$json" \
-        | jq -r '
-            sort_by(.number)
-            | .[:2]
-            | map("#\(.number) " + (.title | gsub("[\\t\\n\\r]"; " ")))
-            | join(", ")
-          ')
-      [ -z "$top" ] && top="—"
-      printf '%s\t%s\t%s\n' "$rel" "$count" "$top" \
-        > "$tmpdir/$(echo "$rel" | tr '/' '_')"
-    ) &
-  done <<< "$repos"
-  wait
+  (
+    while IFS= read -r rel; do
+      [ -z "$rel" ] && continue
+      (
+        cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit 0
+        command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+        local json
+        json=$(gh issue list --state open --json number,title --limit 50 2>/dev/null) || exit 0
+        local count top
+        count=$(echo "$json" | jq 'length')
+        top=$(echo "$json" \
+          | jq -r '
+              sort_by(.number)
+              | .[:2]
+              | map("#\(.number) " + (.title | gsub("[\\t\\n\\r]"; " ")))
+              | join(", ")
+            ')
+        [ -z "$top" ] && top="—"
+        printf '%s\t%s\t%s\n' "$rel" "$count" "$top" \
+          > "$tmpdir/$(echo "$rel" | tr '/' '_')"
+      ) &
+    done <<< "$repos"
+    wait
+  )
 
   local out
   out=$(cat "$tmpdir"/* 2>/dev/null | sort -t$'\t' -k2,2nr -k1,1)
@@ -2166,47 +2168,46 @@ _clrepo_focus_list() {
   [ -n "$pairs" ] && IFS=$'\t' read -r first_rel first_owner \
     <<< "$(printf '%s\n' "$pairs" | head -1)"
 
-  local i=0
-  if [ -n "$pairs" ]; then
-    while IFS=$'\t' read -r rel owner; do
-      [ -z "$owner" ] && continue
-      i=$((i + 1))
-      (
-        cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 0
-        command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-        gh repo list "$owner" --topic focus --json nameWithOwner,url --limit 50 2>/dev/null \
-          | jq -r '.[] | "GH\t\(.nameWithOwner)\t\(.url)"' \
-          > "$tmpdir/$i"
-      ) &
-    done <<< "$pairs"
-  fi
-
   local fj_rel
   fj_rel=$(_clrepo_targets | awk -F'\t' '$2=="forgejo" { print $1; exit }')
-  if [ -n "$fj_rel" ]; then
-    i=$((i + 1))
-    local fj_file="$tmpdir/$i"
-    (
-      cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
-      command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-      if [ -z "${FORGEJO_TOKEN:-}" ]; then
-        printf 'Forgejo: skipped (no FORGEJO_TOKEN)\n' > "$tmpdir/warn_fj"
-        exit 0
-      fi
-      local result
-      result=$(curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
-        "https://git.home.freaxnx01.ch/api/v1/repos/search?topic=true&q=focus&limit=50" \
-        2>/dev/null) || {
-          printf 'Forgejo: skipped (curl error)\n' > "$tmpdir/warn_fj"
+  (
+    i=0
+    if [ -n "$pairs" ]; then
+      while IFS=$'\t' read -r rel owner; do
+        [ -z "$owner" ] && continue
+        i=$((i + 1))
+        (
+          cd "$(_clrepo_base_for_rel "$rel")/$rel" 2>/dev/null || exit 0
+          command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+          gh repo list "$owner" --topic focus --json nameWithOwner,url --limit 50 2>/dev/null \
+            | jq -r '.[] | "GH\t\(.nameWithOwner)\t\(.url)"' \
+            > "$tmpdir/$i"
+        ) &
+      done <<< "$pairs"
+    fi
+    if [ -n "$fj_rel" ]; then
+      i=$((i + 1))
+      (
+        cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
+        command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+        if [ -z "${FORGEJO_TOKEN:-}" ]; then
+          printf 'Forgejo: skipped (no FORGEJO_TOKEN)\n' > "$tmpdir/warn_fj"
           exit 0
-        }
-      printf '%s\n' "$result" \
-        | jq -r '.data[] | "FJ\t\(.full_name)\t\(.html_url)"' \
-        > "$fj_file"
-    ) &
-  fi
-
-  wait
+        fi
+        local result
+        result=$(curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
+          "https://git.home.freaxnx01.ch/api/v1/repos/search?topic=true&q=focus&limit=50" \
+          2>/dev/null) || {
+            printf 'Forgejo: skipped (curl error)\n' > "$tmpdir/warn_fj"
+            exit 0
+          }
+        printf '%s\n' "$result" \
+          | jq -r '.data[] | "FJ\t\(.full_name)\t\(.html_url)"' \
+          > "$tmpdir/$i"
+      ) &
+    fi
+    wait
+  )
 
   local repos
   repos=$(cat "$tmpdir"/[0-9]* 2>/dev/null | grep -v '^[[:space:]]*$' | sort -u)
@@ -2241,46 +2242,48 @@ _clrepo_focus_list() {
   fi
 
   # --- Phase 3: per-repo issue counts (parallel) ---
-  local count_idx=0
-  while IFS=$'\t' read -r platform nwo url; do
-    [ -z "$platform" ] && continue
-    count_idx=$((count_idx + 1))
-    (
-      case "$platform" in
-        GH)
-          if [ -n "$first_rel" ]; then
-            cd "$(_clrepo_base_for_rel "$first_rel")/$first_rel" 2>/dev/null || exit 0
-            command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-          fi
-          local r
-          r=$(gh issue list --repo "$nwo" --state open \
-            --json number,assignees --limit 100 2>/dev/null) \
-            || { printf '%s\n' "-1 -1"; exit 0; }
-          printf '%s\n' "$r" | jq -r --arg me "$gh_user" '
-            (length | tostring) + " " +
-            ([.[] | select(any(.assignees[]; .login == $me))] | length | tostring)
-          ' 2>/dev/null || printf '%s\n' "-1 -1"
-          ;;
-        FJ)
-          if [ -n "$fj_rel" ]; then
-            cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
-            command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-          fi
-          [ -z "${FORGEJO_TOKEN:-}" ] && { printf '%s\n' "-1 -1"; exit 0; }
-          local name="${nwo#*/}"
-          local r
-          r=$(curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
-            "https://git.home.freaxnx01.ch/api/v1/repos/freax/$name/issues?state=open&type=issues&limit=50" \
-            2>/dev/null) || { printf '%s\n' "-1 -1"; exit 0; }
-          printf '%s\n' "$r" | jq -r --arg me "$fj_user" '
-            (length | tostring) + " " +
-            ([.[] | select(.assignee.login == $me)] | length | tostring)
-          ' 2>/dev/null || printf '%s\n' "-1 -1"
-          ;;
-      esac
-    ) > "$tmpdir/count_$count_idx" &
-  done <<< "$repos"
-  wait
+  (
+    local count_idx=0
+    while IFS=$'\t' read -r platform nwo url; do
+      [ -z "$platform" ] && continue
+      count_idx=$((count_idx + 1))
+      (
+        case "$platform" in
+          GH)
+            if [ -n "$first_rel" ]; then
+              cd "$(_clrepo_base_for_rel "$first_rel")/$first_rel" 2>/dev/null || exit 0
+              command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+            fi
+            local r
+            r=$(gh issue list --repo "$nwo" --state open \
+              --json number,assignees --limit 100 2>/dev/null) \
+              || { printf '%s\n' "-1 -1"; exit 0; }
+            printf '%s\n' "$r" | jq -r --arg me "$gh_user" '
+              (length | tostring) + " " +
+              ([.[] | select(any(.assignees[]; .login == $me))] | length | tostring)
+            ' 2>/dev/null || printf '%s\n' "-1 -1"
+            ;;
+          FJ)
+            if [ -n "$fj_rel" ]; then
+              cd "$(_clrepo_base_for_rel "$fj_rel")/$fj_rel" 2>/dev/null || exit 0
+              command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
+            fi
+            [ -z "${FORGEJO_TOKEN:-}" ] && { printf '%s\n' "-1 -1"; exit 0; }
+            local name="${nwo#*/}"
+            local r
+            r=$(curl -sf -H "Authorization: token $FORGEJO_TOKEN" \
+              "https://git.home.freaxnx01.ch/api/v1/repos/freax/$name/issues?state=open&type=issues&limit=50" \
+              2>/dev/null) || { printf '%s\n' "-1 -1"; exit 0; }
+            printf '%s\n' "$r" | jq -r --arg me "$fj_user" '
+              (length | tostring) + " " +
+              ([.[] | select(.assignee.login == $me)] | length | tostring)
+            ' 2>/dev/null || printf '%s\n' "-1 -1"
+            ;;
+        esac
+      ) > "$tmpdir/count_$count_idx" &
+    done <<< "$repos"
+    wait
+  )
 
   # --- Phase 4: assemble cache JSON ---
   local json_repos=() count_idx=0

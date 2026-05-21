@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.1] - 2026-05-21
+
+### Fixed
+
+- `--dashboard` and `clrepo -f` no longer print `[N] Done ...` job-completion lines in interactive shells. Background fan-out jobs were started directly from the interactive shell function; bash job control reported each one on completion. Fix: wrap each fan-out loop + `wait` in a non-interactive subshell so the outer shell never directly tracks the inner jobs. Affects `_clrepo_dashboard` and both parallel phases of `_clrepo_focus_list`.
+
 ## [1.41.0] - 2026-05-20
 
 ### Added
