@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.2"
+_CLREPO_VERSION="1.41.3"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -3215,10 +3215,6 @@ EOF
     [ "$mode_delete" = 1 ]            && bad="${bad:+$bad, }-D/--delete"
     [ -n "$worktree" ]                && bad="${bad:+$bad, }-w/--worktree"
     [ -n "$editor" ]                  && bad="${bad:+$bad, }-c/-p/-o/--cd"
-    [ "$_CLREPO_NO_CHANNEL" = 1 ]     && bad="${bad:+$bad, }--no-channel"
-    [ "$_CLREPO_NO_SYNC" = 1 ]        && bad="${bad:+$bad, }--no-sync"
-    [ -n "$_CLREPO_FORCED_SLOT" ]     && bad="${bad:+$bad, }--slot"
-    [ "$remote_control" != 1 ]        && bad="${bad:+$bad, }--no-rc"
     [ "$mode_pick" = 1 ]              && bad="${bad:+$bad, }--pick/--connect"
     [ "$mode_focus" = 1 ]             && bad="${bad:+$bad, }-f/--focus-list"
     if [ -n "$bad" ]; then
