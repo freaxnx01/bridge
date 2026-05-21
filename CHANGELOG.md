@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.5] - 2026-05-21
+
+### Fixed
+
+- `--attach` now finds `no-channel` (and `--code`/`--opencode`) sessions, not only slot-backed ones. Previously it only read `slots.json`; it now also enumerates every tmux session tagged with `@clrepo-repo` (the same source `--status` uses), deduplicating against slot rows. The fzf picker shows `LABEL / REPO / KIND / AGE` so sessions are clearly distinguishable.
+
 ## [1.41.4] - 2026-05-21
 
 ### Changed

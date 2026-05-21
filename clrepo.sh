@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.4"
+_CLREPO_VERSION="1.41.5"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -2336,31 +2336,58 @@ _clrepo_attach_pick() {
   _clrepo_slots_init
   _clrepo_reconcile_slots
 
-  # Emit one TSV row per live, tmux-backed slot:
-  #   <slot>\t<repo>\t<worktree-or-empty>\t<age>\t<session>
+  # Same tmux-tagged enumeration as _clrepo_slot_status.
+  local tmux_rows
+  tmux_rows=$(tmux list-sessions -F \
+    '#{session_name}	#{session_created}	#{@clrepo-repo}	#{@clrepo-worktree}	#{@clrepo-kind}	#{@clrepo-slot}	#{@clrepo-pid}' \
+    2>/dev/null)
+
+  # Emit one TSV row per live, attachable session (slot or tmux-tagged):
+  #   <label>\t<repo_disp>\t<kind>\t<age>\t<session>
   local rows
   rows=$(python3 -c "
 import json, time
+
 with open('$_CLREPO_SLOTS_FILE') as f: d = json.load(f)
 slots = d.get('slots', {})
+tmux_rows_raw = '''$tmux_rows'''
 now = int(time.time())
+
+def fmt_age(sa):
+    if not sa: return '—'
+    age = now - int(sa)
+    h, m = divmod(age // 60, 60)
+    return f'{h}h{m:02d}m'
+
 out = []
+slot_sessions = set()
+
 for k in sorted(slots.keys(), key=lambda s: int(s) if s.isdigit() else 999):
     v = slots.get(k)
     if not v: continue
     sess = v.get('session') or ''
-    if not sess: continue  # foreground-mode: not attachable
+    if not sess: continue
+    slot_sessions.add(sess)
     repo = v.get('repo', '')
     wt = v.get('worktree') or ''
-    sa = v.get('started_at', 0)
-    age = now - sa if sa else 0
-    h, m = divmod(age // 60, 60)
-    age_s = f'{h}h{m:02d}m' if sa else '—'
-    out.append('\t'.join([k, repo, wt, age_s, sess]))
+    repo_disp = f'{repo} [{wt}]' if wt else repo
+    out.append('\t'.join([f's{k}', repo_disp, 'slot', fmt_age(v.get('started_at', 0)), sess]))
+
+for line in tmux_rows_raw.strip().split('\n'):
+    if not line: continue
+    parts = line.split('\t')
+    if len(parts) < 7: continue
+    name, created, repo, wt, kind, slot, pid = parts[:7]
+    if not repo: continue
+    if name in slot_sessions: continue
+    repo_disp = f'{repo} [{wt}]' if wt else repo
+    try: created_i = int(created)
+    except ValueError: created_i = 0
+    out.append('\t'.join(['—', repo_disp, kind or '—', fmt_age(created_i), name]))
+
 print('\n'.join(out))
 " 2>/dev/null)
 
-  # Strip a trailing-only newline from python's print so wc -l on empty is 0.
   local count=0
   [ -n "$rows" ] && count=$(printf '%s\n' "$rows" | grep -c .)
 
@@ -2371,16 +2398,13 @@ print('\n'.join(out))
 
   local session
   if [ "$count" = 1 ]; then
-    # Single live session: auto-attach, no picker.
     session=$(printf '%s' "$rows" | awk -F'\t' '{print $5; exit}')
   else
-    # 2+ live: fzf picker. Display column is human-formatted; the exact
-    # session name rides along as a trailing tab-separated field for
-    # unambiguous extraction (same trick as the meta-search picker).
     local out
     out=$(printf '%s\n' "$rows" \
-      | awk -F'\t' 'BEGIN{OFS=""} { wt = ($3=="" ? "—" : $3); \
-          printf "s%-3s %-30s %-10s %-12s\t%s\n", $1, $2, wt, $4, $5 }' \
+      | awk -F'\t' 'BEGIN{OFS=""} {
+            printf "%-5s %-32s %-12s %-8s\t%s\n", $1, $2, $3, $4, $5
+          }' \
       | fzf --height=40% --reverse --prompt='session> ' \
             -d $'\t' --with-nth=1) || return
     session=$(printf '%s' "$out" | awk -F'\t' '{print $2}')
