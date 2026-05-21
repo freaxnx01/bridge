@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.5"
+_CLREPO_VERSION="1.41.7"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1888,8 +1888,9 @@ _clrepo_issues() {
     {
       forge=$1; repo=$2; num="#"$3; title=$4; labels=$5; url=$6
       if (length(title) > 50) title = substr(title, 1, 47) "..."
-      printf "%-8s %-30s %-5s %-50s %s\n", forge, repo, num, title, labels
-      printf "         %s\n", url
+      pad = 5 - length(num); if (pad < 0) pad = 0
+      num_link = "\033]8;;" url "\033\\" num "\033]8;;\033\\" sprintf("%*s", pad, "")
+      printf "%-8s %-30s %s  %-50s %s\n", forge, repo, num_link, title, labels
       n++
     }
     END {
@@ -1920,7 +1921,7 @@ _clrepo_dashboard() {
       (
         cd "$_CLREPO_BASE/$rel" 2>/dev/null || exit 0
         command -v direnv >/dev/null && eval "$(direnv export bash 2>/dev/null)"
-        json=$(gh issue list --state open --json number,title --limit 50 2>/dev/null) || exit 0
+        json=$(gh issue list --state open --json number,title,url --limit 50 2>/dev/null) || exit 0
         IFS='/' read -ra p <<< "$rel"
         n=${#p[@]}
         case "${p[0]}" in
@@ -1937,7 +1938,7 @@ _clrepo_dashboard() {
         printf '%s\n' "$json" \
           | jq -r --arg plat "$plat" --arg vis "$vis" --arg name "$name" '
               sort_by(.number) | .[]
-              | [$plat, $vis, $name, (.number | tostring), (.title | gsub("[\\t\\n\\r]"; " "))]
+              | [$plat, $vis, $name, (.number | tostring), (.title | gsub("[\\t\\n\\r]"; " ")), .url]
               | @tsv
             ' 2>/dev/null \
           > "$tmpdir/$(printf '%s' "$rel" | tr '/' '_')"
@@ -1954,12 +1955,18 @@ _clrepo_dashboard() {
     return 1
   fi
 
-  printf '%s\n' "$out" | awk -F'\t' '
+  local _termw; _termw=$(tput cols 2>/dev/null || echo 120)
+  # fixed cols: 4+2+3+2+28+2+5+2 = 48; give the rest to TITLE (min 40)
+  local _titlew=$(( _termw - 48 )); (( _titlew < 40 )) && _titlew=40
+  printf '%s\n' "$out" | awk -F'\t' -v tw="$_titlew" '
     BEGIN { printf "%-4s  %-3s  %-28s  %-5s  %s\n", "PLAT", "VIS", "REPO", "#", "TITLE" }
     {
-      title = $5
-      if (length(title) > 60) title = substr(title, 1, 57) "..."
-      printf "%-4s  %-3s  %-28s  #%-4s  %s\n", $1, $2, $3, $4, title
+      title = $5; url = $6
+      if (length(title) > tw) title = substr(title, 1, tw - 3) "..."
+      num_text = "#" $4
+      pad = 5 - length(num_text); if (pad < 0) pad = 0
+      num_link = "\033]8;;" url "\033\\" num_text "\033]8;;\033\\" sprintf("%*s", pad, "")
+      printf "%-4s  %-3s  %-28s  %s  %s\n", $1, $2, $3, num_link, title
     }
   '
 }

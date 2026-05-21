@@ -5,6 +5,18 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.7] - 2026-05-21
+
+### Changed
+
+- `--dashboard` and `--issues` (`-i`): issue numbers (`#N`) are now OSC 8 terminal hyperlinks — clicking opens the issue URL directly in the browser. The raw URL second line previously printed below each `--issues` row is removed. Column alignment is preserved by padding the visible text manually (escape bytes are excluded from width calculation).
+
+## [1.41.6] - 2026-05-21
+
+### Changed
+
+- `--dashboard` TITLE column now uses the available terminal width instead of a hardcoded 60-character cap. Fixed columns consume 48 chars; the remainder (minimum 40) goes to TITLE. On a typical 220-column terminal the full title is shown untruncated.
+
 ## [1.41.5] - 2026-05-21
 
 ### Fixed
