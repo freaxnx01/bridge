@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.8"
+_CLREPO_VERSION="1.41.9"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -3495,6 +3495,27 @@ EOF
   _clrepo_launch "$sel" "$worktree" "$editor" "$remote_control"
 }
 
+# Cached basename list for tab completion. Walking every repo's full
+# directory tree on each keystroke took 1-2s end-to-end; the cache makes
+# completion instant. Every completion call kicks a background rebuild,
+# so the list converges within one tab press of any clone/delete — good
+# enough for a UI affordance, and we avoid wiring explicit invalidation
+# into every mutation site.
+_CLREPO_LOCAL_LIST_CACHE="$_CLREPO_CACHE/local-repos.list"
+_clrepo_local_list_build() {
+  mkdir -p "$_CLREPO_CACHE" 2>/dev/null
+  local tmp="$_CLREPO_LOCAL_LIST_CACHE.tmp.$$"
+  {
+    local _b
+    for _b in "${_CLREPO_BASES[@]}"; do
+      find "$_b" -type d -name '_archive' -prune -o \
+                 -type d -name '.git' -prune -printf '%h\n' 2>/dev/null
+    done
+  } | awk -F/ 'NF{print $NF}' | sort -u > "$tmp" 2>/dev/null \
+    && mv "$tmp" "$_CLREPO_LOCAL_LIST_CACHE" 2>/dev/null \
+    || rm -f "$tmp" 2>/dev/null
+}
+
 _clrepo() {
   local cur="${COMP_WORDS[COMP_CWORD]}"
   COMPREPLY=()
@@ -3516,11 +3537,15 @@ _clrepo() {
     COMPREPLY=($(compgen -W "$flags" -- "$cur"))
     return
   fi
-  local names name _b
-  names=""
-  for _b in "${_CLREPO_BASES[@]}"; do
-    names+=$(find "$_b" -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | xargs -n1 basename)$'\n'
-  done
+  local names name
+  if [ -s "$_CLREPO_LOCAL_LIST_CACHE" ]; then
+    names=$(cat "$_CLREPO_LOCAL_LIST_CACHE" 2>/dev/null)
+  else
+    _clrepo_local_list_build
+    names=$(cat "$_CLREPO_LOCAL_LIST_CACHE" 2>/dev/null)
+  fi
+  # Best-effort async rebuild so the cache converges after clone/delete.
+  ( _clrepo_local_list_build >/dev/null 2>&1 & ) 2>/dev/null
   shopt -s nocasematch
   while IFS= read -r name; do
     [[ "$name" == *"$cur"* ]] && COMPREPLY+=("$name")

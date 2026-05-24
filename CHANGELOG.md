@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.9] - 2026-05-24
+
+### Changed
+
+- Tab completion no longer rescans the full repo tree on every keystroke. Basenames are cached at `$_CLREPO_CACHE/local-repos.list` (built on first use, refreshed in the background after each completion). Previously each tab took 1-2s on a typical setup as `find` walked into every repo's working tree; now it's effectively instant. The cache converges within one tab press after any clone/delete, so no explicit invalidation is needed.
+
 ## [1.41.8] - 2026-05-24
 
 ### Fixed
