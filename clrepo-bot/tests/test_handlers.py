@@ -86,6 +86,49 @@ class StatusTests(unittest.TestCase):
         self.assertIn("status output", ctx.bot.sent[0]["text"])
 
 
+class KillTests(unittest.TestCase):
+    def test_kill_no_args_sends_usage(self):
+        ctx = make_ctx()
+        handlers.cmd_kill(ctx, chat_id=1, args="")
+        self.assertEqual(len(ctx.bot.sent), 1)
+        self.assertIn("Usage", ctx.bot.sent[0]["text"])
+
+    def test_kill_sends_confirmation_prompt(self):
+        ctx = make_ctx()
+        handlers.cmd_kill(ctx, chat_id=1, args="3")
+        self.assertEqual(len(ctx.bot.sent), 1)
+        msg = ctx.bot.sent[0]
+        self.assertIn("slot 3", msg["text"])
+        kb = msg["reply_markup"]["inline_keyboard"][0]
+        cb_data = {btn["callback_data"] for btn in kb}
+        self.assertIn("kill_confirm:3", cb_data)
+        self.assertIn("kill_cancel:3", cb_data)
+
+    def test_kill_confirm_callback_kills_and_edits(self):
+        kill_calls = []
+        ctx = make_ctx()
+        ctx.kill_session = lambda s: kill_calls.append(s) or True
+        handlers.on_callback(ctx, chat_id=1, callback_id="cb_kc", data="kill_confirm:5", message_id=999)
+        self.assertEqual(kill_calls, ["5"])
+        self.assertEqual(len(ctx.bot.edited), 1)
+        self.assertIn("slot 5", ctx.bot.edited[0]["text"])
+        self.assertIn("✅", ctx.bot.edited[0]["text"])
+        self.assertIsNone(ctx.bot.edited[0]["reply_markup"])
+
+    def test_kill_confirm_callback_failure(self):
+        ctx = make_ctx()
+        ctx.kill_session = lambda s: False
+        handlers.on_callback(ctx, chat_id=1, callback_id="cb_kf", data="kill_confirm:5", message_id=999)
+        self.assertIn("❌", ctx.bot.edited[0]["text"])
+
+    def test_kill_cancel_callback_edits_cancelled(self):
+        ctx = make_ctx()
+        handlers.on_callback(ctx, chat_id=1, callback_id="cb_cancel", data="kill_cancel:5", message_id=999)
+        self.assertEqual(len(ctx.bot.edited), 1)
+        self.assertIn("Cancelled", ctx.bot.edited[0]["text"])
+        self.assertIsNone(ctx.bot.edited[0]["reply_markup"])
+
+
 class CallbackTests(unittest.TestCase):
     def test_nav_next_advances_page(self):
         ctx = make_ctx(items=[str(i) for i in range(25)])

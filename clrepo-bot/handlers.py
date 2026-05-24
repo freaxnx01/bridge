@@ -112,8 +112,14 @@ def cmd_kill(ctx: Context, chat_id: int, args: str) -> None:
         ctx.bot.send_message(chat_id, "Usage: /kill <slot>")
         return
     slot = parts[0]
-    ok = ctx.kill_session(slot)
-    ctx.bot.send_message(chat_id, f"{'✅' if ok else '❌'} kill slot {slot}: {'done' if ok else 'failed'}")
+    ctx.bot.send_message(
+        chat_id,
+        f"Kill slot {slot}? This will terminate the Claude session.",
+        reply_markup={"inline_keyboard": [[
+            {"text": "✅ Confirm", "callback_data": f"kill_confirm:{slot}"},
+            {"text": "✖ Cancel", "callback_data": f"kill_cancel:{slot}"},
+        ]]},
+    )
 
 
 def cmd_cancel(ctx: Context, chat_id: int) -> None:
@@ -138,6 +144,21 @@ def on_text_message(ctx: Context, chat_id: int, text: str) -> None:
 
 
 def on_callback(ctx: Context, chat_id: int, callback_id: str, data: str, message_id: int) -> None:
+    if data.startswith("kill_confirm:"):
+        slot = data.split(":", 1)[1]
+        ok = ctx.kill_session(slot)
+        ctx.bot.answer_callback_query(callback_id)
+        ctx.bot.edit_message_text(
+            chat_id, message_id,
+            f"{'✅' if ok else '❌'} kill slot {slot}: {'done' if ok else 'failed'}",
+            reply_markup=None,
+        )
+        return
+    elif data.startswith("kill_cancel:"):
+        ctx.bot.answer_callback_query(callback_id, "Cancelled")
+        ctx.bot.edit_message_text(chat_id, message_id, "Cancelled.", reply_markup=None)
+        return
+
     state = ctx.pickers.get(chat_id)
     if not state or state.message_id != message_id:
         ctx.bot.answer_callback_query(callback_id, "Picker expired — /new to restart")

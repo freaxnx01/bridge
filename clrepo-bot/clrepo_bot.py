@@ -146,6 +146,8 @@ def _handle_update(ctx: handlers.Context, cfg: dict, rl: auth.RateLimiter, upd: 
             return
         msg = cq.get("message") or {}
         chat_id = msg.get("chat", {}).get("id")
+        if msg.get("chat", {}).get("type") != "private":
+            return
         _log_event(evt="callback", user=user, data=cq.get("data"))
         handlers.on_callback(
             ctx, chat_id=chat_id, callback_id=cq["id"],
