@@ -46,12 +46,11 @@ def find_new_slot(path: str, before_keys: set[str], repo: str) -> dict | None:
     return None
 
 
-def spawn_clrepo(name: str, extra_args: str = "") -> str:
-    """Launch `clrepo <name> <extra_args>` in detached tmux. Return wrapper session name."""
+def spawn_clrepo(name: str, extra_args: list[str] | None = None) -> str:
+    """Launch `clrepo <name> [extra_args...]` in detached tmux. Return wrapper session name."""
     wrapper = f"clrepo-spawn-{secrets.token_hex(3)}"
-    cmdline = f"clrepo {shlex.quote(name)}"
-    if extra_args:
-        cmdline += " " + extra_args
+    parts = [shlex.quote(name)] + [shlex.quote(a) for a in (extra_args or [])]
+    cmdline = "clrepo " + " ".join(parts)
     LOG.info("spawn: tmux session=%s cmd=%s", wrapper, cmdline)
     subprocess.run(
         ["tmux", "new-session", "-d", "-s", wrapper, "bash", "-lc", cmdline],

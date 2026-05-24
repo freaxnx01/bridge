@@ -19,7 +19,7 @@ class Context:
     local_provider: Callable[[], list[str]]
     remote_provider: Callable[[], list[str]]
     mru_provider: Callable[[], list[str]]
-    spawner: Callable[[str, str], dict | None]  # (name, extra_args) -> {slot, session} or None
+    spawner: Callable[[str, list[str] | None], dict | None]  # (name, extra_args) -> {slot, session} or None
     kill_session: Callable[[str], bool]
     status_provider: Callable[[], str]
 
@@ -73,12 +73,12 @@ def cmd_new(ctx: Context, chat_id: int, args: str) -> None:
     parts = shlex.split(args) if args else []
     if parts:
         name_or_query = parts[0]
-        extra_args = " ".join(shlex.quote(p) for p in parts[1:])
+        extra_args_list = parts[1:]
         # Exact-basename single match → direct spawn.
         all_items, _ = _items(ctx, include_remote=False, query="")
         exact = [i for i in all_items if _basename(i).lower() == name_or_query.lower()]
         if len(exact) == 1:
-            result = ctx.spawner(_basename(exact[0]), extra_args)
+            result = ctx.spawner(_basename(exact[0]), extra_args_list or None)
             if result:
                 ctx.bot.send_message(
                     chat_id,
@@ -151,12 +151,12 @@ def on_callback(ctx: Context, chat_id: int, callback_id: str, data: str, message
         ctx.bot.edit_message_text(
             chat_id, message_id,
             f"{'✅' if ok else '❌'} kill slot {slot}: {'done' if ok else 'failed'}",
-            reply_markup=None,
+            reply_markup={"inline_keyboard": []},
         )
         return
     elif data.startswith("kill_cancel:"):
         ctx.bot.answer_callback_query(callback_id, "Cancelled")
-        ctx.bot.edit_message_text(chat_id, message_id, "Cancelled.", reply_markup=None)
+        ctx.bot.edit_message_text(chat_id, message_id, "Cancelled.", reply_markup={"inline_keyboard": []})
         return
 
     state = ctx.pickers.get(chat_id)
@@ -184,27 +184,31 @@ def on_callback(ctx: Context, chat_id: int, callback_id: str, data: str, message
         state.awaiting_query = True
         ctx.bot.edit_message_text(chat_id, state.message_id,
                                   "Reply with a search query to filter:",
-                                  reply_markup=None)
+                                  reply_markup={"inline_keyboard": []})
         ctx.bot.answer_callback_query(callback_id)
     elif data == "cancel":
         del ctx.pickers[chat_id]
-        ctx.bot.edit_message_text(chat_id, state.message_id, "Cancelled.", reply_markup=None)
+        ctx.bot.edit_message_text(chat_id, state.message_id, "Cancelled.", reply_markup={"inline_keyboard": []})
         ctx.bot.answer_callback_query(callback_id, "Cancelled")
     elif data.startswith("pick:"):
-        idx = int(data.split(":", 1)[1])
+        try:
+            idx = int(data.split(":", 1)[1])
+        except (ValueError, IndexError):
+            ctx.bot.answer_callback_query(callback_id, "Bad payload")
+            return
         if idx >= len(state.items):
             ctx.bot.answer_callback_query(callback_id, "Out of range")
             return
         target = state.items[idx]
         name = _basename(target)
         ctx.bot.answer_callback_query(callback_id, f"Launching {name}…")
-        result = ctx.spawner(name, "")
+        result = ctx.spawner(name, [])
         if result:
             text = (f"✅ Launched: {target} → slot {result['slot']} "
                     f"(tmux: {result['session']})")
         else:
             text = "⏳ Spawn dispatched. Check /status in a few seconds."
-        ctx.bot.edit_message_text(chat_id, state.message_id, text, reply_markup=None)
+        ctx.bot.edit_message_text(chat_id, state.message_id, text, reply_markup={"inline_keyboard": []})
         del ctx.pickers[chat_id]
     else:
         ctx.bot.answer_callback_query(callback_id, "Unknown action")

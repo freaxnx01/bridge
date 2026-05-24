@@ -2,6 +2,7 @@
 
 import json
 import logging
+import subprocess
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -72,7 +73,6 @@ class Bot:
 
 def fetch_token_from_passbolt(resource_id: str) -> str:
     """Shell out to `passbolt get resource --id <id>`, parse Password line."""
-    import subprocess
     out = subprocess.check_output(
         ["passbolt", "get", "resource", "--id", resource_id],
         text=True,

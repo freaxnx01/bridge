@@ -4,9 +4,11 @@
 import json
 import logging
 import os
+import shlex
 import signal
 import subprocess
 import sys
+import threading
 import time
 from pathlib import Path
 
@@ -55,13 +57,14 @@ def _status() -> str:
         )
         return (out.stdout + out.stderr).strip() or "(empty)"
     except subprocess.SubprocessError as e:
+        LOG.warning("clrepo --status failed: %s", e)
         return f"(error: {e})"
 
 
-def _spawn_and_confirm(name: str, extra: str) -> dict | None:
+def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
     before = set(spawn.read_slots())
     try:
-        spawn.spawn_clrepo(name, extra)
+        spawn.spawn_clrepo(name, extra or None)
     except (FileNotFoundError, subprocess.CalledProcessError) as e:
         _log_event(evt="spawn", repo=name, ok=False, error=str(e))
         return None
@@ -74,7 +77,7 @@ def _spawn_and_confirm(name: str, extra: str) -> dict | None:
 def build_context(bot: tg.Bot) -> handlers.Context:
     return handlers.Context(
         bot=bot,
-        pickers={},
+        pickers={},  # in-memory only; abandoned pickers are never pruned (single-user bot)
         local_provider=lambda: repos.list_local(),
         remote_provider=lambda: repos.list_remote(),
         mru_provider=lambda: repos.read_mru(),
@@ -85,16 +88,21 @@ def build_context(bot: tg.Bot) -> handlers.Context:
 
 
 def _refresh_remote_if_stale() -> None:
-    """If remote.list is missing or > 10min old, warm it."""
+    """Refresh remote.list cache in a background thread if stale (missing or > 10min old)."""
     p = repos.REMOTE_LIST_PATH
     needs = (not os.path.exists(p)) or (time.time() - os.path.getmtime(p) > 600)
     if not needs:
         return
-    try:
-        subprocess.run(["bash", "-lc", "clrepo --refresh >/dev/null 2>&1"],
-                       timeout=30, env=spawn.clean_env())
-    except subprocess.SubprocessError:
-        pass
+
+    def _refresh():
+        try:
+            subprocess.run(["bash", "-lc", "clrepo --refresh >/dev/null 2>&1"],
+                           timeout=30, env=spawn.clean_env())
+        except subprocess.SubprocessError:
+            pass
+
+    t = threading.Thread(target=_refresh, daemon=True)
+    t.start()
 
 
 def _handle_message(ctx: handlers.Context, msg: dict) -> None:

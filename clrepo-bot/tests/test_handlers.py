@@ -75,7 +75,7 @@ class NewCommandTests(unittest.TestCase):
         ctx.spawner = lambda name, extra: (spawn_calls.append((name, extra)) or {"slot": "1", "session": name})
         handlers.cmd_new(ctx, chat_id=1, args="clrepo")
         # When the basename matches exactly one item, spawn directly:
-        self.assertEqual(spawn_calls, [("clrepo", "")])
+        self.assertEqual(spawn_calls, [("clrepo", None)])
         self.assertTrue(any("Launched" in s["text"] for s in ctx.bot.sent))
 
 
@@ -113,7 +113,7 @@ class KillTests(unittest.TestCase):
         self.assertEqual(len(ctx.bot.edited), 1)
         self.assertIn("slot 5", ctx.bot.edited[0]["text"])
         self.assertIn("✅", ctx.bot.edited[0]["text"])
-        self.assertIsNone(ctx.bot.edited[0]["reply_markup"])
+        self.assertEqual(ctx.bot.edited[0]["reply_markup"], {"inline_keyboard": []})
 
     def test_kill_confirm_callback_failure(self):
         ctx = make_ctx()
@@ -126,7 +126,7 @@ class KillTests(unittest.TestCase):
         handlers.on_callback(ctx, chat_id=1, callback_id="cb_cancel", data="kill_cancel:5", message_id=999)
         self.assertEqual(len(ctx.bot.edited), 1)
         self.assertIn("Cancelled", ctx.bot.edited[0]["text"])
-        self.assertIsNone(ctx.bot.edited[0]["reply_markup"])
+        self.assertEqual(ctx.bot.edited[0]["reply_markup"], {"inline_keyboard": []})
 
 
 class CallbackTests(unittest.TestCase):

@@ -22,8 +22,10 @@ def list_local(root: str = DEFAULT_ROOT) -> list[str]:
 
 def order_by_mru(items: list[str], mru: list[str]) -> list[str]:
     """Sort items: MRU order first (for items present in mru), then the rest in original order."""
-    mru_set = [m for m in mru if m in items]
-    leftover = [i for i in items if i not in mru_set]
+    items_set = set(items)
+    mru_set = [m for m in mru if m in items_set]
+    mru_present = set(mru_set)
+    leftover = [i for i in items if i not in mru_present]
     return mru_set + leftover
 
 
