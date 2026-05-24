@@ -126,4 +126,58 @@ print(" ".join(sorted(d, key=lambda x: int(x) if x.isdigit() else 10**9)))
 
 echo
 echo "✓ slot-tokens.json: ${slot_list:-(empty)}"
+
+# --- 3. clrepo-bot (standalone Telegram wrapper for spawning sessions) ---
+echo
+echo "clrepo-bot — standalone Telegram bot for spawning new sessions."
+echo "  Needs its own BotFather bot + Passbolt resource for the token."
+echo "  Press Enter to skip if you don't want to set this up now."
+
+CLREPO_BOT_CFG="$CACHE/clrepo-bot.json"
+bot_json=$(json_read "$CLREPO_BOT_CFG")
+cur_bot_pb=$(printf '%s' "$bot_json" | json_get passbolt_resource_id)
+cur_bot_owner=$(printf '%s' "$bot_json" | json_get telegram_owner_id)
+[ -z "$cur_bot_owner" ] && cur_bot_owner="${new_owner:-$cur_owner}"
+
+new_bot_pb=$(prompt_default "  Passbolt resource id for bot token" "$cur_bot_pb")
+if [ -z "$new_bot_pb" ]; then
+  echo "  (skipped — clrepo-bot not configured)"
+else
+  if [ "$new_bot_pb" = "$cur_bot_pb" ] || validate_passbolt "$new_bot_pb"; then
+    new_bot_owner=$(prompt_default "  Telegram owner user_id (allowlist)" "$cur_bot_owner")
+    python3 - "$CLREPO_BOT_CFG" "$new_bot_pb" "$new_bot_owner" <<'PY'
+import json, os, sys
+path, pb, owner = sys.argv[1], sys.argv[2], int(sys.argv[3])
+d = json.load(open(path)) if os.path.exists(path) else {}
+d["passbolt_resource_id"] = pb
+d["telegram_owner_id"] = owner
+d.setdefault("allowlist", [])
+if owner not in d["allowlist"]:
+    d["allowlist"].append(owner)
+d.setdefault("last_update_id", 0)
+json.dump(d, open(path + ".tmp", "w"), indent=2, sort_keys=True)
+os.replace(path + ".tmp", path)
+PY
+    echo "  ✓ clrepo-bot.json written"
+
+    UNIT_SRC="$(dirname "$0")/clrepo-bot/systemd/clrepo-bot.service"
+    UNIT_DST="$HOME/.config/systemd/user/clrepo-bot.service"
+    if [ -f "$UNIT_SRC" ]; then
+      read -r -p "  Install + enable systemd --user unit now? [Y/n]: " ans
+      case "${ans:-y}" in
+        [Yy]*)
+          mkdir -p "$(dirname "$UNIT_DST")"
+          cp "$UNIT_SRC" "$UNIT_DST"
+          systemctl --user daemon-reload
+          systemctl --user enable --now clrepo-bot.service
+          echo "  ✓ clrepo-bot.service enabled"
+          ;;
+        *) echo "  (skipped systemd install — run later: systemctl --user enable --now clrepo-bot.service)" ;;
+      esac
+    fi
+  else
+    echo "  ✗ Passbolt id did not resolve — clrepo-bot config unchanged" >&2
+  fi
+fi
+
 echo "Done. Run 'clrepo --status' to confirm."
