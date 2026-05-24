@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.9"
+_CLREPO_VERSION="1.41.10"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1465,7 +1465,9 @@ with open(f, 'w') as fh: json.dump(d, fh, indent=2)
 # Output: one table + optional "Remote Control URLs:" footer for rows
 # with an active bridgeSessionId. RC lookup mirrors the old --status-rc
 # logic: slot rows read ~/.claude-s<N>/sessions/<pid>.json; synthetic
-# no-channel rows read ~/.claude/sessions/<pid>.json. Other kinds get —.
+# rows try ~/.claude first, then fall back to scanning every ~/.claude-s*
+# (stray sessions launched outside the clrepo launcher land under a
+# slot-specific home directory inherited from the parent shell).
 _clrepo_slot_status() {
   _clrepo_slots_init
   _clrepo_reconcile_slots
@@ -1477,12 +1479,21 @@ _clrepo_slot_status() {
     '#{session_name}	#{session_created}	#{@clrepo-repo}	#{@clrepo-worktree}	#{@clrepo-kind}	#{@clrepo-slot}	#{@clrepo-pid}' \
     2>/dev/null)
 
+  # Also enumerate panes so we can surface untagged tmux sessions whose
+  # pane is running `claude` (started outside the clrepo launcher).
+  # Format: session_name, pane_pid, pane_current_command, pane_current_path.
+  local tmux_panes
+  tmux_panes=$(tmux list-panes -a -F \
+    '#{session_name}	#{pane_pid}	#{pane_current_command}	#{pane_current_path}' \
+    2>/dev/null)
+
   python3 -c "
-import json, os, time
+import glob, json, os, time
 
 slots_file = '$_CLREPO_SLOTS_FILE'
 MAX = $_CLREPO_MAX_SLOTS
 tmux_rows_raw = '''$tmux_rows'''
+tmux_panes_raw = '''$tmux_panes'''
 
 with open(slots_file) as f: d = json.load(f)
 slots = d.get('slots', {})
@@ -1500,6 +1511,17 @@ def bridge_for(cfg_dir, pid):
         return sd.get('bridgeSessionId') or ''
     except Exception:
         return ''
+
+def bridge_for_any(pid):
+    # Try ~/.claude first, then every ~/.claude-s*. Used for non-slot rows
+    # whose owning slot dir isn't recoverable from tmux state.
+    if not pid: return ''
+    b = bridge_for('~/.claude', pid)
+    if b: return b
+    for cfg in sorted(glob.glob(os.path.expanduser('~/.claude-s*'))):
+        b = bridge_for(cfg, pid)
+        if b: return b
+    return ''
 
 def fmt_age(sa):
     if not sa: return '—'
@@ -1544,16 +1566,18 @@ for n in sorted(slot_keys, key=int):
 
 # --- Source 2: tmux-tagged rows (synthetic, non-slot) ---
 synth = []
+tagged_sessions = set()
 for line in tmux_rows_raw.strip().split('\n'):
     if not line: continue
     parts = line.split('\t')
     if len(parts) < 7: continue
     name, created, repo, wt, kind, slot, pid = parts[:7]
-    if not repo: continue                  # untagged tmux session, skip
+    if not repo: continue                  # untagged — handled in Source 3
+    tagged_sessions.add(name)
     if name in slot_sessions: continue      # dedup: slot row already has it
     repo_disp = f'{repo} [{wt}]' if wt else repo
-    if kind == 'no-channel':
-        bridge = bridge_for('~/.claude', pid)
+    if kind in ('no-channel', 'unmanaged'):
+        bridge = bridge_for_any(pid)
     else:
         bridge = ''  # code/opencode have no Claude session file
     try: created_i = int(created)
@@ -1567,6 +1591,44 @@ for line in tmux_rows_raw.strip().split('\n'):
         'tmux':    name,
         'bot':     '—',
         'bridge':  bridge,
+        'label':   repo_disp,
+        'created': created_i,
+    })
+
+# --- Source 3: untagged tmux sessions running a claude pane ---
+# These are claude processes started outside the clrepo launcher (e.g.
+# bare `tmux new -s foo 'claude ...'`). Surface them as kind=unmanaged
+# so they're discoverable in --status / --attach.
+session_created = {}
+for line in tmux_rows_raw.strip().split('\n'):
+    if not line: continue
+    parts = line.split('\t')
+    if len(parts) < 2: continue
+    try: session_created[parts[0]] = int(parts[1])
+    except ValueError: pass
+
+seen_unmanaged = set()
+for line in tmux_panes_raw.strip().split('\n'):
+    if not line: continue
+    parts = line.split('\t')
+    if len(parts) < 4: continue
+    sess_name, pane_pid, pane_cmd, pane_path = parts[:4]
+    if sess_name in tagged_sessions: continue
+    if sess_name in slot_sessions:   continue
+    if sess_name in seen_unmanaged:  continue
+    if pane_cmd != 'claude':         continue
+    seen_unmanaged.add(sess_name)
+    repo_disp = os.path.basename(pane_path) or sess_name
+    created_i = session_created.get(sess_name, 0)
+    synth.append({
+        'slot':    '—',
+        'kind':    'unmanaged',
+        'repo':    repo_disp,
+        'started': fmt_age(created_i),
+        'pid':     pane_pid or '—',
+        'tmux':    sess_name,
+        'bot':     '—',
+        'bridge':  bridge_for_any(pane_pid),
         'label':   repo_disp,
         'created': created_i,
     })

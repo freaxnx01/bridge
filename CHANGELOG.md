@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.10] - 2026-05-24
+
+### Fixed
+
+- `--status` now surfaces Claude sessions started outside the `clrepo` launcher (#31). Two changes to `_clrepo_slot_status`: (1) untagged tmux sessions whose pane command is `claude` are listed as `kind=unmanaged` instead of being silently dropped, using the pane's `current_path` basename as the repo label; (2) bridge lookup for non-slot rows now tries `~/.claude` first and then falls back to scanning every `~/.claude-s*/sessions/<pid>.json`, so RC URLs resolve even when a stray session was launched from a slot-specific home directory. Previously such sessions were invisible in `--status` and never produced a Remote Control URL.
+
 ## [1.41.9] - 2026-05-24
 
 ### Changed
