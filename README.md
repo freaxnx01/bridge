@@ -184,6 +184,17 @@ The split is intentional: runtime state churns every launch and is safe to delet
 
 When `slot-tokens.json` is absent, clrepo prints a one-time discoverability hint (gated by a `.channels-hinted` sentinel) pointing at the setup script, then stays silent for the host's lifetime.
 
+## clrepo-bot — Telegram wrapper for spawning
+
+`clrepo-bot/` ships a standalone Telegram bot that wraps `clrepo` on the host.
+DM it `/new` to get a paginated picker of local (and optionally remote) repos;
+tap a row to launch a fresh Claude session in detached tmux. Independent of
+bot0/admin and the per-slot Telegram bots; no Claude in the command loop.
+
+Setup is part of `setup-claude-channels.sh`. See
+[`clrepo-bot/README.md`](clrepo-bot/README.md) and the design at
+[`docs/specs/2026-05-24-clrepo-telegram-bot-design.md`](docs/specs/2026-05-24-clrepo-telegram-bot-design.md).
+
 ## Presence-aware Telegram pages
 
 clrepo proactively pages each slot's Telegram bot when Claude is paused or
