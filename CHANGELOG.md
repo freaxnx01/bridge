@@ -5,6 +5,12 @@ All notable changes to clrepo are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.8] - 2026-05-24
+
+### Fixed
+
+- Tab completion no longer dilutes a clean basename match with description-only metadata hits. E.g. `clrepo pipe<tab>` now completes to `claude-pipeline` instead of collapsing to the `claude-` common prefix shared with `claude-action-sandbox` (whose description mentions "claude-pipeline"). The meta-search fallback now only runs when basename matching produced nothing, mirroring the positional-arg path.
+
 ## [1.41.7] - 2026-05-21
 
 ### Changed

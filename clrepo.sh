@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _clrepo_launch
 # wholesale without touching the rest of this file.
 
-_CLREPO_VERSION="1.41.7"
+_CLREPO_VERSION="1.41.8"
 
 # Disable alias expansion while sourcing so an existing `alias clrepo='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -3531,9 +3531,12 @@ _clrepo() {
   done
   shopt -u nocasematch
 
-  # Keyword fallback: when cur is non-empty, also include basenames of repos
-  # whose cached topics/description match (mirrors positional-arg behavior).
-  if [ -n "$cur" ] && [ -f "$_CLREPO_CACHE/repo-meta.json" ]; then
+  # Keyword fallback: only when basename matching produced nothing. Mirrors
+  # the positional-arg path (basename first, meta on miss) and prevents a
+  # single clean basename hit from being diluted by description-only matches
+  # — which would otherwise collapse the completion to a useless common
+  # prefix (e.g. `pipe<tab>` → `claude-` instead of `claude-pipeline`).
+  if [ ${#COMPREPLY[@]} -eq 0 ] && [ -n "$cur" ] && [ -f "$_CLREPO_CACHE/repo-meta.json" ]; then
     local meta_names found c
     meta_names=$(_clrepo_meta_search "$cur" 2>/dev/null | awk -F'\t' '{print $2}' | awk -F/ '{print $NF}')
     while IFS= read -r name; do
