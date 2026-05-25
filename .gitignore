@@ -2,3 +2,5 @@
 .ralph/iter-*.json
 .claude/
 .nfs*
+/bridge-go
+/bridge-go.exe

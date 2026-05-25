@@ -1,4 +1,4 @@
-.PHONY: help test smoke lint test-deps all
+.PHONY: help test smoke lint test-deps all build-go test-go
 
 BATS ?= bats
 
@@ -32,3 +32,9 @@ test-deps:
 	@echo "  macOS:         brew install bats-core shellcheck"
 	@echo "  From source:   git clone https://github.com/bats-core/bats-core /opt/bats"
 	@echo "                 and add /opt/bats/bin to PATH"
+
+build-go:
+	go build -o bridge-go ./cmd/bridge
+
+test-go:
+	go test ./...

@@ -1,0 +1,24 @@
+name: go
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.22'
+      - name: build
+        run: go build ./...
+      - name: test
+        run: go test ./...
+      - name: cross-compile windows
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go build -o /tmp/bridge.exe ./cmd/bridge
