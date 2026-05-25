@@ -40,3 +40,6 @@ build-go:
 
 test-go:
 	go test ./...
+
+install-go: build-go
+	install -m 0755 bridge-go $(HOME)/.local/bin/bridge-go
