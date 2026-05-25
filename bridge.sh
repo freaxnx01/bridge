@@ -22,7 +22,7 @@
 # The slot/telegram wrapper (see external spec) can replace _bridge_launch
 # wholesale without touching the rest of this file.
 
-_BRIDGE_VERSION="1.41.10"
+_BRIDGE_VERSION="1.41.11"
 
 # Disable alias expansion while sourcing so an existing `alias bridge='...'`
 # (typical in interactive bashrc) doesn't get expanded inline at the
@@ -1597,7 +1597,10 @@ for line in tmux_rows_raw.strip().split('\n'):
 
 # --- Source 3: untagged tmux sessions running a claude pane ---
 # These are claude processes started outside the bridge launcher (e.g.
-# bare `tmux new -s foo 'claude ...'`). Surface them as kind=unmanaged
+# bare 'tmux new -s foo claude ...'). Surface them as kind=unmanaged
+# (backticks intentionally avoided — this comment lives inside a
+# double-quoted python3 -c heredoc, where bash would treat them as
+# command substitution and actually spawn the example.)
 # so they're discoverable in --status / --attach.
 session_created = {}
 for line in tmux_rows_raw.strip().split('\n'):

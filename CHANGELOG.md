@@ -5,6 +5,12 @@ All notable changes to bridge are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.41.11] - 2026-05-25
+
+### Fixed
+
+- `bridge --status` no longer spawns a stray `tmux new -s foo 'claude ...'` session before printing the slot table (#33). A comment inside `_bridge_slot_status`'s `python3 -c "..."` heredoc used backticks around an example command — `` `tmux new -s foo 'claude ...'` `` — and since the heredoc is double-quoted, bash treated those backticks as command substitution and actually executed the example on every `--status` call. The command launched a real Claude session in a tmux pane named `foo`, attaching the user's TTY until they exited; only then did the python proceed and print the status table. Replaced the backticks with plain quotes and added a warning comment for future editors.
+
 ## [1.41.10] - 2026-05-24
 
 ### Fixed
