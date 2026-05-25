@@ -14,7 +14,7 @@
 #   - --delete / -D is the non-interactive delete shortcut
 #   - -w/--worktree NAME passes through to `claude --worktree NAME`
 #
-# SSH persistence: when $SSH_CONNECTION is set (i.e. you're reaching claude-dev
+# SSH persistence: when $SSH_CONNECTION is set (i.e. you're reaching agent-dev
 # from a remote client), the final launch is wrapped in `tmux new-session -A`
 # so disconnecting the client leaves the Claude session alive on the host.
 # Reconnect and re-run `bridge <repo>` (or `bridge <repo> -w <wt>`) to reattach.
