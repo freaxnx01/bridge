@@ -20,10 +20,10 @@ smoke:
 
 lint:
 	shellcheck -s bash -x \
-	  clrepo.sh \
-	  clrepo-autosync.sh \
-	  clrepo-unpushed-warn.sh \
-	  clrepo-watcher.sh \
+	  bridge.sh \
+	  bridge-autosync.sh \
+	  bridge-unpushed-warn.sh \
+	  bridge-watcher.sh \
 	  setup-claude-channels.sh
 
 test-deps:

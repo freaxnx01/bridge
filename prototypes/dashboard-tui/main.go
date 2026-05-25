@@ -34,13 +34,13 @@ type session struct {
 
 var (
 	mockRepos = []repo{
-		{"public/clrepo", 1, "pub"},
+		{"public/bridge", 1, "pub"},
 		{"private/ingest-pipeline", 4, "pri"},
 		{"private/dms-core", 7, "pri"},
 		{"public/ai-instructions", 0, "pub"},
 	}
 	mockIssues = []issue{
-		{30, "public/clrepo", "feat(dashboard): TUI / styled output for --dashboard"},
+		{30, "public/bridge", "feat(dashboard): TUI / styled output for --dashboard"},
 		{142, "private/ingest-pipeline", "fix: retry on transient 503 from upstream"},
 		{139, "private/ingest-pipeline", "feat: parquet writer backpressure"},
 		{138, "private/ingest-pipeline", "chore: bump pyarrow to 17.x"},
@@ -49,7 +49,7 @@ var (
 		{84, "private/dms-core", "fix: trustee group resolution on rename"},
 	}
 	mockSessions = []session{
-		{"clrepo:main", "attached", "2h ago", "public/clrepo"},
+		{"bridge:main", "attached", "2h ago", "public/bridge"},
 		{"ingest:bug-142", "detached", "5m ago", "private/ingest-pipeline"},
 		{"dms:perf-91", "code", "yesterday", "private/dms-core"},
 	}
@@ -364,7 +364,7 @@ func (m model) viewSessions(w, h int) string {
 }
 
 func (m model) viewHeader(w int) string {
-	left := accentStyle.Render(" clrepo ") + mutedStyle.Render("· dashboard PoC")
+	left := accentStyle.Render(" bridge ") + mutedStyle.Render("· dashboard PoC")
 	right := mutedStyle.Render(time.Now().Format("2006-01-02 15:04"))
 	gap := w - lipgloss.Width(left) - lipgloss.Width(right) - 4
 	if gap < 1 {

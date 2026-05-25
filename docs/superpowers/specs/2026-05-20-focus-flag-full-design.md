@@ -7,50 +7,50 @@
 
 ## Goal
 
-Complete the remaining acceptance criteria from issue #9: Forgejo support, open-issue counts with "assigned to me", JSON caching with TTL, `--no-cache` bypass, `clrepo -f <name>` open-by-name, tab completion over the focus list, and partial-failure handling.
+Complete the remaining acceptance criteria from issue #9: Forgejo support, open-issue counts with "assigned to me", JSON caching with TTL, `--no-cache` bypass, `bridge -f <name>` open-by-name, tab completion over the focus list, and partial-failure handling.
 
 ## Approach
 
-Monolithic expansion — all changes inside `clrepo.sh`. Follows existing codebase pattern (one large self-contained helper per feature area, e.g. `_clrepo_dashboard`). No new files except `tests/test_focus.sh`.
+Monolithic expansion — all changes inside `bridge.sh`. Follows existing codebase pattern (one large self-contained helper per feature area, e.g. `_bridge_dashboard`). No new files except `tests/test_focus.sh`.
 
 ---
 
 ## 1. New constants (module load)
 
 ```bash
-_CLREPO_FOCUS_CACHE="$_CLREPO_CACHE/focus.json"
-_CLREPO_FOCUS_TTL="${CLREPO_FOCUS_TTL:-3600}"
+_BRIDGE_FOCUS_CACHE="$_BRIDGE_CACHE/focus.json"
+_BRIDGE_FOCUS_TTL="${BRIDGE_FOCUS_TTL:-3600}"
 ```
 
-Added alongside `_CLREPO_REMOTE_TTL` and `_CLREPO_UPDATE_TTL`.
+Added alongside `_BRIDGE_REMOTE_TTL` and `_BRIDGE_UPDATE_TTL`.
 
 ---
 
 ## 2. Forgejo support
 
-### `_clrepo_focus_toggle_fj <rel> add|rm`
+### `_bridge_focus_toggle_fj <rel> add|rm`
 
-New helper, mirrors `_clrepo_focus_toggle_gh`.
+New helper, mirrors `_bridge_focus_toggle_gh`.
 
-- `cd "$(_clrepo_base_for_rel "$rel")/$rel"` — direnv walks up to `git-forgejo/.envrc`, loads `FORGEJO_TOKEN`.
-- `owner=freax` (hardcoded, matching `_clrepo_targets`).
+- `cd "$(_bridge_base_for_rel "$rel")/$rel"` — direnv walks up to `git-forgejo/.envrc`, loads `FORGEJO_TOKEN`.
+- `owner=freax` (hardcoded, matching `_bridge_targets`).
 - `name=$(basename "$rel")`.
 - **Add:** `PUT https://git.home.freaxnx01.ch/api/v1/repos/freax/$name/topics/focus`
 - **Rm:** `DELETE https://git.home.freaxnx01.ch/api/v1/repos/freax/$name/topics/focus`
 
 Both return 204 on success. Idempotent (adding an existing topic or deleting a missing one is a no-op per Forgejo API).
 
-### Dispatch in `_clrepo_focus_add` / `_clrepo_focus_rm`
+### Dispatch in `_bridge_focus_add` / `_bridge_focus_rm`
 
 ```bash
-git-forgejo/*) _clrepo_focus_toggle_fj "$rel" add ;;   # was: deferred message
+git-forgejo/*) _bridge_focus_toggle_fj "$rel" add ;;   # was: deferred message
 ```
 
-Both functions call `rm -f "$_CLREPO_FOCUS_CACHE"` on success.
+Both functions call `rm -f "$_BRIDGE_FOCUS_CACHE"` on success.
 
-### Forgejo repo fetch in `_clrepo_focus_list`
+### Forgejo repo fetch in `_bridge_focus_list`
 
-Find the first Forgejo target rel via `_clrepo_targets | awk -F'\t' '$2=="forgejo"{print $1;exit}'`. If none exists, skip silently. Otherwise:
+Find the first Forgejo target rel via `_bridge_targets | awk -F'\t' '$2=="forgejo"{print $1;exit}'`. If none exists, skip silently. Otherwise:
 
 ```bash
 cd "$base/$fj_rel"; eval "$(direnv export bash 2>/dev/null)"
@@ -100,7 +100,7 @@ If a count job fails, `$tmpdir/count_$i` is absent or empty → display `? open`
 
 ## 4. Caching
 
-**Cache schema** (`~/.cache/clrepo/focus.json`):
+**Cache schema** (`~/.cache/bridge/focus.json`):
 ```json
 {
   "fetched_at": 1716210000,
@@ -116,20 +116,20 @@ If a count job fails, `$tmpdir/count_$i` is absent or empty → display `? open`
 
 **Read path:**
 ```bash
-if [ -f "$_CLREPO_FOCUS_CACHE" ] && [ "$1" != "1" ]; then
-  age=$(( $(date +%s) - $(jq '.fetched_at' "$_CLREPO_FOCUS_CACHE") ))
-  if [ "$age" -lt "$_CLREPO_FOCUS_TTL" ]; then
-    _clrepo_focus_display_cache  # reads $_CLREPO_FOCUS_CACHE, renders Section 7 format
+if [ -f "$_BRIDGE_FOCUS_CACHE" ] && [ "$1" != "1" ]; then
+  age=$(( $(date +%s) - $(jq '.fetched_at' "$_BRIDGE_FOCUS_CACHE") ))
+  if [ "$age" -lt "$_BRIDGE_FOCUS_TTL" ]; then
+    _bridge_focus_display_cache  # reads $_BRIDGE_FOCUS_CACHE, renders Section 7 format
     return
   fi
 fi
 ```
 
-**Write path:** after all jobs complete, assemble JSON with `jq -n`, write to `$_CLREPO_FOCUS_CACHE.tmp`, then `mv -f` in place. Atomic — a crashed run leaves no half-written cache.
+**Write path:** after all jobs complete, assemble JSON with `jq -n`, write to `$_BRIDGE_FOCUS_CACHE.tmp`, then `mv -f` in place. Atomic — a crashed run leaves no half-written cache.
 
-**Invalidation:** `rm -f "$_CLREPO_FOCUS_CACHE"` on successful `--focus-add` or `--focus-rm`.
+**Invalidation:** `rm -f "$_BRIDGE_FOCUS_CACHE"` on successful `--focus-add` or `--focus-rm`.
 
-**`force_refresh` param:** `_clrepo_focus_list` accepts `$1=1` to skip the cache read (used by `--no-cache`).
+**`force_refresh` param:** `_bridge_focus_list` accepts `$1=1` to skip the cache read (used by `--no-cache`).
 
 ---
 
@@ -137,7 +137,7 @@ fi
 
 **Before:**
 ```bash
--f|--focus-list) _clrepo_focus_list; return ;;
+-f|--focus-list) _bridge_focus_list; return ;;
 ```
 
 **After:**
@@ -146,20 +146,20 @@ fi
 --no-cache)      focus_no_cache=1; shift ;;
 ```
 
-`mode_focus` and `focus_no_cache` added to the `local` declarations in `clrepo()`. `--no-cache` outside `mode_focus` is silently ignored.
+`mode_focus` and `focus_no_cache` added to the `local` declarations in `bridge()`. `--no-cache` outside `mode_focus` is silently ignored.
 
 **After the dispatch loop**, before `mode_repo_issues`:
 ```bash
 if [ "$mode_focus" = 1 ]; then
   if [ -z "${1:-}" ]; then
-    _clrepo_focus_list "$focus_no_cache"
+    _bridge_focus_list "$focus_no_cache"
     return
   fi
   # name given → fall through to the existing positional-arg launch path
 fi
 ```
 
-When a name is given, execution falls through to the existing exact → substring → metadata lookup and `_clrepo_launch`. Resolution is against all local repos (not focus-only); tab completion is what constrains the suggestions to focus repos.
+When a name is given, execution falls through to the existing exact → substring → metadata lookup and `_bridge_launch`. Resolution is against all local repos (not focus-only); tab completion is what constrains the suggestions to focus repos.
 
 **Conflict checks:** `mode_focus` added to the bad-flags list in the `--attach` and `--pick` guards.
 
@@ -167,15 +167,15 @@ When a name is given, execution falls through to the existing exact → substrin
 
 ## 6. Tab completion
 
-`clrepo -f <TAB>` completes from cached focus basenames (no API call):
+`bridge -f <TAB>` completes from cached focus basenames (no API call):
 
 ```bash
 if [ "${COMP_WORDS[COMP_CWORD-1]}" = "-f" ] || \
    [ "${COMP_WORDS[COMP_CWORD-1]}" = "--focus-list" ]; then
-  if [ -f "$_CLREPO_FOCUS_CACHE" ]; then
+  if [ -f "$_BRIDGE_FOCUS_CACHE" ]; then
     local focus_names
     focus_names=$(jq -r '.repos[].name | split("/")[-1]' \
-                  "$_CLREPO_FOCUS_CACHE" 2>/dev/null)
+                  "$_BRIDGE_FOCUS_CACHE" 2>/dev/null)
     COMPREPLY=($(compgen -W "$focus_names" -- "$cur"))
     return
   fi
@@ -216,7 +216,7 @@ FOCUS REPOS
 |---|---|
 | Forgejo unreachable (curl error) | GH results shown; `"Forgejo: skipped (curl error)"` in warnings |
 | No `FORGEJO_TOKEN` | GH results shown; `"Forgejo: skipped (no FORGEJO_TOKEN)"` in warnings |
-| No Forgejo target in `_clrepo_targets` | Forgejo fetch silently skipped; no warning |
+| No Forgejo target in `_bridge_targets` | Forgejo fetch silently skipped; no warning |
 | Per-repo GH count failure | Row shows `? open`; total uses `?` for that repo |
 | GH user resolution failure | `mine` counts omitted from all GH rows |
 
@@ -226,10 +226,10 @@ FOCUS REPOS
 
 Self-contained Bash assertions, no framework. Tests:
 
-1. **Cache read/write round-trip** — write a synthetic `focus.json`, source `clrepo.sh`, call `_clrepo_focus_display_cache`, assert output matches expected format.
+1. **Cache read/write round-trip** — write a synthetic `focus.json`, source `bridge.sh`, call `_bridge_focus_display_cache`, assert output matches expected format.
 2. **TTL expiry** — write a `focus.json` with `fetched_at` set to `now - TTL - 1`, assert cache is not used (fall-through to fetch).
-3. **`--no-cache` bypass** — write a valid `focus.json`, call `_clrepo_focus_list 1`, assert cache is not read (mock fetch returns empty).
-4. **Invalidation on add/rm** — write a `focus.json`, stub `_clrepo_focus_toggle_gh` to succeed, call `_clrepo_focus_add`, assert cache file is absent.
+3. **`--no-cache` bypass** — write a valid `focus.json`, call `_bridge_focus_list 1`, assert cache is not read (mock fetch returns empty).
+4. **Invalidation on add/rm** — write a `focus.json`, stub `_bridge_focus_toggle_gh` to succeed, call `_bridge_focus_add`, assert cache file is absent.
 5. **Partial-failure warning** — write a `focus.json` with a non-empty `warnings` field, assert warning line appears in display output.
 
 ---

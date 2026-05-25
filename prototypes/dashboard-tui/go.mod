@@ -1,4 +1,4 @@
-module github.com/freaxnx01/clrepo/prototypes/dashboard-tui
+module github.com/freaxnx01/bridge/prototypes/dashboard-tui
 
 go 1.24.2
 

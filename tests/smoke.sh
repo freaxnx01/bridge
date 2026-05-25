@@ -15,13 +15,13 @@ fail=0
 
 blue "==> shellcheck on shell scripts (errors only)"
 if command -v shellcheck >/dev/null; then
-  # -s bash: clrepo.sh has no shebang (it's sourced); tell shellcheck the dialect.
+  # -s bash: bridge.sh has no shebang (it's sourced); tell shellcheck the dialect.
   # --severity=error: only block on real errors. Tighten as the codebase is cleaned up.
   if shellcheck -s bash --severity=error -x \
-      "$REPO_ROOT/clrepo.sh" \
-      "$REPO_ROOT/clrepo-autosync.sh" \
-      "$REPO_ROOT/clrepo-unpushed-warn.sh" \
-      "$REPO_ROOT/clrepo-watcher.sh" \
+      "$REPO_ROOT/bridge.sh" \
+      "$REPO_ROOT/bridge-autosync.sh" \
+      "$REPO_ROOT/bridge-unpushed-warn.sh" \
+      "$REPO_ROOT/bridge-watcher.sh" \
       "$REPO_ROOT/setup-claude-channels.sh"; then
     green "shellcheck OK"
   else
@@ -32,24 +32,24 @@ else
   red "shellcheck not installed — skipping (install with: apt install shellcheck)"
 fi
 
-blue "==> sourcing clrepo.sh and probing --version / --help"
+blue "==> sourcing bridge.sh and probing --version / --help"
 TMP="$(mktemp -d)"
 trap 'rm -rf "$TMP"' EXIT
-export CLREPO_CACHE="$TMP/cache" CLREPO_CONFIG="$TMP/config" CLREPO_BASE="$TMP/repos"
-mkdir -p "$CLREPO_CACHE" "$CLREPO_CONFIG" "$CLREPO_BASE"
+export BRIDGE_CACHE="$TMP/cache" BRIDGE_CONFIG="$TMP/config" BRIDGE_BASE="$TMP/repos"
+mkdir -p "$BRIDGE_CACHE" "$BRIDGE_CONFIG" "$BRIDGE_BASE"
 
 # Run in a fresh bash so we don't pollute the caller's shell state.
-if bash -c "source '$REPO_ROOT/clrepo.sh' && clrepo --version" | grep -qE 'clrepo [0-9]+\.[0-9]+\.[0-9]+'; then
-  green "clrepo --version OK"
+if bash -c "source '$REPO_ROOT/bridge.sh' && bridge --version" | grep -qE 'bridge [0-9]+\.[0-9]+\.[0-9]+'; then
+  green "bridge --version OK"
 else
-  red "clrepo --version FAILED"
+  red "bridge --version FAILED"
   fail=1
 fi
 
-if bash -c "source '$REPO_ROOT/clrepo.sh' && clrepo --help" | grep -q '^Usage: clrepo'; then
-  green "clrepo --help OK"
+if bash -c "source '$REPO_ROOT/bridge.sh' && bridge --help" | grep -q '^Usage: bridge'; then
+  green "bridge --help OK"
 else
-  red "clrepo --help FAILED"
+  red "bridge --help FAILED"
   fail=1
 fi
 

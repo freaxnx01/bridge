@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Self-contained tests for the path helpers in clrepo.sh.
+# Self-contained tests for the path helpers in bridge.sh.
 # Run: bash tests/test_norm_path.sh
 set -u
 
 _HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck disable=SC1091
-. "$_HERE/../clrepo.sh" >/dev/null 2>&1 || true
+. "$_HERE/../bridge.sh" >/dev/null 2>&1 || true
 
 _fail=0
 assert_eq() {
@@ -18,27 +18,27 @@ assert_eq() {
   fi
 }
 
-# --- _clrepo_is_windows ---
-( OSTYPE=linux-gnu;  _clrepo_is_windows && exit 1 || exit 0 ) && \
-  echo "ok  _clrepo_is_windows: linux-gnu => false" || \
-  { echo "FAIL _clrepo_is_windows: linux-gnu should be false" >&2; _fail=$((_fail+1)); }
+# --- _bridge_is_windows ---
+( OSTYPE=linux-gnu;  _bridge_is_windows && exit 1 || exit 0 ) && \
+  echo "ok  _bridge_is_windows: linux-gnu => false" || \
+  { echo "FAIL _bridge_is_windows: linux-gnu should be false" >&2; _fail=$((_fail+1)); }
 
-( OSTYPE=msys;       _clrepo_is_windows && exit 0 || exit 1 ) && \
-  echo "ok  _clrepo_is_windows: msys => true" || \
-  { echo "FAIL _clrepo_is_windows: msys should be true" >&2; _fail=$((_fail+1)); }
+( OSTYPE=msys;       _bridge_is_windows && exit 0 || exit 1 ) && \
+  echo "ok  _bridge_is_windows: msys => true" || \
+  { echo "FAIL _bridge_is_windows: msys should be true" >&2; _fail=$((_fail+1)); }
 
-( OSTYPE=cygwin;     _clrepo_is_windows && exit 0 || exit 1 ) && \
-  echo "ok  _clrepo_is_windows: cygwin => true" || \
-  { echo "FAIL _clrepo_is_windows: cygwin should be true" >&2; _fail=$((_fail+1)); }
+( OSTYPE=cygwin;     _bridge_is_windows && exit 0 || exit 1 ) && \
+  echo "ok  _bridge_is_windows: cygwin => true" || \
+  { echo "FAIL _bridge_is_windows: cygwin should be true" >&2; _fail=$((_fail+1)); }
 
-# --- _clrepo_norm_path: no-op on POSIX ---
-got=$(OSTYPE=linux-gnu _clrepo_norm_path '/home/me/repos')
+# --- _bridge_norm_path: no-op on POSIX ---
+got=$(OSTYPE=linux-gnu _bridge_norm_path '/home/me/repos')
 assert_eq "norm_path posix passthrough"     '/home/me/repos'   "$got"
 
-got=$(OSTYPE=linux-gnu _clrepo_norm_path 'C:\Develop\Repos')
+got=$(OSTYPE=linux-gnu _bridge_norm_path 'C:\Develop\Repos')
 assert_eq "norm_path posix no convert"      'C:\Develop\Repos' "$got"
 
-# --- _clrepo_norm_path: Windows-style on Windows (with cygpath shim) ---
+# --- _bridge_norm_path: Windows-style on Windows (with cygpath shim) ---
 _tmpdir=$(mktemp -d)
 cat >"$_tmpdir/cygpath" <<'SH'
 #!/usr/bin/env bash
@@ -70,24 +70,24 @@ esac
 SH
 chmod +x "$_tmpdir/cygpath"
 
-got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _clrepo_norm_path 'C:\Develop\Repos')
+got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _bridge_norm_path 'C:\Develop\Repos')
 assert_eq "norm_path windows backslash"     '/c/Develop/Repos' "$got"
 
-got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _clrepo_norm_path 'C:/Develop/Repos')
+got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _bridge_norm_path 'C:/Develop/Repos')
 assert_eq "norm_path windows forward-slash" '/c/Develop/Repos' "$got"
 
-got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _clrepo_norm_path '/c/Develop/Repos')
+got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _bridge_norm_path '/c/Develop/Repos')
 assert_eq "norm_path windows already posix" '/c/Develop/Repos' "$got"
 
-# --- _clrepo_norm_path: pure-Bash fallback when cygpath missing ---
-got=$(OSTYPE=msys PATH=/usr/bin:/bin _clrepo_norm_path 'C:\Develop\Repos')
+# --- _bridge_norm_path: pure-Bash fallback when cygpath missing ---
+got=$(OSTYPE=msys PATH=/usr/bin:/bin _bridge_norm_path 'C:\Develop\Repos')
 assert_eq "norm_path fallback (no cygpath)" '/c/Develop/Repos' "$got"
 
-# --- _clrepo_display_path ---
-got=$(OSTYPE=linux-gnu _clrepo_display_path '/home/me/repos')
+# --- _bridge_display_path ---
+got=$(OSTYPE=linux-gnu _bridge_display_path '/home/me/repos')
 assert_eq "display_path posix passthrough"  '/home/me/repos'   "$got"
 
-got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _clrepo_display_path '/c/Develop/Repos')
+got=$(OSTYPE=msys PATH="$_tmpdir:$PATH" _bridge_display_path '/c/Develop/Repos')
 assert_eq "display_path windows -> C:\\"    'C:\Develop\Repos' "$got"
 
 rm -rf "$_tmpdir"

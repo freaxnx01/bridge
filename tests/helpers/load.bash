@@ -1,7 +1,7 @@
-# Common bats setup for clrepo unit tests.
+# Common bats setup for bridge unit tests.
 #
 # Each test should `load '../helpers/load'` in its preamble and call
-# `clrepo_load_lib` from setup() to source clrepo.sh against an isolated
+# `bridge_load_lib` from setup() to source bridge.sh against an isolated
 # tmpdir.
 #
 # Install bats locally:
@@ -16,21 +16,21 @@ REPO_ROOT="$( cd "$TESTS_DIR/.." && pwd )"
 
 export PATH="$HELPERS_DIR/stubs:$PATH"
 
-# Source clrepo.sh into the test shell with isolated cache/config/base dirs.
-# Tests can override CLREPO_BASE / CLREPO_CACHE / CLREPO_CONFIG before
+# Source bridge.sh into the test shell with isolated cache/config/base dirs.
+# Tests can override BRIDGE_BASE / BRIDGE_CACHE / BRIDGE_CONFIG before
 # calling this; otherwise per-test defaults under $BATS_TEST_TMPDIR are used.
-clrepo_load_lib() {
-  : "${CLREPO_CACHE:=$BATS_TEST_TMPDIR/cache}"
-  : "${CLREPO_CONFIG:=$BATS_TEST_TMPDIR/config}"
-  : "${CLREPO_BASE:=$BATS_TEST_TMPDIR/repos}"
-  mkdir -p "$CLREPO_CACHE" "$CLREPO_CONFIG"
-  # If CLREPO_BASE is a single path (no colons), make sure it exists so
-  # _clrepo_collect_bases doesn't warn about a missing dir.
-  case "$CLREPO_BASE" in
+bridge_load_lib() {
+  : "${BRIDGE_CACHE:=$BATS_TEST_TMPDIR/cache}"
+  : "${BRIDGE_CONFIG:=$BATS_TEST_TMPDIR/config}"
+  : "${BRIDGE_BASE:=$BATS_TEST_TMPDIR/repos}"
+  mkdir -p "$BRIDGE_CACHE" "$BRIDGE_CONFIG"
+  # If BRIDGE_BASE is a single path (no colons), make sure it exists so
+  # _bridge_collect_bases doesn't warn about a missing dir.
+  case "$BRIDGE_BASE" in
     *:*) ;;
-    *) mkdir -p "$CLREPO_BASE" ;;
+    *) mkdir -p "$BRIDGE_BASE" ;;
   esac
-  export CLREPO_CACHE CLREPO_CONFIG CLREPO_BASE
+  export BRIDGE_CACHE BRIDGE_CONFIG BRIDGE_BASE
   # shellcheck source=/dev/null
-  source "$REPO_ROOT/clrepo.sh"
+  source "$REPO_ROOT/bridge.sh"
 }

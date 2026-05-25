@@ -1,11 +1,11 @@
 #!/usr/bin/env bash
-# Minimal `gh` stub for clrepo tests.
+# Minimal `gh` stub for bridge tests.
 #
 # Extend cases as the test suite grows. Unknown calls fail loudly so a test
 # accidentally hitting the network is obvious in CI output.
 #
 # Optional env knobs:
-#   CLREPO_STUB_GH_REPO_LIST  path to a file whose contents are returned
+#   BRIDGE_STUB_GH_REPO_LIST  path to a file whose contents are returned
 #                             verbatim for `gh repo list ...`
 
 set -u
@@ -26,8 +26,8 @@ case "${1:-}" in
   repo)
     case "${2:-}" in
       list)
-        if [ -n "${CLREPO_STUB_GH_REPO_LIST:-}" ] && [ -r "$CLREPO_STUB_GH_REPO_LIST" ]; then
-          cat "$CLREPO_STUB_GH_REPO_LIST"
+        if [ -n "${BRIDGE_STUB_GH_REPO_LIST:-}" ] && [ -r "$BRIDGE_STUB_GH_REPO_LIST" ]; then
+          cat "$BRIDGE_STUB_GH_REPO_LIST"
         fi
         exit 0
         ;;
