@@ -77,16 +77,33 @@ func TestComposeStatusRowsJoinsSlotAndSession(t *testing.T) {
 	}
 	sessions := []core.Session{
 		{SlotID: "bridge", State: "attached", TmuxName: "bridge", PID: 4242, Age: 100 * time.Second},
+		// "extra" is a tmux session running outside the slot registry — must NOT
+		// appear in the table, since LiveSessions is unfiltered and would
+		// otherwise leak unrelated shells / admin sessions into bridge status.
 		{SlotID: "extra", State: "detached", TmuxName: "extra", PID: 9999, Age: 10 * time.Minute},
 	}
 	got := composeStatusRows(slots, sessions, now)
 	want := []statusRow{
 		{Slot: "bridge", Kind: "slot", Repo: "bridge", Agent: "claude", Age: humanDuration(now.Sub(slots[0].Created)), State: "attached", TmuxName: "bridge", PID: 4242},
 		{Slot: "stale", Kind: "slot", Repo: "foo", Agent: "claude", Age: humanDuration(now.Sub(slots[1].Created)), State: "—", TmuxName: "—"},
-		{Slot: "extra", Kind: "tmux", Repo: "—", Age: humanDuration(10 * time.Minute), State: "detached", TmuxName: "extra", PID: 9999},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %+v\nwant %+v", got, want)
+	}
+}
+
+func TestComposeStatusRowsExcludesUntaggedTmuxSessions(t *testing.T) {
+	// Explicit regression test: any tmux session whose name doesn't match a
+	// slot ID is silently dropped, regardless of how many there are. Adding
+	// pane-command filtering to re-surface claude-running sessions is a
+	// separate enhancement.
+	now := time.Unix(2_000_000, 0).UTC()
+	sessions := []core.Session{
+		{SlotID: "work-shell"}, {SlotID: "irssi"}, {SlotID: "admin"},
+	}
+	got := composeStatusRows(nil, sessions, now)
+	if len(got) != 0 {
+		t.Errorf("expected no rows from sessions-only input, got %+v", got)
 	}
 }
 

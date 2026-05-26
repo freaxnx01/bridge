@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
-	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -94,11 +93,15 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// composeStatusRows joins the slot registry with live tmux sessions:
-//   - Every slot becomes a row (kind=slot). State+TmuxName come from a matching
-//     live session if one exists; otherwise both render as "—" (stale slot).
-//   - Live tmux sessions not present in the slot registry become extra rows
-//     (kind=tmux). These are sessions started outside the bridge launcher.
+// composeStatusRows joins the slot registry with live tmux sessions: every
+// slot becomes a row (kind=slot), with State+TmuxName populated from the
+// matching live session if one exists; otherwise both render as "—" (stale).
+//
+// Untagged tmux sessions (running on this host but not in the slot registry)
+// are NOT surfaced here — the LiveSessions enumeration is unfiltered, so it
+// would otherwise leak unrelated shells / admin sessions / etc. into the
+// bridge status table. Adding them back with a pane-command filter (e.g.
+// keep only sessions whose pane runs `claude`) is a separate enhancement.
 //
 // Pure function — testable without disk or tmux access.
 func composeStatusRows(slots []core.Slot, sessions []core.Session, now time.Time) []statusRow {
@@ -106,7 +109,6 @@ func composeStatusRows(slots []core.Slot, sessions []core.Session, now time.Time
 	for _, s := range sessions {
 		sessionsByID[s.SlotID] = s
 	}
-	covered := map[string]bool{}
 	var rows []statusRow
 	for _, slot := range slots {
 		repo := slot.Repo
@@ -126,30 +128,8 @@ func composeStatusRows(slots []core.Slot, sessions []core.Session, now time.Time
 			row.State = live.State
 			row.TmuxName = live.TmuxName
 			row.PID = live.PID
-			covered[slot.ID] = true
 		}
 		rows = append(rows, row)
-	}
-	// Untagged tmux sessions (running but not in slots.json) get their own rows.
-	// Sort by slot id for deterministic output.
-	var extras []core.Session
-	for _, s := range sessions {
-		if covered[s.SlotID] {
-			continue
-		}
-		extras = append(extras, s)
-	}
-	sort.Slice(extras, func(i, j int) bool { return extras[i].SlotID < extras[j].SlotID })
-	for _, s := range extras {
-		rows = append(rows, statusRow{
-			Slot:     s.SlotID,
-			Kind:     "tmux",
-			Repo:     "—",
-			Age:      humanDuration(s.Age),
-			State:    s.State,
-			TmuxName: s.TmuxName,
-			PID:      s.PID,
-		})
 	}
 	return rows
 }
