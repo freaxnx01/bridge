@@ -1,6 +1,11 @@
 package main
 
-import "github.com/spf13/cobra"
+import (
+	"log/slog"
+	"os"
+
+	"github.com/spf13/cobra"
+)
 
 var (
 	version = "dev"
@@ -22,4 +27,14 @@ Repo discovery walks ~/projects/repos/ (overridable via BRIDGE_REPOS_ROOT).`,
 
 func versionString() string {
 	return "bridge " + version + " (commit " + commit + ", built " + date + ")"
+}
+
+var verboseCount int
+
+func init() {
+	rootCmd.PersistentFlags().CountVarP(&verboseCount, "verbose", "v", "increase log verbosity (-v info, -vv debug)")
+	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
+		slog.SetDefault(slog.New(installLogger(os.Stderr, verboseCount, "")))
+		return nil
+	}
 }
