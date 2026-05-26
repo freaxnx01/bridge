@@ -34,6 +34,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 }
 
 func dispatchPreflight(out io.Writer, args []string) error {
+	args = rewriteLegacyPreflight(args)
 	if len(args) == 0 {
 		return preflightPicker(out)
 	}
