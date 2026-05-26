@@ -73,22 +73,31 @@ func dispatchPreflight(out io.Writer, args []string) error {
 	return shellbridge.EmitNoop(out)
 }
 
-// preflightPickerWithRemote runs the picker over local repos after warming
-// the remote cache. Selecting remote-only entries from the picker is not yet
-// supported (tracked as a follow-up to #42); for now this restores the
-// "interactive picker for bridge -r/--refresh" UX without the clone-on-select
-// behavior. Remote cache refresh runs as a best-effort side effect so a
-// subsequent `bridge list -r` reflects current forge state.
+// preflightPickerWithRemote runs the picker over local repos. For
+// `--refresh` it also kicks off a remote-cache refresh, bounded by a short
+// deadline so the picker can't stall on slow forge APIs. Selecting
+// remote-only entries from the picker is not yet supported (separate
+// follow-up to #42).
+//
+// Bare `bridge -r` does NOT trigger a network call here — it just opens the
+// picker. The remote cache stays whatever `bridge list -r [--refresh]` last
+// wrote; users who want a guaranteed fresh listing should pass `--refresh`.
+// This preserves the bash bridge's snappy interactive feel.
 func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 	root := reposRoot()
 	local, err := core.DiscoverRepos(root)
 	if err != nil {
 		return err
 	}
-	// Best-effort cache warming. Errors are logged to stderr but don't block
-	// the picker — the local list is still useful.
-	if _, ferr := loadOrFetchRemote(context.Background(), local, refresh); ferr != nil {
-		fmt.Fprintf(os.Stderr, "warning: remote fetch failed: %v\n", ferr)
+	if refresh {
+		// Bound the remote fetch so a hung forge call can't lock up the
+		// picker indefinitely. 5s is generous for healthy networks and short
+		// enough that the user can ctrl-C without thinking the binary hung.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if _, ferr := loadOrFetchRemote(ctx, local, true); ferr != nil {
+			fmt.Fprintf(os.Stderr, "warning: remote refresh failed (continuing with local picker): %v\n", ferr)
+		}
+		cancel()
 	}
 	r, ok, err := pickRepo(local)
 	if err != nil {
