@@ -124,6 +124,47 @@ func TestPreflightOpenWithAgentEmitsExec(t *testing.T) {
 	}
 }
 
+func TestPreflightOpenWithWorktreeAgent(t *testing.T) {
+	// `bridge open <name> -w <wt> --agent claude` must:
+	//   - tmux session name = <repo>-wt-<wt>
+	//   - working dir = <repo>/.worktrees/<wt>
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "-w", "feature-x", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	if !strings.Contains(s, " -s bridge-wt-feature-x ") {
+		t.Errorf("missing slot name in: %s", s)
+	}
+	wtPath := filepath.Join(root, "github", "freaxnx01", "public", "bridge", ".worktrees", "feature-x")
+	if !strings.Contains(s, " -c "+wtPath+" ") {
+		t.Errorf("missing worktree path %q in: %s", wtPath, s)
+	}
+}
+
+func TestPreflightOpenWithWorktreeCDOnly(t *testing.T) {
+	// Without --agent, -w should still resolve the worktree path for the cd
+	// directive.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "-w", "feature-x")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	wtPath := filepath.Join(root, "github", "freaxnx01", "public", "bridge", ".worktrees", "feature-x")
+	want := "cd:" + wtPath
+	if s != want {
+		t.Errorf("got %q want %q", s, want)
+	}
+}
+
 func TestPreflightOpenWithAgentInsideTmuxEmitsSwitchClient(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()

@@ -158,7 +158,7 @@ func preflightPicker(out io.Writer) error {
 }
 
 func preflightOpen(out io.Writer, args []string) error {
-	var name, agentName string
+	var name, agentName, worktree string
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--agent":
@@ -168,7 +168,8 @@ func preflightOpen(out io.Writer, args []string) error {
 			}
 		case "-w", "--worktree":
 			if i+1 < len(args) {
-				i++ // skip value
+				worktree = args[i+1]
+				i++
 			}
 		case "--rc", "--remote-control", "--json":
 			// ignore in preflight
@@ -197,22 +198,31 @@ func preflightOpen(out io.Writer, args []string) error {
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
 
+	// Resolve the working directory. With -w/--worktree, use the bash bridge
+	// convention `<repo.Path>/.worktrees/<wt>`. A future enhancement could
+	// consult `git worktree list --porcelain` for non-default layouts.
+	workDir := repo.Path
+	if worktree != "" {
+		workDir = filepath.Join(repo.Path, ".worktrees", worktree)
+	}
+
 	if agentName == "" {
-		return shellbridge.EmitCD(out, repo.Path)
+		return shellbridge.EmitCD(out, workDir)
 	}
 	spec, err := agents.Resolve(agentName)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
 		os.Exit(2)
 	}
-	slot := slotIDFor(repo, "")
+	slot := slotIDFor(repo, worktree)
 	// Record the slot in the registry. Non-fatal on failure — emitting the
 	// exec directive is still the right thing to do.
 	if err := core.UpsertSlot(filepath.Join(cacheRoot(), "slots.json"), core.Slot{
-		ID:      slot,
-		Repo:    repo.Name,
-		Agent:   agentName,
-		Created: time.Now().UTC(),
+		ID:       slot,
+		Repo:     repo.Name,
+		Worktree: worktree,
+		Agent:    agentName,
+		Created:  time.Now().UTC(),
 	}); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: slot upsert failed: %v\n", err)
 	}
@@ -221,9 +231,9 @@ func preflightOpen(out io.Writer, args []string) error {
 	if os.Getenv("TMUX") != "" {
 		// Already inside tmux: nesting `tmux new-session -A` fails, so use the
 		// nested launcher that creates-detached-then-switches the current client.
-		argv, err = l.LaunchArgvNested(slot, repo.Path, spec)
+		argv, err = l.LaunchArgvNested(slot, workDir, spec)
 	} else {
-		argv, err = l.LaunchArgv(slot, repo.Path, spec)
+		argv, err = l.LaunchArgv(slot, workDir, spec)
 	}
 	if err != nil {
 		return err

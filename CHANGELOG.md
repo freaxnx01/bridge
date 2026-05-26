@@ -16,6 +16,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge --status` is now legacy-mapped to `bridge status`, restoring the bash flag spelling (#43).
 - `--json` output keeps the legacy flat shape (`sessions`, `presence`, `sync`, `version`) for backward compatibility, with a new `rows` field carrying the detail table.
 - `bridge sync now` and `bridge sync --auto` now serialize against each other via a `sync.lock` flock around `runSyncNow`. Previously a concurrent overlap could let one writer's `sync.json` content overwrite the other's. Block-and-wait semantics match the bash bridge (#38).
+- `bridge open <name> -w <wt>` now actually uses the worktree (#36). The slot name becomes `<repo>-wt-<wt>`, the working directory is `<repo>/.worktrees/<wt>` (bash bridge convention), and the recorded slot carries the worktree field. Without `--agent`, `cd` now lands inside the worktree. Non-default worktree layouts (`git worktree list --porcelain`) remain a follow-up.
 
 ## [2.0.0] - 2026-05-26
 
