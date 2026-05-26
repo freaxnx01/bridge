@@ -22,7 +22,8 @@ func runSyncNow(ctx context.Context, cmd *cobra.Command) error {
 	s := &syncer.Syncer{}
 	res := s.Run(ctx, repos)
 	state := SyncState{
-		LastRun: time.Now().UTC(),
+		LastRun:  time.Now().UTC(),
+		Unpushed: s.Unpushed(ctx, repos),
 	}
 	for _, f := range res.Failed {
 		state.Queue = append(state.Queue, f.Repo.Name)
