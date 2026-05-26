@@ -84,7 +84,7 @@ docs/cli-json-schema.md             # initial JSON schema docs (grows in B)
 
 ---
 
-## Task 1: Bootstrap Go module + CI skeleton
+## Task 1: Bootstrap Go module + CI skeleton ✅
 
 **Files:**
 - Create: `go.mod`
@@ -186,7 +186,7 @@ git commit -m "feat(go): bootstrap Go module and CI skeleton"
 
 ---
 
-## Task 2: Cobra root command + `bridge --version`
+## Task 2: Cobra root command + `bridge --version` ✅
 
 **Files:**
 - Modify: `go.mod` (add cobra)
@@ -307,7 +307,7 @@ git commit -m "feat(go): cobra root command with --version"
 
 ---
 
-## Task 3: `internal/store` — atomic file IO
+## Task 3: `internal/store` — atomic file IO ✅
 
 **Files:**
 - Create: `internal/store/store.go`
@@ -496,7 +496,7 @@ git commit -m "feat(go): internal/store atomic file IO"
 
 ---
 
-## Task 4: `internal/store` — flock abstraction
+## Task 4: `internal/store` — flock abstraction ✅
 
 **Files:**
 - Create: `internal/store/lock.go`
@@ -694,7 +694,7 @@ git commit -m "feat(go): flock abstraction (Unix + Windows)"
 
 ---
 
-## Task 5: `internal/store` — schema versioning
+## Task 5: `internal/store` — schema versioning ✅
 
 **Files:**
 - Create: `internal/store/schema.go`
@@ -832,7 +832,7 @@ git commit -m "feat(go): internal/store schema versioning + migration backup"
 
 ---
 
-## Task 6: `internal/core` — Repo type + filesystem discovery
+## Task 6: `internal/core` — Repo type + filesystem discovery ✅
 
 **Files:**
 - Create: `internal/core/repo.go`
@@ -1088,7 +1088,7 @@ git commit -m "feat(go): core.Repo type + filesystem discovery"
 
 ---
 
-## Task 7: `internal/core` — MRU read
+## Task 7: `internal/core` — MRU read ✅
 
 **Files:**
 - Create: `internal/core/mru.go`
@@ -1216,7 +1216,7 @@ git commit -m "feat(go): core.LoadMRU"
 
 ---
 
-## Task 8: `cmd/bridge list` — local repos with `--json` and human output
+## Task 8: `cmd/bridge list` — local repos with `--json` and human output ✅
 
 **Files:**
 - Create: `cmd/bridge/output.go`
@@ -1430,7 +1430,7 @@ git commit -m "feat(go): bridge list (local repos, --json)"
 
 ---
 
-## Task 9: `internal/forge` — Client interface + TTL cache
+## Task 9: `internal/forge` — Client interface + TTL cache ✅
 
 **Files:**
 - Create: `internal/forge/client.go`
@@ -1650,7 +1650,7 @@ git commit -m "feat(go): forge Client interface + TTL cache"
 
 ---
 
-## Task 10: `internal/forge/github.go` — GitHub client
+## Task 10: `internal/forge/github.go` — GitHub client ✅
 
 **Files:**
 - Create: `internal/forge/github.go`
@@ -1880,7 +1880,7 @@ git commit -m "feat(go): forge.GithubClient (repos + open issues)"
 
 ---
 
-## Task 11: `internal/forge` — GitLab + Forgejo clients
+## Task 11: `internal/forge` — GitLab + Forgejo clients ✅ (note: test uses r.URL.RawPath, not r.URL.Path as plan said — Go decodes %2F into Path)
 
 These mirror the GitHub pattern: minimal HTTP client, REST list endpoints, mapped into the common `RepoRef`/`Issue` types.
 
@@ -2232,7 +2232,7 @@ git commit -m "feat(go): forge.GitlabClient + ForgejoClient"
 
 ---
 
-## Task 12: `bridge list -r` — remote streaming with cache
+## Task 12: `bridge list -r` — remote streaming with cache ✅
 
 **Files:**
 - Modify: `cmd/bridge/list.go`
@@ -2490,7 +2490,7 @@ git commit -m "feat(go): bridge list -r --refresh with remote cache"
 
 ---
 
-## Task 13: `internal/core` — Slot type + read
+## Task 13: `internal/core` — Slot type + read ✅
 
 **Files:**
 - Create: `internal/core/slot.go`
@@ -2593,7 +2593,7 @@ git commit -m "feat(go): core.Slot type + LoadSlots"
 
 ---
 
-## Task 14: `bridge slots` command
+## Task 14: `bridge slots` command ✅
 
 **Files:**
 - Create: `cmd/bridge/slots.go`
@@ -2722,7 +2722,7 @@ git commit -m "feat(go): bridge slots"
 
 ---
 
-## Task 15: `internal/core` — Session inspection (tmux read)
+## Task 15: `internal/core` — Session inspection (tmux read) ✅
 
 **Files:**
 - Create: `internal/core/session.go`
@@ -2877,7 +2877,7 @@ git commit -m "feat(go): core.Session + tmux parse"
 
 ---
 
-## Task 16: `bridge sessions` command
+## Task 16: `bridge sessions` command ✅
 
 **Files:**
 - Create: `cmd/bridge/sessions.go`
@@ -3017,7 +3017,7 @@ git commit -m "feat(go): bridge sessions"
 
 ---
 
-## Task 17: `internal/core` — Presence read
+## Task 17: `internal/core` — Presence read ✅
 
 **Files:**
 - Create: `internal/core/presence.go`
@@ -3106,7 +3106,7 @@ git commit -m "feat(go): core.Presence + LoadPresence"
 
 ---
 
-## Task 18: `bridge presence` (read only)
+## Task 18: `bridge presence` (read only) ✅
 
 **Files:**
 - Create: `cmd/bridge/presence.go`
@@ -3220,7 +3220,7 @@ git commit -m "feat(go): bridge presence (read-only)"
 
 ---
 
-## Task 19: `bridge sync` — status summary (read-only)
+## Task 19: `bridge sync` — status summary (read-only) ✅
 
 **Files:**
 - Create: `cmd/bridge/sync.go`
@@ -3369,7 +3369,7 @@ git commit -m "feat(go): bridge sync (read-only status)"
 
 ---
 
-## Task 20: `bridge issues` — fetch + cache + render
+## Task 20: `bridge issues` — fetch + cache + render ✅
 
 **Files:**
 - Create: `internal/core/issue.go`
@@ -3573,7 +3573,7 @@ git commit -m "feat(go): bridge issues (fetch + 10min cache)"
 
 ---
 
-## Task 21: `bridge status` — slim composed summary
+## Task 21: `bridge status` — slim composed summary ✅
 
 **Files:**
 - Create: `cmd/bridge/status.go`
@@ -3715,7 +3715,7 @@ git commit -m "feat(go): bridge status (slim composed summary)"
 
 ---
 
-## Task 22: Bash format read-compat — MRU coexistence
+## Task 22: Bash format read-compat — MRU coexistence ✅
 
 The bash `bridge` writes `~/.cache/bridge/mru` as newline-delimited paths (oldest at top, newest at bottom). Our `LoadMRU` already reads that format. This task adds a smoke test that proves it.
 
@@ -3778,7 +3778,7 @@ git commit -m "test(go): MRU bash format compatibility smoke test"
 
 ---
 
-## Task 23: `--json` schema doc + ship as `bridge-go`
+## Task 23: `--json` schema doc + ship as `bridge-go` ✅
 
 **Files:**
 - Create: `docs/cli-json-schema.md`
@@ -3956,7 +3956,7 @@ git commit -m "docs(go): --json schema reference + install-go make target"
 
 ---
 
-## Task 24: Wire `--help` polish + verify full CLI tree
+## Task 24: Wire `--help` polish + verify full CLI tree ✅
 
 **Files:**
 - Modify: `cmd/bridge/root.go`
@@ -4005,7 +4005,7 @@ git commit -m "chore(go): polish root --help text"
 
 ---
 
-## Task 25: Cross-compile smoke for Windows + final smoke
+## Task 25: Cross-compile smoke for Windows + final smoke ✅
 
 **Files:** none (verification only).
 
