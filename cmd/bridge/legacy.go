@@ -14,14 +14,20 @@ var legacyVerbForwards = map[string][]string{
 // applies legacy-flag forwarding so muscle memory from the bash bridge keeps
 // working. Pure function — no side effects.
 //
-// Mapping table:
+// Mapping table (top-level, for the `noop` fallback path — bypasses the shim's
+// preflight directive flow):
 //
 //	bridge -r [trailing...]          → bridge list -r [trailing...]
 //	bridge --refresh [trailing...]   → bridge list --refresh [trailing...]
 //	bridge -D <name> [trailing...]   → bridge rm <name> --yes [trailing...]
+//	bridge -a [trailing...]          → bridge sessions attach [trailing...]
+//	bridge --attach [trailing...]    → bridge sessions attach [trailing...]
 //	bridge away|back|auto            → bridge presence away|back|auto
 //
 // Known modern verbs and __preflight are left alone.
+//
+// Note: the shim path (rewriteLegacyPreflight) routes -r/--refresh through the
+// picker instead — only direct `command bridge -r` ends up here as `list -r`.
 func rewriteLegacyArgs(args []string) []string {
 	if len(args) < 2 {
 		return args
@@ -44,6 +50,10 @@ func rewriteLegacyArgs(args []string) []string {
 		return out
 	case "--refresh":
 		out := []string{args[0], "list", "--refresh"}
+		out = append(out, args[2:]...)
+		return out
+	case "-a", "--attach":
+		out := []string{args[0], "sessions", "attach"}
 		out = append(out, args[2:]...)
 		return out
 	case "-D":
@@ -72,7 +82,11 @@ func rewriteLegacy() {
 
 // rewriteLegacyPreflight is the preflight-side analogue. The args slice here
 // excludes both the program name and "__preflight" itself — it's what the user
-// typed after `bridge`. Mirrors the same mapping table.
+// typed after `bridge`.
+//
+// Differs from rewriteLegacyArgs: -r and --refresh are NOT rewritten here.
+// dispatchPreflight detects them and routes through the picker instead, which
+// is the interactive UX the bash bridge provided.
 func rewriteLegacyPreflight(args []string) []string {
 	if len(args) == 0 {
 		return args
@@ -82,10 +96,8 @@ func rewriteLegacyPreflight(args []string) []string {
 		return args
 	}
 	switch first {
-	case "-r":
-		return append([]string{"list", "-r"}, args[1:]...)
-	case "--refresh":
-		return append([]string{"list", "--refresh"}, args[1:]...)
+	case "-a", "--attach":
+		return append([]string{"sessions", "attach"}, args[1:]...)
 	case "-D":
 		if len(args) < 2 {
 			return args

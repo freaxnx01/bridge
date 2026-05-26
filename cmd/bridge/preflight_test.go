@@ -27,6 +27,46 @@ func TestPreflightNoArgs(t *testing.T) {
 	}
 }
 
+func TestPreflightDashRRoutesToPicker(t *testing.T) {
+	// `bridge -r` must NOT dump text — it routes to the picker. Using the
+	// cancel fixture so we get a deterministic noop without needing fzf.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "-r")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_PICKER_FIXTURE_CANCEL=1",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := strings.TrimSpace(string(out))
+	if s != "noop" {
+		t.Errorf("got %q, want noop (picker cancel)", s)
+	}
+}
+
+func TestPreflightRefreshRoutesToPicker(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "--refresh")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_PICKER_FIXTURE_CANCEL=1",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := strings.TrimSpace(string(out))
+	if s != "noop" {
+		t.Errorf("got %q, want noop", s)
+	}
+}
+
 func TestPreflightUnknownVerb(t *testing.T) {
 	out, err := bridgeCmd("__preflight", "list").CombinedOutput()
 	if err != nil {
