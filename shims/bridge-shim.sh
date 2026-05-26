@@ -4,7 +4,7 @@
 
 bridge() {
     local directive rc
-    directive=$(command bridge-go __preflight "$@")
+    directive=$(command bridge __preflight "$@")
     rc=$?
     if [ $rc -ne 0 ]; then
         return $rc
@@ -16,7 +16,7 @@ bridge() {
         # Without eval, the unquoted parameter expansion would word-split
         # the directive as data, turning literal quotes into argv chars.
         exec:*) eval "exec ${directive#exec:}" ;;
-        noop)   command bridge-go "$@" ;;
+        noop)   command bridge "$@" ;;
         *)
             printf 'bridge: unknown directive: %s\n' "$directive" >&2
             return 1

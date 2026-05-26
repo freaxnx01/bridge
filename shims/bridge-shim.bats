@@ -4,7 +4,7 @@
 setup_file() {
     BRIDGE_TEST_DIR=$(mktemp -d)
     export BRIDGE_TEST_DIR
-    (cd "$BATS_TEST_DIRNAME/.." && go build -o "$BRIDGE_TEST_DIR/bridge-go" ./cmd/bridge)
+    (cd "$BATS_TEST_DIRNAME/.." && go build -o "$BRIDGE_TEST_DIR/bridge" ./cmd/bridge)
     export PATH="$BRIDGE_TEST_DIR:$PATH"
 }
 
@@ -34,7 +34,7 @@ teardown_file() {
     # Heredoc is single-quoted so no expansion happens inside; the stub
     # references $TEST_OUT (env-injected) at run time.
     # After `bash -c CMD _ 'hi there'`, "hi there" is $1 inside CMD ($0 is "_").
-    cat > "$stubdir/bridge-go" <<'STUB'
+    cat > "$stubdir/bridge" <<'STUB'
 #!/usr/bin/env bash
 if [ "$1" = "__preflight" ]; then
     printf "exec:bash -c '%s' _ '%s'\n" 'printf %s "$1" > '"$TEST_OUT" 'hi there'
@@ -42,7 +42,7 @@ else
     exit 0
 fi
 STUB
-    chmod +x "$stubdir/bridge-go"
+    chmod +x "$stubdir/bridge"
     PATH="$stubdir:$PATH" bash -c "source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever" || true
     run cat "$out"
     [ "$status" -eq 0 ]

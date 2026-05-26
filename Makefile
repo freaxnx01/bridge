@@ -41,8 +41,14 @@ build-go:
 test-go:
 	go test ./...
 
+# install-go installs the Go binary as `bridge` on PATH. The bash bridge()
+# function (still sourced from ~/.bashrc until Plan C task 3) shadows this
+# in interactive shells, so this is safe to run before cutover. After cutover,
+# the shim's `command bridge` resolves here.
 install-go: build-go
-	install -m 0755 bridge-go $(HOME)/.local/bin/bridge-go
+	install -m 0755 bridge-go $(HOME)/.local/bin/bridge
+	@# Clean up the previous installed name to avoid two binaries on PATH.
+	@rm -f $(HOME)/.local/bin/bridge-go
 
 .PHONY: install-shim
 install-shim:

@@ -1,6 +1,6 @@
 # bridge-shim.ps1 — dot-sourced from $PROFILE once Phase 3 cuts over.
 function bridge {
-    $directive = & bridge-go.exe __preflight @args
+    $directive = & bridge.exe __preflight @args
     if ($LASTEXITCODE -ne 0) { return }
     switch -Regex ($directive) {
         '^cd:(.+)$'   { Set-Location $matches[1] }
@@ -9,7 +9,7 @@ function bridge {
             $cmd, $rest = $parts[0], $parts[1]
             Start-Process -FilePath $cmd -ArgumentList $rest -NoNewWindow -Wait
         }
-        '^noop$'      { & bridge-go.exe @args }
+        '^noop$'      { & bridge.exe @args }
         default       {
             Write-Error "bridge: unknown directive: $directive"
         }
