@@ -37,6 +37,9 @@ func dispatchPreflight(out io.Writer, args []string) error {
 		return preflightPicker(out)
 	}
 	head := args[0]
+	if head == "sessions" && len(args) >= 3 && args[1] == "attach" {
+		return preflightSessionsAttach(out, args[2])
+	}
 	if head == "open" {
 		return preflightOpen(out, args[1:])
 	}
@@ -126,6 +129,25 @@ func preflightOpen(out io.Writer, args []string) error {
 		return err
 	}
 	return shellbridge.EmitExec(out, argv)
+}
+
+func preflightSessionsAttach(out io.Writer, slot string) error {
+	sessions, err := loadSessions()
+	if err != nil {
+		return err
+	}
+	found := false
+	for _, s := range sessions {
+		if s.SlotID == slot {
+			found = true
+			break
+		}
+	}
+	if !found {
+		fmt.Fprintf(os.Stderr, "bridge: no session %q\n", slot)
+		os.Exit(2)
+	}
+	return shellbridge.EmitExec(out, launcher.New().AttachArgv(slot))
 }
 
 // slotIDFor produces a deterministic tmux session name.
