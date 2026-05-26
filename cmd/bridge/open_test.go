@@ -34,6 +34,45 @@ func TestOpenByExactName(t *testing.T) {
 	}
 }
 
+func TestOpenJSONEnrichesFromRepoMetaCache(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	bridgeCache := filepath.Join(cache, "bridge")
+	_ = os.MkdirAll(bridgeCache, 0o755)
+	_ = os.WriteFile(filepath.Join(bridgeCache, "repo-meta.json"), []byte(`{
+		"github/freaxnx01/public/bridge": {
+			"description": "the bridge",
+			"topics": ["dev-tools","cli"],
+			"default_branch": "main",
+			"remote_url": "https://github.com/freaxnx01/bridge"
+		}
+	}`), 0o644)
+
+	cmd := bridgeCmd("open", "bridge", "--json")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	var sout stringBuf
+	cmd.Stdout = &sout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var r map[string]any
+	if err := json.Unmarshal([]byte(sout.String()), &r); err != nil {
+		t.Fatalf("json: %v in %s", err, sout.String())
+	}
+	if r["desc"] != "the bridge" {
+		t.Errorf("desc: %+v", r)
+	}
+	if r["default_branch"] != "main" {
+		t.Errorf("default_branch: %+v", r)
+	}
+	if r["remote_url"] != "https://github.com/freaxnx01/bridge" {
+		t.Errorf("remote_url: %+v", r)
+	}
+}
+
 func TestOpenUnknownNameExits2(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
