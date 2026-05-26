@@ -1,11 +1,19 @@
 package main
 
 import (
+	"fmt"
 	"io"
+	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
 
+	"github.com/freaxnx01/bridge/internal/agents"
+	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/shellbridge"
+	"github.com/freaxnx01/bridge/internal/store"
 )
 
 var preflightCmd = &cobra.Command{
@@ -24,13 +32,78 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	return dispatchPreflight(cmd.OutOrStdout(), args)
 }
 
-// dispatchPreflight inspects the user-typed args and decides what directive
-// (if any) the parent shell must perform. For verbs handled entirely inside
-// the Go binary (list, slots, status, …), it returns noop. For verbs that
-// must change the shell (open, sessions attach, the no-arg picker, a bare
-// positional repo name), it emits the corresponding directive.
-//
-// Phase 2 grows this function task by task. This task only knows noop.
 func dispatchPreflight(out io.Writer, args []string) error {
+	if len(args) == 0 {
+		return shellbridge.EmitNoop(out)
+	}
+	if args[0] == "open" {
+		return preflightOpen(out, args[1:])
+	}
 	return shellbridge.EmitNoop(out)
+}
+
+func preflightOpen(out io.Writer, args []string) error {
+	var name, agentName string
+	for i := 0; i < len(args); i++ {
+		switch args[i] {
+		case "--agent":
+			if i+1 < len(args) {
+				agentName = args[i+1]
+				i++
+			}
+		case "-w", "--worktree":
+			if i+1 < len(args) {
+				i++ // skip value
+			}
+		case "--rc", "--remote-control", "--json":
+			// ignore in preflight
+		default:
+			if name == "" && !strings.HasPrefix(args[i], "-") {
+				name = args[i]
+			}
+		}
+	}
+	if name == "" {
+		return shellbridge.EmitNoop(out)
+	}
+	repos, err := core.DiscoverRepos(reposRoot())
+	if err != nil {
+		return err
+	}
+	repo, ok := findRepoByName(repos, name)
+	if !ok {
+		matches := findReposByKeyword(repos, name)
+		if len(matches) == 1 {
+			repo = matches[0]
+		} else {
+			fmt.Fprintf(os.Stderr, "bridge: unknown repo %q\n", name)
+			os.Exit(2)
+		}
+	}
+	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
+
+	if agentName == "" {
+		return shellbridge.EmitCD(out, repo.Path)
+	}
+	spec, err := agents.Resolve(agentName)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
+		os.Exit(2)
+	}
+	slot := slotIDFor(repo, "")
+	l := launcher.New()
+	argv, err := l.LaunchArgv(slot, repo.Path, spec)
+	if err != nil {
+		return err
+	}
+	return shellbridge.EmitExec(out, argv)
+}
+
+// slotIDFor produces a deterministic tmux session name.
+func slotIDFor(repo core.Repo, worktree string) string {
+	id := repo.Name
+	if worktree != "" {
+		id += "-wt-" + worktree
+	}
+	return id
 }
