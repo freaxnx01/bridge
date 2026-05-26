@@ -39,6 +39,16 @@ func TestDirectiveNoop(t *testing.T) {
 	}
 }
 
+func TestDirectiveCancel(t *testing.T) {
+	var buf bytes.Buffer
+	if err := EmitCancel(&buf); err != nil {
+		t.Fatal(err)
+	}
+	if buf.String() != "cancel\n" {
+		t.Errorf("got %q", buf.String())
+	}
+}
+
 func TestDirectiveExecRejectsEmpty(t *testing.T) {
 	var buf bytes.Buffer
 	if err := EmitExec(&buf, nil); err == nil {

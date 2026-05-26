@@ -38,7 +38,7 @@ func TestPickerFixtureCancel(t *testing.T) {
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
-	if strings.TrimSpace(string(out)) != "noop" {
+	if strings.TrimSpace(string(out)) != "cancel" {
 		t.Errorf("got %q", out)
 	}
 }

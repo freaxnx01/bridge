@@ -22,14 +22,14 @@ func TestPreflightNoArgs(t *testing.T) {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
 	s := strings.TrimSpace(string(out))
-	if s != "noop" {
-		t.Errorf("got %q, want noop", s)
+	if s != "cancel" {
+		t.Errorf("got %q, want cancel", s)
 	}
 }
 
 func TestPreflightDashRRoutesToPicker(t *testing.T) {
 	// `bridge -r` must NOT dump text — it routes to the picker. Using the
-	// cancel fixture so we get a deterministic noop without needing fzf.
+	// cancel fixture so we get a deterministic cancel without needing fzf.
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	cmd := bridgeCmd("__preflight", "-r")
@@ -43,8 +43,8 @@ func TestPreflightDashRRoutesToPicker(t *testing.T) {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
 	s := strings.TrimSpace(string(out))
-	if s != "noop" {
-		t.Errorf("got %q, want noop (picker cancel)", s)
+	if s != "cancel" {
+		t.Errorf("got %q, want cancel (picker cancel)", s)
 	}
 }
 
@@ -62,8 +62,8 @@ func TestPreflightRefreshRoutesToPicker(t *testing.T) {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
 	s := strings.TrimSpace(string(out))
-	if s != "noop" {
-		t.Errorf("got %q, want noop", s)
+	if s != "cancel" {
+		t.Errorf("got %q, want cancel", s)
 	}
 }
 

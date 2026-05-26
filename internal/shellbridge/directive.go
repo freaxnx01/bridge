@@ -40,6 +40,16 @@ func EmitNoop(w io.Writer) error {
 	return err
 }
 
+// EmitCancel writes "cancel\n". The shim treats this as a silent exit 0 —
+// distinct from noop, which falls through to `command bridge "$@"`. Use this
+// for interactive cancels (e.g. ESC in the picker) so the original argv isn't
+// re-run through cobra, which would otherwise hit legacy rewrites like
+// `-r` → `list -r` and dump the text list.
+func EmitCancel(w io.Writer) error {
+	_, err := fmt.Fprintln(w, "cancel")
+	return err
+}
+
 // shellQuote returns s safely quoted for /bin/sh.
 // Only quotes when needed; arguments without whitespace or shell metacharacters
 // are passed through unchanged.

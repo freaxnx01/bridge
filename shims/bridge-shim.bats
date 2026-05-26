@@ -50,3 +50,25 @@ STUB
     rm -rf "$stubdir" "$out"
     unset TEST_OUT
 }
+
+@test "cancel directive exits 0 without calling binary fallback (#63)" {
+    # If the shim treated cancel like noop, it would re-run `bridge -r`, which
+    # would hit the legacy rewrite (-r → list -r) and dump the text list to
+    # stdout. cancel must exit silently.
+    stubdir=$(mktemp -d)
+    cat > "$stubdir/bridge" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "__preflight" ]; then
+    echo cancel
+    exit 0
+fi
+echo "FALLBACK CALLED with args: $*"
+exit 0
+STUB
+    chmod +x "$stubdir/bridge"
+    run bash -c "export PATH=\"$stubdir:\$PATH\"; source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge -r"
+    [ "$status" -eq 0 ]
+    [[ "$output" != *"FALLBACK CALLED"* ]]
+    [ -z "$output" ]
+    rm -rf "$stubdir"
+}

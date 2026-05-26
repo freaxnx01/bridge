@@ -17,6 +17,10 @@ bridge() {
         # the directive as data, turning literal quotes into argv chars.
         exec:*) eval "exec ${directive#exec:}" ;;
         noop)   command bridge "$@" ;;
+        # `cancel` = interactive cancel (e.g. ESC in picker). Silent exit 0.
+        # Distinct from noop so we don't re-run the original argv, which would
+        # hit legacy rewrites like `-r` → `list -r` and dump the text list.
+        cancel) return 0 ;;
         *)
             printf 'bridge: unknown directive: %s\n' "$directive" >&2
             return 1

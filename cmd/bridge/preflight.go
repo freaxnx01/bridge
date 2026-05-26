@@ -59,7 +59,7 @@ func dispatchPreflight(out io.Writer, args []string) error {
 			}
 			slot = pickSession(sessions)
 			if slot == "" {
-				return shellbridge.EmitNoop(out)
+				return shellbridge.EmitCancel(out)
 			}
 		}
 		return preflightSessionsAttach(out, slot)
@@ -101,7 +101,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 		return err
 	}
 	if !ok {
-		return shellbridge.EmitNoop(out)
+		return shellbridge.EmitCancel(out)
 	}
 
 	var repo core.Repo
@@ -116,7 +116,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 		}
 		repo = repoFromClonedRef(root, *choice.Remote, cloned)
 	default:
-		return shellbridge.EmitNoop(out)
+		return shellbridge.EmitCancel(out)
 	}
 
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
@@ -142,7 +142,7 @@ func preflightPicker(out io.Writer) error {
 		return err
 	}
 	if !ok {
-		return shellbridge.EmitNoop(out)
+		return shellbridge.EmitCancel(out)
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
 	if agent := os.Getenv("BRIDGE_DEFAULT_AGENT"); agent != "" {

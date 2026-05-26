@@ -29,7 +29,7 @@ Each forge directory has an `.envrc` (loaded by direnv) that exports the appropr
 ```
 bridge                          # fzf picker (local repos, MRU on top)
 bridge <name>                   # case-insensitive basename lookup; on miss, keyword search across cached topics/desc
-bridge -r                       # picker (no network) — local repos
+bridge -r                       # picker (no network) — local + cached remote rows (↓ marker = clone-on-select)
 bridge --refresh                # picker + refresh remote cache (bounded by 5s)
 bridge -a / --attach            # session picker → tmux attach
 bridge -D <name>                # delete a local repo
