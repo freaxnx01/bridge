@@ -43,3 +43,11 @@ test-go:
 
 install-go: build-go
 	install -m 0755 bridge-go $(HOME)/.local/bin/bridge-go
+
+.PHONY: install-shim
+install-shim:
+	install -d $(HOME)/.local/share/bridge
+	install -m 0644 shims/bridge-shim.sh $(HOME)/.local/share/bridge/bridge-shim.sh
+	@echo
+	@echo "Shim installed to $(HOME)/.local/share/bridge/bridge-shim.sh"
+	@echo "DO NOT add to ~/.bashrc yet — Phase 3 (Plan C) handles cutover."
