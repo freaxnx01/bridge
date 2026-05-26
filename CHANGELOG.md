@@ -9,7 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- `bridge -r` / `bridge --refresh` now invoke the interactive picker instead of dumping text (regression vs bash bridge, #42). Bare `-r` opens the picker against local repos immediately (no network); `--refresh` additionally kicks off a remote-cache refresh bounded by a 5s deadline so the picker can't stall on slow forge APIs. Selecting remote-only entries from the picker (clone-on-select) is tracked as a follow-up. `bridge list -r` retains the text-output shape for scripts.
+- `bridge -r` / `bridge --refresh` now invoke the interactive picker instead of dumping text (regression vs bash bridge, #42). Bare `-r` opens the picker against local repos + cached remote refs immediately (no network); `--refresh` additionally warms the remote cache bounded by a 5s deadline. `bridge list -r` retains the text-output shape for scripts.
+- Picker surfaces **remote-only** repos as `↓ <name>` rows alongside local ones (#54). Selecting a remote entry shells out to `direnv exec <parent-dir> git clone <url> <target>` so the per-dir forge token (from `.envrc`) is loaded; clone progress streams to stderr. Requires `direnv` on PATH. On clone failure the partial target dir is removed so a retry can succeed.
 - `bridge -a` / `bridge --attach` are now legacy-mapped to `bridge sessions attach`, restoring the muscle-memory entry point for the live-session picker (#44).
 
 ## [2.0.0] - 2026-05-26
