@@ -73,16 +73,14 @@ func dispatchPreflight(out io.Writer, args []string) error {
 	return shellbridge.EmitNoop(out)
 }
 
-// preflightPickerWithRemote runs the picker over local repos. For
-// `--refresh` it also kicks off a remote-cache refresh, bounded by a short
-// deadline so the picker can't stall on slow forge APIs. Selecting
-// remote-only entries from the picker is not yet supported (separate
-// follow-up to #42).
+// preflightPickerWithRemote runs the combined picker over local repos plus
+// any remote refs in the cache. With `--refresh` it warms the remote cache
+// first (bounded by 5s so a slow forge can't stall the picker).
 //
-// Bare `bridge -r` does NOT trigger a network call here — it just opens the
-// picker. The remote cache stays whatever `bridge list -r [--refresh]` last
-// wrote; users who want a guaranteed fresh listing should pass `--refresh`.
-// This preserves the bash bridge's snappy interactive feel.
+// Bare `-r` does NOT trigger a network call — it shows whatever the cache
+// holds. On selection of a remote-only entry the binary shells out to
+// `direnv exec <parent> git clone <url>` to acquire credentials, then emits
+// a directive as if the repo were local. See #54.
 func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 	root := reposRoot()
 	local, err := core.DiscoverRepos(root)
@@ -90,33 +88,48 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 		return err
 	}
 	if refresh {
-		// Bound the remote fetch so a hung forge call can't lock up the
-		// picker indefinitely. 5s is generous for healthy networks and short
-		// enough that the user can ctrl-C without thinking the binary hung.
 		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		if _, ferr := loadOrFetchRemote(ctx, local, true); ferr != nil {
-			fmt.Fprintf(os.Stderr, "warning: remote refresh failed (continuing with local picker): %v\n", ferr)
+			fmt.Fprintf(os.Stderr, "warning: remote refresh failed (continuing with cached picker): %v\n", ferr)
 		}
 		cancel()
 	}
-	r, ok, err := pickRepo(local)
+	remote := readRemoteCache()
+
+	choice, ok, err := pickRepoOrRemote(local, remote)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return shellbridge.EmitNoop(out)
 	}
-	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
+
+	var repo core.Repo
+	switch {
+	case choice.Local != nil:
+		repo = *choice.Local
+	case choice.Remote != nil:
+		cloned, cerr := cloneRemoteRepo(*choice.Remote)
+		if cerr != nil {
+			fmt.Fprintf(os.Stderr, "bridge: %v\n", cerr)
+			os.Exit(2)
+		}
+		repo = repoFromClonedRef(root, *choice.Remote, cloned)
+	default:
+		return shellbridge.EmitNoop(out)
+	}
+
+	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
 	if agent := os.Getenv("BRIDGE_DEFAULT_AGENT"); agent != "" {
 		spec, err := agents.Resolve(agent)
 		if err == nil {
-			argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
+			argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
 			if err == nil {
 				return shellbridge.EmitExec(out, argv)
 			}
 		}
 	}
-	return shellbridge.EmitCD(out, r.Path)
+	return shellbridge.EmitCD(out, repo.Path)
 }
 
 func preflightPicker(out io.Writer) error {
