@@ -61,3 +61,32 @@ func pickRepo(repos []core.Repo) (core.Repo, bool, error) {
 	}
 	return core.Repo{}, false, errors.New("picker: chosen repo not in list")
 }
+
+// pickSession mirrors pickRepo for sessions. Returns "" on cancel.
+func pickSession(sessions []core.Session) string {
+	if os.Getenv("BRIDGE_PICKER_FIXTURE_CANCEL") != "" {
+		return ""
+	}
+	if name := os.Getenv("BRIDGE_PICKER_FIXTURE"); name != "" {
+		for _, s := range sessions {
+			if s.SlotID == name {
+				return s.SlotID
+			}
+		}
+		return ""
+	}
+	if _, err := exec.LookPath("fzf"); err != nil {
+		return ""
+	}
+	var input bytes.Buffer
+	for _, s := range sessions {
+		input.WriteString(s.SlotID + "\n")
+	}
+	cmd := exec.Command("fzf", "--prompt=session> ")
+	cmd.Stdin = &input
+	cmd.Stderr = os.Stderr
+	var out bytes.Buffer
+	cmd.Stdout = &out
+	_ = cmd.Run()
+	return strings.TrimSpace(out.String())
+}

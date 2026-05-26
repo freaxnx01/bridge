@@ -37,8 +37,22 @@ func dispatchPreflight(out io.Writer, args []string) error {
 		return preflightPicker(out)
 	}
 	head := args[0]
-	if head == "sessions" && len(args) >= 3 && args[1] == "attach" {
-		return preflightSessionsAttach(out, args[2])
+	if head == "sessions" && len(args) >= 2 && args[1] == "attach" {
+		slot := ""
+		if len(args) >= 3 {
+			slot = args[2]
+		} else {
+			sessions, _ := loadSessions()
+			if len(sessions) == 0 {
+				fmt.Fprintln(os.Stderr, "bridge: no live sessions to attach to")
+				os.Exit(2)
+			}
+			slot = pickSession(sessions)
+			if slot == "" {
+				return shellbridge.EmitNoop(out)
+			}
+		}
+		return preflightSessionsAttach(out, slot)
 	}
 	if head == "open" {
 		return preflightOpen(out, args[1:])
