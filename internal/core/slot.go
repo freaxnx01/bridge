@@ -112,6 +112,25 @@ func writeSlotsLocked(path string, slots []Slot) error {
 	return store.AtomicWrite(path, b)
 }
 
+// PruneSlots partitions slots into (kept, dropped) based on whether each
+// slot's ID matches any live session's SlotID. Pure function — used by the
+// `bridge slots prune` command. Slot IDs are tmux session names, so the
+// match is direct equality.
+func PruneSlots(slots []Slot, sessions []Session) (kept, dropped []Slot) {
+	live := make(map[string]bool, len(sessions))
+	for _, s := range sessions {
+		live[s.SlotID] = true
+	}
+	for _, s := range slots {
+		if live[s.ID] {
+			kept = append(kept, s)
+		} else {
+			dropped = append(dropped, s)
+		}
+	}
+	return
+}
+
 // UpsertSlot adds slot to the registry, or replaces an existing entry whose
 // ID matches. Read-modify-write is performed under the same flock used by
 // WriteSlots, so concurrent UpsertSlot calls do not lose entries.

@@ -7,6 +7,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bridge slots prune` — drop slot entries whose tmux session is no longer live (#39). Refuses to run if tmux is unavailable (would otherwise wipe the registry on tmux-less hosts).
+- `bridge slots` now marks live entries with `*` so staleness is visible without auto-mutating the file. `--json` output gains a `live` bool per slot.
+
 ### Fixed
 
 - `bridge -r` / `bridge --refresh` now invoke the interactive picker instead of dumping text (regression vs bash bridge, #42). Bare `-r` opens the picker against local repos + cached remote refs immediately (no network); `--refresh` additionally warms the remote cache bounded by a 5s deadline. `bridge list -r` retains the text-output shape for scripts.
