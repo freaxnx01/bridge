@@ -46,10 +46,18 @@ def find_new_slot(path: str, before_keys: set[str], repo: str) -> dict | None:
     return None
 
 
-def spawn_bridge(name: str, extra_args: list[str] | None = None) -> str:
-    """Launch `bridge <name> [extra_args...]` in detached tmux. Return wrapper session name."""
+def spawn_bridge(name: str, extra_args: list[str] | None = None, agent: str = "claude") -> str:
+    """Launch `bridge open <name> --agent <agent> [extra_args...]` in detached tmux.
+
+    Post v2.0.0 Go cutover, bare `bridge <name>` emits a `cd:` directive that
+    the shim handles by `cd`ing in the wrapper bash — the wrapper then exits
+    without spawning anything. `--agent` is required so the directive becomes
+    `exec:tmux new-session ...` (or the nested switch-client form), which
+    actually launches an agent session that outlives the wrapper.
+    """
     wrapper = f"bridge-spawn-{secrets.token_hex(3)}"
-    parts = [shlex.quote(name)] + [shlex.quote(a) for a in (extra_args or [])]
+    parts = ["open", shlex.quote(name), "--agent", shlex.quote(agent)]
+    parts += [shlex.quote(a) for a in (extra_args or [])]
     cmdline = "bridge " + " ".join(parts)
     LOG.info("spawn: tmux session=%s cmd=%s", wrapper, cmdline)
     subprocess.run(
