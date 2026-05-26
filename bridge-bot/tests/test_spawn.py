@@ -68,5 +68,48 @@ class SlotPollTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class SpawnBridgeTests(unittest.TestCase):
+    def _captured_cmdline(self, mock_run):
+        # subprocess.run was called with positional args=[tmux ... bash -lc <cmdline>]
+        args = mock_run.call_args_list[0].args[0]
+        # cmdline is the last positional arg
+        return args[-1]
+
+    def test_cmdline_contains_agent_claude(self):
+        # Post-cutover regression guard: without --agent claude, bare `bridge
+        # <name>` only emits a cd: directive and the wrapper exits without
+        # spawning anything. See issue #60.
+        with mock.patch("spawn.subprocess.run") as run:
+            spawn.spawn_bridge("bridge")
+            cmdline = self._captured_cmdline(run)
+        self.assertIn("--agent", cmdline)
+        self.assertIn("claude", cmdline)
+        self.assertIn("open", cmdline)
+        self.assertIn("bridge", cmdline)
+
+    def test_cmdline_passes_extra_args_after_agent(self):
+        with mock.patch("spawn.subprocess.run") as run:
+            spawn.spawn_bridge("bridge", ["-w", "feature-x"])
+            cmdline = self._captured_cmdline(run)
+        # Extra args come after the agent flag.
+        self.assertIn("--agent claude", cmdline)
+        self.assertIn("-w feature-x", cmdline)
+
+    def test_custom_agent(self):
+        with mock.patch("spawn.subprocess.run") as run:
+            spawn.spawn_bridge("bridge", agent="opencode")
+            cmdline = self._captured_cmdline(run)
+        self.assertIn("--agent opencode", cmdline)
+
+    def test_quotes_name_safely(self):
+        with mock.patch("spawn.subprocess.run") as run:
+            # Shouldn't actually be a realistic name but spawn must not let it
+            # word-split or inject.
+            spawn.spawn_bridge("repo with spaces")
+            cmdline = self._captured_cmdline(run)
+        # shlex.quote produces single-quoted form for names with spaces.
+        self.assertIn("'repo with spaces'", cmdline)
+
+
 if __name__ == "__main__":
     unittest.main()
