@@ -92,11 +92,42 @@ func TestRewriteLegacyShortArgs(t *testing.T) {
 	}
 }
 
-func TestRewriteLegacyPreflightDashR(t *testing.T) {
-	got := rewriteLegacyPreflight([]string{"-r"})
-	want := []string{"list", "-r"}
-	if !reflect.DeepEqual(got, want) {
-		t.Errorf("got %v want %v", got, want)
+func TestRewriteLegacyPreflightDashRPassthrough(t *testing.T) {
+	// -r is intentionally NOT rewritten in preflight: dispatchPreflight
+	// routes it to the picker. Asserting passthrough catches regressions
+	// where someone re-adds the old `list -r` rewrite.
+	in := []string{"-r"}
+	got := rewriteLegacyPreflight(in)
+	if !reflect.DeepEqual(got, in) {
+		t.Errorf("got %v want passthrough %v", got, in)
+	}
+}
+
+func TestRewriteLegacyPreflightRefreshPassthrough(t *testing.T) {
+	in := []string{"--refresh"}
+	got := rewriteLegacyPreflight(in)
+	if !reflect.DeepEqual(got, in) {
+		t.Errorf("got %v want passthrough %v", got, in)
+	}
+}
+
+func TestRewriteLegacyPreflightAttach(t *testing.T) {
+	for _, flag := range []string{"-a", "--attach"} {
+		got := rewriteLegacyPreflight([]string{flag})
+		want := []string{"sessions", "attach"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %v want %v", flag, got, want)
+		}
+	}
+}
+
+func TestRewriteLegacyArgsAttach(t *testing.T) {
+	for _, flag := range []string{"-a", "--attach"} {
+		got := rewriteLegacyArgs([]string{"bridge", flag})
+		want := []string{"bridge", "sessions", "attach"}
+		if !reflect.DeepEqual(got, want) {
+			t.Errorf("%s: got %v want %v", flag, got, want)
+		}
 	}
 }
 

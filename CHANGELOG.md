@@ -5,6 +5,13 @@ All notable changes to bridge are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- `bridge -r` / `bridge --refresh` now invoke the interactive picker instead of dumping text (regression vs bash bridge, #42). Bare `-r` opens the picker against local repos immediately (no network); `--refresh` additionally kicks off a remote-cache refresh bounded by a 5s deadline so the picker can't stall on slow forge APIs. Selecting remote-only entries from the picker (clone-on-select) is tracked as a follow-up. `bridge list -r` retains the text-output shape for scripts.
+- `bridge -a` / `bridge --attach` are now legacy-mapped to `bridge sessions attach`, restoring the muscle-memory entry point for the live-session picker (#44).
+
 ## [2.0.0] - 2026-05-26
 
 ### Changed

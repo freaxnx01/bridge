@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
@@ -38,6 +39,13 @@ func dispatchPreflight(out io.Writer, args []string) error {
 	if len(args) == 0 {
 		return preflightPicker(out)
 	}
+	// Picker entry points: bare `-r` / `--refresh` (no other args) → open the
+	// picker, optionally refreshing the remote cache first. Restores the bash
+	// bridge's interactive UX for `bridge -r`. The text-output `bridge list -r`
+	// remains available as an explicit verb.
+	if len(args) == 1 && (args[0] == "-r" || args[0] == "--refresh") {
+		return preflightPickerWithRemote(out, args[0] == "--refresh")
+	}
 	head := args[0]
 	if head == "sessions" && len(args) >= 2 && args[1] == "attach" {
 		slot := ""
@@ -63,6 +71,52 @@ func dispatchPreflight(out io.Writer, args []string) error {
 		return preflightOpen(out, args)
 	}
 	return shellbridge.EmitNoop(out)
+}
+
+// preflightPickerWithRemote runs the picker over local repos. For
+// `--refresh` it also kicks off a remote-cache refresh, bounded by a short
+// deadline so the picker can't stall on slow forge APIs. Selecting
+// remote-only entries from the picker is not yet supported (separate
+// follow-up to #42).
+//
+// Bare `bridge -r` does NOT trigger a network call here — it just opens the
+// picker. The remote cache stays whatever `bridge list -r [--refresh]` last
+// wrote; users who want a guaranteed fresh listing should pass `--refresh`.
+// This preserves the bash bridge's snappy interactive feel.
+func preflightPickerWithRemote(out io.Writer, refresh bool) error {
+	root := reposRoot()
+	local, err := core.DiscoverRepos(root)
+	if err != nil {
+		return err
+	}
+	if refresh {
+		// Bound the remote fetch so a hung forge call can't lock up the
+		// picker indefinitely. 5s is generous for healthy networks and short
+		// enough that the user can ctrl-C without thinking the binary hung.
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if _, ferr := loadOrFetchRemote(ctx, local, true); ferr != nil {
+			fmt.Fprintf(os.Stderr, "warning: remote refresh failed (continuing with local picker): %v\n", ferr)
+		}
+		cancel()
+	}
+	r, ok, err := pickRepo(local)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return shellbridge.EmitNoop(out)
+	}
+	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
+	if agent := os.Getenv("BRIDGE_DEFAULT_AGENT"); agent != "" {
+		spec, err := agents.Resolve(agent)
+		if err == nil {
+			argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
+			if err == nil {
+				return shellbridge.EmitExec(out, argv)
+			}
+		}
+	}
+	return shellbridge.EmitCD(out, r.Path)
 }
 
 func preflightPicker(out io.Writer) error {
