@@ -25,7 +25,7 @@ func init() {
 
 func runPresence(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return fmt.Errorf("setting presence is not implemented yet (Plan B); read-only in Plan A")
+		return setPresence(cmd, args[0])
 	}
 	p, err := core.LoadPresence(filepath.Join(cacheRoot(), "presence.json"))
 	if err != nil {

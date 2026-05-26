@@ -28,13 +28,3 @@ func TestPresenceReadJSON(t *testing.T) {
 		t.Errorf("got %+v", p)
 	}
 }
-
-func TestPresenceWriteRejected(t *testing.T) {
-	cmd := bridgeCmd("presence", "away")
-	var serr stringBuf
-	cmd.Stderr = &serr
-	err := cmd.Run()
-	if err == nil {
-		t.Fatal("expected non-zero exit")
-	}
-}
