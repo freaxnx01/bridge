@@ -2,9 +2,9 @@
 
 A repo picker and agent-session launcher. Walks `~/projects/repos/`, presents an fzf picker, then opens the selected repo in a tmux-wrapped agent session (Claude Code, Copilot, opencode, or VS Code) or just `cd`'s into it.
 
-As of `v2.0.0` (2026-05-26), `bridge` is a Go binary at `~/.local/bin/bridge` wrapped by a tiny shell-function shim. The legacy `bridge.sh` is frozen in the tree but no longer sourced; scheduled for deletion in Phase 4 ([#35](https://github.com/freaxnx01/bridge/issues/35)).
+`bridge` is a Go binary at `~/.local/bin/bridge` wrapped by a tiny shell-function shim. The legacy `bridge.sh` and friends were deleted in v2.1.0 (Phase 4, [#35](https://github.com/freaxnx01/bridge/issues/35)); the Go binary is the only implementation.
 
-> **Installing or migrating?** See [`go-migrate.md`](go-migrate.md). It covers the one-time `~/.bashrc` edit, updating an already-cut-over host, the shim source, and rollback.
+> **Installing or updating?** See [`go-migrate.md`](go-migrate.md). It covers fresh install, updating an already-installed host, and migrating from a pre-v2.1 bash-bridge host.
 
 ## Layout
 
@@ -100,33 +100,23 @@ The shim is ≤20 lines of logic on purpose. All real work lives in the binary.
 
 Forge API calls run with tokens loaded from each target dir's `.envrc` (direnv → Passbolt). HTTPS clones use an inline `credential.helper` (GitHub). Forgejo clone uses SSH (port 222) via `~/.ssh/config`. GitLab clone uses HTTPS via the `GIT_CONFIG_*` helpers the dir's `.envrc` wires.
 
-## Status of bash-era features in the Go port
+## Carryovers from bash bridge
 
-Not everything in `bridge.sh` has been ported yet. The cutover prioritized the daily picker/launcher path; specialty subsystems are tracked separately:
+Most bash-era behavior was ported during cutover; the remaining subsystems were never ported and the bash scripts implementing them were deleted in Phase 4 (#35). They will return as Go features only if reimplemented from scratch:
 
-| Feature | Status | Tracking |
-|---|---|---|
-| fzf picker (local) | ✓ shipped | [PR #46](https://github.com/freaxnx01/bridge/pull/46) |
-| Session picker for `-a/--attach` | ✓ shipped | [#44](https://github.com/freaxnx01/bridge/issues/44) |
-| Worktree wiring (`-w`) | ✓ shipped | [#36](https://github.com/freaxnx01/bridge/issues/36) |
-| Per-slot status table (`bridge status`) | ✓ shipped | [#43](https://github.com/freaxnx01/bridge/issues/43) |
-| `slots prune` + live marker | ✓ shipped | [#39](https://github.com/freaxnx01/bridge/issues/39) |
-| Sync serialization (flock) | ✓ shipped | [#38](https://github.com/freaxnx01/bridge/issues/38) |
-| Picker: remote rows + clone-on-select | open | [#54](https://github.com/freaxnx01/bridge/issues/54) |
-| Slot-count limit + displacement | open | [#56](https://github.com/freaxnx01/bridge/issues/56) (mechanism), [#32](https://github.com/freaxnx01/bridge/issues/32) (UX) |
-| Telegram per-slot pages (presence-aware) | bash-only; scope-down in flight | [#40](https://github.com/freaxnx01/bridge/issues/40), [#41](https://github.com/freaxnx01/bridge/issues/41) |
-| Startup sync (`git fetch` before launch) | bash-only | not yet filed |
-| Session-exit autosync (`bridge-autosync.sh`) | bash-only | not yet filed |
-| `--install-admin-commands` / `setup-claude-channels.sh` | bash-only | not in Go scope |
+- **Startup sync** (`git fetch && git pull --ff-only` before each launch).
+- **Session-exit autosync** (commit + push uncommitted changes when a bridge session closes).
+- **Presence-aware Telegram pages** (idle / elicitation / usage-limit notifications). Replaced operationally by Remote Control for live-session interaction. Telegram bootstrap via the slot-0 admin bot survives through `bridge-bot/` (Python).
+- **`--install-admin-commands`** (installed claude slash commands like `/status`, `/issues`).
 
-The bash scripts (`bridge.sh`, `bridge-watcher.sh`, `bridge-autosync.sh`, `bridge-unpushed-warn.sh`) remain in the tree but are **not sourced** and **not executed**. They will be deleted in Phase 4 ([#35](https://github.com/freaxnx01/bridge/issues/35)).
+`bridge-bot/` (the Python Telegram spawner) is unaffected and remains in the tree.
 
 ## Editing
 
-- Go changes go in `cmd/bridge/` and `internal/`. Don't edit the frozen bash scripts.
+- Go code lives in `cmd/bridge/` (CLI) and `internal/` (libraries).
 - Tests: `go test ./...`. Per-package: `go test ./cmd/bridge -run TestXxx`.
 - Install locally: `make install-go`. Build only: `make build-go`.
-- See [`CLAUDE.md`](CLAUDE.md) for commit conventions (Conventional Commits; tag the Go binary as `v2.0.0-go.N`).
+- See [`CLAUDE.md`](CLAUDE.md) for commit conventions (Conventional Commits; tag releases as `vX.Y.Z`).
 - Design docs: `docs/specs/2026-05-25-bridge-core-redesign-design.md`. Plans: `docs/plans/2026-05-26-bridge-core-redesign-plan-{a,b,b1,c}.md`.
 
 ## Windows

@@ -5,7 +5,20 @@ All notable changes to bridge are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [2.1.0] - 2026-05-26
+
+### Removed
+
+- **Phase 4 cleanup** (#35): deleted the frozen bash implementation.
+  - Removed: `bridge.sh`, `bridge-watcher.sh`, `bridge-autosync.sh`, `bridge-unpushed-warn.sh`, `setup-claude-channels.sh`, `bridge-hooks/`, all bash tests under `tests/`.
+  - Removed: `internal/core` bash-format read-compat for `slots.json` (the legacy `{"slots":{"<idx>":{...}}}` shape). Hosts that haven't run the Go binary since v2.0.0 should delete `~/.cache/bridge/slots.json` before upgrading.
+  - Removed: the `mru_compat_test.go` redundancy (MRU shape was always shared between bash and Go).
+  - Makefile pruned to Go targets only (`build-go`, `test-go`, `test-shim`, `install-go`, `install-shim`); shellcheck / bats / smoke targets gone.
+  - CLAUDE.md guidance simplified — no more "do not edit frozen bash" rule.
+
+### Notes
+
+- bridge-bot's `config.py` still references `setup-claude-channels.sh` in an error message; the Python bot survives but its setup script doesn't. Tracked separately.
 
 ### Added
 
