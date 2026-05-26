@@ -36,8 +36,12 @@ func dispatchPreflight(out io.Writer, args []string) error {
 	if len(args) == 0 {
 		return shellbridge.EmitNoop(out)
 	}
-	if args[0] == "open" {
+	head := args[0]
+	if head == "open" {
 		return preflightOpen(out, args[1:])
+	}
+	if !knownVerbs[head] && !strings.HasPrefix(head, "-") {
+		return preflightOpen(out, args)
 	}
 	return shellbridge.EmitNoop(out)
 }
