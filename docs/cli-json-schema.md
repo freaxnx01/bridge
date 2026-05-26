@@ -135,3 +135,38 @@ Array of `Issue`:
 ```
 
 Codes: `1` internal/FS/subprocess; `2` user input; `3` network with no cache fallback.
+
+## `bridge open --json`
+
+Same shape as a single `Repo` object from `bridge list --json`:
+
+```json
+{
+  "name": "bridge",
+  "path": "/home/me/projects/repos/github/me/public/bridge",
+  "forge": "github",
+  "owner": "me",
+  "visibility": "public",
+  "topics": [],
+  "desc": "",
+  "default_branch": "",
+  "remote_url": "",
+  "last_used": "0001-01-01T00:00:00Z"
+}
+```
+
+When invoked via the shell shim (`__preflight`), the binary instead emits a
+directive on stdout (`cd:<path>` or `exec:<argv>`); the shim consumes it and
+nothing reaches the user's terminal as JSON. Use `bridge open --json` as a
+scriptable form when you want the structured Repo data without changing the
+shell.
+
+## Interactive commands (no structured stdout)
+
+These write state or detach from stdout; they intentionally do not emit JSON:
+
+- `bridge rm <name>` — prints removal confirmation
+- `bridge presence away|back|auto` — silent on success
+- `bridge sync now` — prints a count summary
+- `bridge sync --auto` — long-running; log to file
+- `bridge watch` — long-running; log to file
