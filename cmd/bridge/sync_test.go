@@ -46,11 +46,3 @@ func TestSyncStatusMissing(t *testing.T) {
 		t.Errorf("expected object even when missing")
 	}
 }
-
-func TestSyncNowNotImplemented(t *testing.T) {
-	cmd := bridgeCmd("sync", "now")
-	err := cmd.Run()
-	if err == nil {
-		t.Fatal("expected non-zero exit (Plan B)")
-	}
-}

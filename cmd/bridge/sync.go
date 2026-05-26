@@ -33,7 +33,11 @@ func init() {
 
 func runSync(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
-		return fmt.Errorf("`bridge sync %s` is not implemented yet (Plan B); read-only status in Plan A", args[0])
+		switch args[0] {
+		case "now":
+			return runSyncNow(cmd)
+		}
+		return fmt.Errorf("`bridge sync %s` is not implemented", args[0])
 	}
 	b, err := store.ReadFile(filepath.Join(cacheRoot(), "sync.json"))
 	if err != nil {
