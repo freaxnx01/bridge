@@ -94,7 +94,7 @@ Makefile               add `install-shim` target (does NOT touch ~/.bashrc)
 
 ---
 
-## Task 1: `internal/shellbridge` — directive type + emitters
+## Task 1: `internal/shellbridge` — directive type + emitters ✅
 
 **Files:**
 - Create: `internal/shellbridge/directive.go`
@@ -259,7 +259,7 @@ git commit -m "feat(go): shellbridge directive protocol (cd/exec/noop)"
 
 ---
 
-## Task 2: `cmd/bridge __preflight` hidden subcommand
+## Task 2: `cmd/bridge __preflight` hidden subcommand ✅
 
 The shim's only entry point. Receives the same argv the user typed; decides what the parent shell must do.
 
@@ -367,7 +367,7 @@ git commit -m "feat(go): __preflight hidden subcommand (noop default)"
 
 ---
 
-## Task 3: Shell shim — `shims/bridge-shim.sh` + bats test
+## Task 3: Shell shim — `shims/bridge-shim.sh` + bats test ✅
 
 The shim is a tiny wrapper. It is NOT installed to `~/.bashrc` by this plan; that's Phase 3. Here we just ship the file and a bats test that exercises the directive contract through a real subshell.
 
@@ -457,7 +457,7 @@ git commit -m "feat(shim): bash shell shim + bats smoke test"
 
 ---
 
-## Task 4: PowerShell shim — `shims/bridge-shim.ps1`
+## Task 4: PowerShell shim — `shims/bridge-shim.ps1` ✅
 
 Analogous to bash shim. No bats test (no Windows CI); we only verify it parses with `pwsh -Command "Get-Command bridge"` if available, otherwise this task is build-time only.
 
@@ -506,7 +506,7 @@ git commit -m "feat(shim): powershell shell shim"
 
 ---
 
-## Task 5: `internal/store/mru_writer.go` — append + touch
+## Task 5: `internal/store/mru_writer.go` — append + touch ✅
 
 Plan A read MRU; now we need to write to it (so `bridge open <name>` records a hit). Append-only with dedup-on-read keeps the file simple.
 
@@ -641,7 +641,7 @@ git commit -m "feat(go): store.MRUTouch (append-only writer)"
 
 ---
 
-## Task 6: `internal/store/pidfile.go` — PID file helpers
+## Task 6: `internal/store/pidfile.go` — PID file helpers ✅
 
 Used by `sync --auto` and `watch --daemonize`.
 
@@ -790,7 +790,7 @@ git commit -m "feat(go): store.PIDFile helpers (write/read/remove/IsRunning)"
 
 ---
 
-## Task 7: `internal/agents` — resolve agent name → command line
+## Task 7: `internal/agents` — resolve agent name → command line ✅
 
 For Phase 2 we support: `claude`, `copilot` (alias `gh copilot suggest`? no — `copilot-cli`), `opencode`, `code`. Each agent boils down to: executable + args. Caller adds repo path / worktree as needed.
 
@@ -907,7 +907,7 @@ git commit -m "feat(go): internal/agents (resolve agent name → command)"
 
 ---
 
-## Task 8: `internal/launcher` — interface + Linux tmux implementation
+## Task 8: `internal/launcher` — interface + Linux tmux implementation ✅
 
 Launchers turn `(slot, repo path, agent spec)` into a concrete shell command that, when exec'd by the parent shell, lands the user inside their session. For Linux this is `tmux new-session -A -s <slot> -c <path> <agent argv...>`.
 
@@ -1039,7 +1039,7 @@ git commit -m "feat(go): internal/launcher + tmux implementation"
 
 ---
 
-## Task 9: Windows `internal/launcher/wt.go`
+## Task 9: Windows `internal/launcher/wt.go` ✅
 
 Build-tagged Windows implementation. No CI; we verify it cross-compiles.
 
@@ -1121,7 +1121,7 @@ git commit -m "feat(go): internal/launcher Windows Terminal implementation"
 
 ---
 
-## Task 10: Logging plumbing — `cmd/bridge/logging.go`
+## Task 10: Logging plumbing — `cmd/bridge/logging.go` ✅
 
 `log/slog` for the binary. Defaults to silent. `-v` enables INFO to stderr (human text), `-vv` enables DEBUG. Daemons (`sync --auto`, `watch --daemonize`) additionally write JSON-lines to `~/.cache/bridge/bridge.log`, rotated at 10 MB, keep 3.
 
@@ -1295,7 +1295,7 @@ git commit -m "feat(go): structured logging with slog + file rotation"
 
 ---
 
-## Task 11: `bridge open <name>` — explicit form
+## Task 11: `bridge open <name>` — explicit form ✅ (note: `go run` wraps exit codes to 1; tests assert via stderr containing "exit status 2")
 
 Looks up a repo by name, validates, writes MRU, returns. In normal cobra flow it prints status; in `__preflight` flow (Task 13) it emits a `cd:` or `exec:` directive.
 
@@ -1467,7 +1467,7 @@ git commit -m "feat(go): bridge open <name> (validate + MRU touch + --json)"
 
 ---
 
-## Task 12: Keyword fallback for `open`
+## Task 12: Keyword fallback for `open` ✅
 
 Spec calls for keyword fallback when the exact-name lookup misses.
 
@@ -1572,7 +1572,7 @@ git commit -m "feat(go): bridge open keyword fallback + ambiguity error"
 
 ---
 
-## Task 13: `__preflight` knows about `open` — emits `exec:` directive
+## Task 13: `__preflight` knows about `open` — emits `exec:` directive ✅
 
 Now `__preflight` actually does something. For `bridge __preflight open <name> [flags]`, it resolves the repo, resolves the agent, asks the launcher for argv, and emits an `exec:<argv>` directive.
 
@@ -1738,7 +1738,7 @@ git commit -m "feat(go): __preflight open emits cd/exec directives"
 
 ---
 
-## Task 14: Positional `bridge <name>` — alias for `open`
+## Task 14: Positional `bridge <name>` — alias for `open` ✅
 
 Cobra doesn't natively dispatch unknown-verb-looks-like-a-repo to `open`. Easiest: a `PersistentPreRunE` on `rootCmd` that, before cobra parses, rewrites `os.Args` so a single bare token becomes `open <token>`.
 
@@ -1882,7 +1882,7 @@ git commit -m "feat(go): positional bridge <name> rewrites to bridge open <name>
 
 ---
 
-## Task 15: `bridge` no-arg picker — fzf subprocess
+## Task 15: `bridge` no-arg picker — fzf subprocess ✅
 
 When invoked with no args, `bridge` should show a picker. Reuse fzf (it's already used by the bash version).
 
@@ -2065,7 +2065,7 @@ git commit -m "feat(go): bridge no-arg picker (fzf with test fixtures)"
 
 ---
 
-## Task 16: `bridge sessions attach <name>` — emit attach directive
+## Task 16: `bridge sessions attach <name>` — emit attach directive ✅
 
 Cobra subcommand of `sessions`. Validates the session exists; preflight emits `exec:tmux attach-session -t <slot>`.
 
@@ -2189,7 +2189,7 @@ git commit -m "feat(go): bridge sessions attach <slot> via preflight exec"
 
 ---
 
-## Task 17: `bridge rm <name>` — delete a local repo
+## Task 17: `bridge rm <name>` — delete a local repo ✅
 
 Confirms with the user (or `--yes`), removes the directory, prunes MRU.
 
@@ -2341,7 +2341,7 @@ git commit -m "feat(go): bridge rm <name> (with --yes/TTY guard)"
 
 ---
 
-## Task 18: `bridge presence away|back|auto` — write
+## Task 18: `bridge presence away|back|auto` — write ✅
 
 Plan A's `presence.go` rejected positional args. Now we wire them through.
 
@@ -2444,7 +2444,7 @@ git commit -m "feat(go): bridge presence away|back|auto (write)"
 
 ---
 
-## Task 19: `internal/syncer` — per-repo git fetch+pull driver
+## Task 19: `internal/syncer` — per-repo git fetch+pull driver ✅
 
 Shared logic for `sync now` and `sync --auto`. Receives a list of `core.Repo`, runs `git fetch && git pull --ff-only` against each, collects results.
 
@@ -2601,7 +2601,7 @@ git commit -m "feat(go): internal/syncer (per-repo git fetch+pull driver)"
 
 ---
 
-## Task 20: `bridge sync now` — one-shot sync + write sync.json
+## Task 20: `bridge sync now` — one-shot sync + write sync.json ✅
 
 Replaces Plan A's "sync now is not implemented yet" stub.
 
@@ -2718,7 +2718,7 @@ git commit -m "feat(go): bridge sync now (one-shot, writes sync.json)"
 
 ---
 
-## Task 21: `bridge sync --auto` — long-running daemon
+## Task 21: `bridge sync --auto` — long-running daemon ✅
 
 Loop: every `--interval` (default 5m), call `runSyncNow`. PID file at `~/.cache/bridge/sync.pid`. `--daemonize` forks (using `os/exec` self-restart) and detaches.
 
@@ -2865,7 +2865,7 @@ git commit -m "feat(go): bridge sync --auto daemon (PID file + signal handling)"
 
 ---
 
-## Task 22: `bridge watch` — fsnotify on `~/projects/repos/`
+## Task 22: `bridge watch` — fsnotify on `~/projects/repos/` ✅
 
 Long-running. Fires on dir create/delete and bumps a state file (`watch.last`). Mostly a hook point for future automation; for Phase 2 we ship the loop and bookkeeping.
 
@@ -3082,7 +3082,7 @@ git commit -m "feat(go): bridge watch (foreground + --status/--stop/--daemonize)
 
 ---
 
-## Task 23: `bridge sessions attach` no-arg picker
+## Task 23: `bridge sessions attach` no-arg picker ✅
 
 User-facing `bridge sessions attach` with no `<slot>` should fzf-pick from live sessions.
 
@@ -3189,7 +3189,7 @@ git commit -m "feat(go): sessions attach no-arg picker"
 
 ---
 
-## Task 24: `bridge tui` reserved subcommand
+## Task 24: `bridge tui` reserved subcommand ✅
 
 Spec reserves the verb. Ship a stub that exits 1 with a "not implemented yet (see dashboard spec)" message so the verb shows up in `--help` and can't be claimed by accident.
 
@@ -3245,7 +3245,7 @@ git commit -m "feat(go): bridge tui (reserved verb stub)"
 
 ---
 
-## Task 25: Makefile `install-shim` target
+## Task 25: Makefile `install-shim` target ✅
 
 Installs the shim file to `~/.local/share/bridge/` without modifying `~/.bashrc`. User must source it manually during Phase 3.
 
@@ -3280,7 +3280,7 @@ git commit -m "chore(go): install-shim Makefile target (does not touch ~/.bashrc
 
 ---
 
-## Task 26: Extend `docs/cli-json-schema.md` for new commands
+## Task 26: Extend `docs/cli-json-schema.md` for new commands ✅
 
 New `--json` shapes from Plan B: `bridge open --json` returns a `Repo`; `bridge presence` write returns nothing on stdout; no new schemas otherwise.
 
@@ -3339,7 +3339,7 @@ git commit -m "docs(go): extend --json schema for Plan B"
 
 ---
 
-## Task 27: Cross-compile + tag `v2.0.0-go.1`
+## Task 27: Cross-compile + tag `v2.0.0-go.1` ✅
 
 **Files:** none (verification + tag).
 
