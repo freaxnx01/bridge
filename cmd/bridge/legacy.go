@@ -44,6 +44,10 @@ func rewriteLegacyArgs(args []string) []string {
 	}
 
 	switch first {
+	case "--status":
+		out := []string{args[0], "status"}
+		out = append(out, args[2:]...)
+		return out
 	case "-r":
 		out := []string{args[0], "list", "-r"}
 		out = append(out, args[2:]...)
@@ -96,6 +100,8 @@ func rewriteLegacyPreflight(args []string) []string {
 		return args
 	}
 	switch first {
+	case "--status":
+		return append([]string{"status"}, args[1:]...)
 	case "-a", "--attach":
 		return append([]string{"sessions", "attach"}, args[1:]...)
 	case "-D":

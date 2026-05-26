@@ -83,6 +83,22 @@ func TestRewriteLegacyLeavesAwayAsArgToPresence(t *testing.T) {
 	}
 }
 
+func TestRewriteLegacyStatus(t *testing.T) {
+	got := rewriteLegacyArgs([]string{"bridge", "--status"})
+	want := []string{"bridge", "status"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestRewriteLegacyPreflightStatus(t *testing.T) {
+	got := rewriteLegacyPreflight([]string{"--status"})
+	want := []string{"status"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
 func TestRewriteLegacyShortArgs(t *testing.T) {
 	// Just program name — no rewrite, no panic.
 	in := []string{"bridge"}
