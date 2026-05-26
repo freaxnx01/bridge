@@ -2,6 +2,8 @@ package main
 
 import (
 	"fmt"
+	"os"
+	"os/exec"
 	"path/filepath"
 
 	"github.com/spf13/cobra"
@@ -75,6 +77,17 @@ func runSlots(cmd *cobra.Command, args []string) error {
 
 func runSlotsPrune(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
+	// Refuse to prune if tmux is not installed on this host. core.LiveSessions
+	// silently returns (nil, nil) when tmux is missing or has no server, which
+	// would otherwise let us wipe the entire registry on tmux-less hosts. The
+	// presence check distinguishes "no server running" (live=∅, prune all is
+	// correct — they really are dead) from "binary missing" (we don't know).
+	// Only skip the guard when a test fixture is providing session data.
+	if os.Getenv("BRIDGE_TMUX_FIXTURE") == "" {
+		if _, err := exec.LookPath("tmux"); err != nil {
+			return fmt.Errorf("prune: tmux not found in PATH; refusing to prune (would wipe registry on tmux-less host)")
+		}
+	}
 	path := filepath.Join(cacheRoot(), "slots.json")
 	slots, err := core.LoadSlots(path)
 	if err != nil {
@@ -82,8 +95,6 @@ func runSlotsPrune(cmd *cobra.Command, args []string) error {
 	}
 	sessions, err := loadSessions()
 	if err != nil {
-		// If tmux is unavailable, refuse to prune — otherwise we'd wipe the
-		// registry on every machine where tmux isn't running.
 		return fmt.Errorf("prune: cannot enumerate live sessions: %w", err)
 	}
 	kept, dropped := core.PruneSlots(slots, sessions)

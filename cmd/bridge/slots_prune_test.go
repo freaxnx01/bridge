@@ -70,6 +70,41 @@ func TestSlotsPruneNoStale(t *testing.T) {
 	}
 }
 
+func TestSlotsPruneRefusesWithoutTmux(t *testing.T) {
+	cache := t.TempDir()
+	bridgeCache := filepath.Join(cache, "bridge")
+	_ = os.MkdirAll(bridgeCache, 0o755)
+	// Seed: one entry. If the guard fails open, prune would wipe it.
+	_ = os.WriteFile(filepath.Join(bridgeCache, "slots.json"), []byte(`{"slots":[
+		{"id":"alive","repo":"x","agent":"claude","created":"2026-01-01T00:00:00Z"}
+	]}`), 0o644)
+
+	// Empty PATH = tmux binary not found. No BRIDGE_TMUX_FIXTURE either, so the
+	// guard must engage rather than fall through to the (nil, nil) silent-prune
+	// path. The TMPDIR holds the test's go-built binary, not tmux.
+	cmd := bridgeCmd("slots", "prune")
+	cmd.Env = []string{
+		"XDG_CACHE_HOME=" + cache,
+		"PATH=/var/empty",
+	}
+	var sout, serr stringBuf
+	cmd.Stdout = &sout
+	cmd.Stderr = &serr
+	err := cmd.Run()
+	if err == nil {
+		t.Fatalf("expected non-zero exit; stdout=%q stderr=%q", sout.String(), serr.String())
+	}
+	if !strings.Contains(serr.String(), "tmux not found") {
+		t.Errorf("expected 'tmux not found' in stderr, got: %s", serr.String())
+	}
+
+	// Registry must be untouched.
+	b, _ := os.ReadFile(filepath.Join(bridgeCache, "slots.json"))
+	if !strings.Contains(string(b), "alive") {
+		t.Errorf("guard failed: registry was modified: %s", b)
+	}
+}
+
 func TestSlotsListMarksLive(t *testing.T) {
 	cache := t.TempDir()
 	bridgeCache := filepath.Join(cache, "bridge")
