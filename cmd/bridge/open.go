@@ -67,6 +67,13 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: MRU touch failed: %v\n", err)
 	}
 	if openJSON {
+		// Enrich Repo with cached forge metadata (topics, description, default
+		// branch, remote URL) for --json consumers. Best-effort: missing or
+		// unreadable cache leaves the Repo untouched. Cache is populated by
+		// `bridge list -r [--refresh]`.
+		if meta, err := core.LoadRepoMeta(filepath.Join(cacheRoot(), "repo-meta.json")); err == nil {
+			repo = core.MergeRepoMeta([]core.Repo{repo}, reposRoot(), meta)[0]
+		}
 		return emitJSON(cmd.OutOrStdout(), repo)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%s\n", repo.Path)
