@@ -5,6 +5,34 @@ All notable changes to bridge are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-05-26
+
+### Changed
+
+- Complete Go-binary rewrite (`cmd/bridge`) replaces the ~3,600-line `bridge.sh`. All read paths (`list`, `slots`, `sessions`, `presence`, `sync`, `status`, `issues`) ship from Plan A; interactive paths (`open`, `rm`, presence writes, `sync now`, `sync --auto`, `watch`, `sessions attach`) plus tmux/WT launcher and shell shim ship from Plan B/B.1.
+- `~/.bashrc` now sources `~/.local/share/bridge/bridge-shim.sh` instead of `bridge.sh`. The shim invokes the Go binary via the `__preflight` directive protocol and acts on `cd:` / `exec:` / `noop` responses.
+- `bridge --status` decomposed into slim `bridge status` plus focused `bridge sessions` / `bridge slots` / `bridge presence` / `bridge sync` verbs. Each supports `--json`.
+- Legacy flags `-r`, `--refresh`, `-D`, and bare `away|back|auto` are silently forwarded to the new verbs inside the binary. Muscle memory preserved.
+
+### Added
+
+- `bridge issues` — open issues across forges with TTL cache.
+- `bridge tui` — reserved verb stub for a future dashboard spec.
+- Cross-platform support: Linux + Windows from one codebase. tmux launcher on Linux, Windows Terminal launcher on Windows. Inside-tmux invocations use `tmux switch-client` instead of nesting.
+- `--json` shape documented in `docs/cli-json-schema.md`.
+- Structured logging (`log/slog` + JSON-lines `bridge.log` with rotation) for long-running `sync --auto` and `watch` daemons.
+
+### Frozen / removed
+
+- `bridge.sh`, `bridge-watcher.sh`, `bridge-autosync.sh`, `bridge-unpushed-warn.sh` remain in the repo for one release cycle but are no longer sourced or run. They will be deleted in a follow-up PR (Phase 4).
+- `_BRIDGE_VERSION` retired. Go releases tagged `v2.0.0-go.N`.
+
+### Migration notes
+
+- Cache directory `~/.cache/bridge/` is shared between the old bash bridge and the Go binary. `slots.json` written by bash continues to be readable by Go via a read-compat shim; new entries written by Go use an array-shaped `slots` field.
+- Bash-only files (`hooks.log`, `hooks.lock`, `meta-warm.lock`, `.channels-hinted`, `sessions/`, `watcher.pid`) remain on disk; Go does not read or write them. These will be cleaned up at Phase 4.
+- Roll back the cutover by editing the `~/.bashrc` source line back to `bridge.sh` (a backup `~/.bashrc.bak-bridge-cutover-<timestamp>` is created when the shim is installed via Plan C).
+
 ## [1.41.11] - 2026-05-25
 
 ### Fixed
