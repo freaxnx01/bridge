@@ -65,6 +65,18 @@ bridge list | head   # → repo listing
 bridge bridge        # → cd's into the bridge repo
 ```
 
+## Tab completion for aliases (`brg`, etc.)
+
+`bridge` registers bash completion under its own name only — user wrappers like `brg() { bridge "$@"; }` don't inherit it (#45). To get repo-name completion on an alias, source the cobra-generated completion and then point it at your wrappers:
+
+```bash
+# in ~/.bashrc, after the shim source line
+eval "$(bridge completion bash)"
+complete -o default -o nospace -F __start_bridge brg
+```
+
+(The flags + function name match what `bridge completion bash` registers for `bridge` itself — verify with `complete -p bridge` if your build differs.) zsh and fish have equivalent `bridge completion zsh` / `fish` outputs — wire similarly for their alias mechanisms.
+
 ## What runs after the cutover
 
 | Component | Path | Role |

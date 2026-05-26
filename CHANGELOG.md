@@ -24,6 +24,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge open <name> -w <wt>` now actually uses the worktree (#36). The slot name becomes `<repo>-wt-<wt>`, the working directory is `<repo>/.worktrees/<wt>` (bash bridge convention), and the recorded slot carries the worktree field. Without `--agent`, `cd` now lands inside the worktree. Non-default worktree layouts (`git worktree list --porcelain`) remain a follow-up.
 - `bridge open <name> --json` now enriches the Repo with cached forge metadata (`desc`, `topics`, `default_branch`, `remote_url`) from `~/.cache/bridge/repo-meta.json`, populated by `bridge list -r [--refresh]` (#37). Missing or unreadable cache leaves fields empty — best-effort, never blocks. Populating `last_used` from MRU is a separate follow-up (MRU has no per-entry timestamps).
 
+### Documentation
+
+- `go-migrate.md` documents how to wire bash tab completion for user wrappers like `brg` (#45). Cobra registers completion under the literal program name only; aliases need an explicit `complete -o default -o nospace -F __start_bridge brg` after sourcing `bridge completion bash`.
+
 ## [2.0.0] - 2026-05-26
 
 ### Changed
