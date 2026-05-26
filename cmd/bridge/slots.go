@@ -23,6 +23,8 @@ func init() {
 }
 
 func runSlots(cmd *cobra.Command, args []string) error {
+	// Match the rest of the read commands: don't dump usage on runtime errors.
+	cmd.SilenceUsage = true
 	slots, err := core.LoadSlots(filepath.Join(cacheRoot(), "slots.json"))
 	if err != nil {
 		return err

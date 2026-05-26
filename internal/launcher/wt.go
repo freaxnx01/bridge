@@ -24,6 +24,13 @@ func (WT) LaunchArgv(slot, dir string, agent agents.AgentSpec) ([]string, error)
 	return argv, nil
 }
 
+// LaunchArgvNested has no separate "inside" semantics on Windows Terminal —
+// `wt.exe new-tab` opens a tab in the running WT window regardless of where
+// it was invoked from, so the same argv works.
+func (w WT) LaunchArgvNested(slot, dir string, agent agents.AgentSpec) ([]string, error) {
+	return w.LaunchArgv(slot, dir, agent)
+}
+
 func (WT) AttachArgv(slot string) []string {
 	return []string{"wt.exe", "new-tab", "--title", slot}
 }

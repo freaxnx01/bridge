@@ -138,7 +138,14 @@ func preflightOpen(out io.Writer, args []string) error {
 	}
 	slot := slotIDFor(repo, "")
 	l := launcher.New()
-	argv, err := l.LaunchArgv(slot, repo.Path, spec)
+	var argv []string
+	if os.Getenv("TMUX") != "" {
+		// Already inside tmux: nesting `tmux new-session -A` fails, so use the
+		// nested launcher that creates-detached-then-switches the current client.
+		argv, err = l.LaunchArgvNested(slot, repo.Path, spec)
+	} else {
+		argv, err = l.LaunchArgv(slot, repo.Path, spec)
+	}
 	if err != nil {
 		return err
 	}

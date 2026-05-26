@@ -68,7 +68,8 @@ func TestPreflightOpenWithAgentEmitsExec(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
-	cmd.Env = append(os.Environ(),
+	// Clear TMUX so the test exercises the outside-tmux branch deterministically.
+	cmd.Env = append(envWithout("TMUX"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 	)
@@ -80,6 +81,43 @@ func TestPreflightOpenWithAgentEmitsExec(t *testing.T) {
 	if !strings.Contains(s, " claude") {
 		t.Errorf("expected agent in argv: %q", s)
 	}
+}
+
+func TestPreflightOpenWithAgentInsideTmuxEmitsSwitchClient(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"TMUX=/tmp/fake-tmux,1,2", // emulate being inside a tmux client
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	for _, want := range []string{
+		"exec:sh -c ",
+		"tmux has-session -t bridge",
+		"tmux new-session -d -s bridge",
+		"exec tmux switch-client -t bridge",
+	} {
+		if !strings.Contains(s, want) {
+			t.Errorf("missing %q in: %s", want, s)
+		}
+	}
+}
+
+// envWithout returns os.Environ() with any entry whose key equals name removed.
+func envWithout(name string) []string {
+	src := os.Environ()
+	out := make([]string, 0, len(src))
+	prefix := name + "="
+	for _, e := range src {
+		if strings.HasPrefix(e, prefix) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
 
 func TestPreflightOpenUnknownRepoExits2(t *testing.T) {
