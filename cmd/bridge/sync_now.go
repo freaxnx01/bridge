@@ -15,6 +15,16 @@ import (
 )
 
 func runSyncNow(ctx context.Context, cmd *cobra.Command) error {
+	// Serialize concurrent sync runs. `sync now` and `sync --auto` both reach
+	// here and both write sync.json; without a flock they can overlap and one
+	// writer's content overwrites the other's. Block-and-wait matches the bash
+	// bridge behavior. See #38.
+	lock, err := store.AcquireLock(filepath.Join(cacheRoot(), "sync.lock"))
+	if err != nil {
+		return fmt.Errorf("sync: acquire lock: %w", err)
+	}
+	defer lock.Release()
+
 	repos, err := core.DiscoverRepos(reposRoot())
 	if err != nil {
 		return err

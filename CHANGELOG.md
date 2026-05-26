@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge status` now includes a per-slot detail table (slot id, kind, repo[wt], agent, age, state, tmux) joining the slot registry with live tmux sessions. Restores the at-a-glance view bash `--status` provided (#43). The 4-line summary remains at top; pass `--slim` for summary-only. Tmux sessions running outside the slot registry are surfaced as `kind=tmux` rows only when at least one of their panes runs a known agent (`claude` / `copilot` / `opencode` / `code` / `node`); see `core.KnownAgentCommands` (#53).
 - `bridge --status` is now legacy-mapped to `bridge status`, restoring the bash flag spelling (#43).
 - `--json` output keeps the legacy flat shape (`sessions`, `presence`, `sync`, `version`) for backward compatibility, with a new `rows` field carrying the detail table.
+- `bridge sync now` and `bridge sync --auto` now serialize against each other via a `sync.lock` flock around `runSyncNow`. Previously a concurrent overlap could let one writer's `sync.json` content overwrite the other's. Block-and-wait semantics match the bash bridge (#38).
 
 ## [2.0.0] - 2026-05-26
 
