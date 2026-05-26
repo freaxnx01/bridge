@@ -8,7 +8,15 @@ import (
 )
 
 func TestPreflightNoArgs(t *testing.T) {
-	out, err := bridgeCmd("__preflight").CombinedOutput()
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_PICKER_FIXTURE_CANCEL=1",
+	)
+	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}

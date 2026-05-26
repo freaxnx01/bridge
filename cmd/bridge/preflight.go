@@ -34,7 +34,7 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 
 func dispatchPreflight(out io.Writer, args []string) error {
 	if len(args) == 0 {
-		return shellbridge.EmitNoop(out)
+		return preflightPicker(out)
 	}
 	head := args[0]
 	if head == "open" {
@@ -44,6 +44,31 @@ func dispatchPreflight(out io.Writer, args []string) error {
 		return preflightOpen(out, args)
 	}
 	return shellbridge.EmitNoop(out)
+}
+
+func preflightPicker(out io.Writer) error {
+	repos, err := core.DiscoverRepos(reposRoot())
+	if err != nil {
+		return err
+	}
+	r, ok, err := pickRepo(repos)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return shellbridge.EmitNoop(out)
+	}
+	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
+	if agent := os.Getenv("BRIDGE_DEFAULT_AGENT"); agent != "" {
+		spec, err := agents.Resolve(agent)
+		if err == nil {
+			argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
+			if err == nil {
+				return shellbridge.EmitExec(out, argv)
+			}
+		}
+	}
+	return shellbridge.EmitCD(out, r.Path)
 }
 
 func preflightOpen(out io.Writer, args []string) error {
