@@ -56,4 +56,4 @@ install-shim:
 	install -m 0644 shims/bridge-shim.sh $(HOME)/.local/share/bridge/bridge-shim.sh
 	@echo
 	@echo "Shim installed to $(HOME)/.local/share/bridge/bridge-shim.sh"
-	@echo "DO NOT add to ~/.bashrc yet — Phase 3 (Plan C) handles cutover."
+	@echo "Cutover state: source this from ~/.bashrc (see docs/plans/2026-05-26-bridge-core-redesign-plan-c.md task 3)."
