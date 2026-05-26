@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"path/filepath"
+	"sort"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -73,7 +74,11 @@ func runStatus(cmd *cobra.Command, args []string) error {
 
 	if !statusSlim {
 		slots, _ := core.LoadSlots(filepath.Join(cacheRoot(), "slots.json"))
-		out.Rows = composeStatusRows(slots, sessions, time.Now())
+		// Pane commands are used to filter untagged tmux sessions to known
+		// agents only. Best-effort: errors leave panes=nil, which makes
+		// composeStatusRows skip the untagged-tmux block entirely.
+		panes, _ := core.LivePaneCommands()
+		out.Rows = composeStatusRows(slots, sessions, panes, time.Now())
 	}
 
 	if statusJSON {
@@ -93,22 +98,24 @@ func runStatus(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-// composeStatusRows joins the slot registry with live tmux sessions: every
-// slot becomes a row (kind=slot), with State+TmuxName populated from the
-// matching live session if one exists; otherwise both render as "—" (stale).
+// composeStatusRows joins the slot registry with live tmux sessions:
+//   - Every slot becomes a row (kind=slot). State+TmuxName come from a
+//     matching live session if one exists; otherwise both render as "—".
+//   - Live tmux sessions NOT in the slot registry are surfaced as kind=tmux
+//     rows only when at least one of their panes runs a known agent command
+//     (see core.KnownAgentCommands). This filter prevents unrelated shells /
+//     admin sessions from leaking into bridge status.
 //
-// Untagged tmux sessions (running on this host but not in the slot registry)
-// are NOT surfaced here — the LiveSessions enumeration is unfiltered, so it
-// would otherwise leak unrelated shells / admin sessions / etc. into the
-// bridge status table. Adding them back with a pane-command filter (e.g.
-// keep only sessions whose pane runs `claude`) is a separate enhancement.
+// paneCommands maps session_name → list of pane_current_command values for
+// that session. Pass nil to disable untagged-tmux surfacing entirely.
 //
 // Pure function — testable without disk or tmux access.
-func composeStatusRows(slots []core.Slot, sessions []core.Session, now time.Time) []statusRow {
+func composeStatusRows(slots []core.Slot, sessions []core.Session, paneCommands map[string][]string, now time.Time) []statusRow {
 	sessionsByID := map[string]core.Session{}
 	for _, s := range sessions {
 		sessionsByID[s.SlotID] = s
 	}
+	covered := map[string]bool{}
 	var rows []statusRow
 	for _, slot := range slots {
 		repo := slot.Repo
@@ -128,8 +135,34 @@ func composeStatusRows(slots []core.Slot, sessions []core.Session, now time.Time
 			row.State = live.State
 			row.TmuxName = live.TmuxName
 			row.PID = live.PID
+			covered[slot.ID] = true
 		}
 		rows = append(rows, row)
+	}
+	if paneCommands == nil {
+		return rows
+	}
+	var extras []core.Session
+	for _, s := range sessions {
+		if covered[s.SlotID] {
+			continue
+		}
+		if !core.SessionRunsKnownAgent(paneCommands[s.SlotID]) {
+			continue
+		}
+		extras = append(extras, s)
+	}
+	sort.Slice(extras, func(i, j int) bool { return extras[i].SlotID < extras[j].SlotID })
+	for _, s := range extras {
+		rows = append(rows, statusRow{
+			Slot:     s.SlotID,
+			Kind:     "tmux",
+			Repo:     "—",
+			Age:      humanDuration(s.Age),
+			State:    s.State,
+			TmuxName: s.TmuxName,
+			PID:      s.PID,
+		})
 	}
 	return rows
 }

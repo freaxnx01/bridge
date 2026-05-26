@@ -82,7 +82,8 @@ func TestComposeStatusRowsJoinsSlotAndSession(t *testing.T) {
 		// otherwise leak unrelated shells / admin sessions into bridge status.
 		{SlotID: "extra", State: "detached", TmuxName: "extra", PID: 9999, Age: 10 * time.Minute},
 	}
-	got := composeStatusRows(slots, sessions, now)
+	// paneCommands nil → only slot rows; "extra" must not appear.
+	got := composeStatusRows(slots, sessions, nil, now)
 	want := []statusRow{
 		{Slot: "bridge", Kind: "slot", Repo: "bridge", Agent: "claude", Age: humanDuration(now.Sub(slots[0].Created)), State: "attached", TmuxName: "bridge", PID: 4242},
 		{Slot: "stale", Kind: "slot", Repo: "foo", Agent: "claude", Age: humanDuration(now.Sub(slots[1].Created)), State: "—", TmuxName: "—"},
@@ -92,25 +93,48 @@ func TestComposeStatusRowsJoinsSlotAndSession(t *testing.T) {
 	}
 }
 
-func TestComposeStatusRowsExcludesUntaggedTmuxSessions(t *testing.T) {
-	// Explicit regression test: any tmux session whose name doesn't match a
-	// slot ID is silently dropped, regardless of how many there are. Adding
-	// pane-command filtering to re-surface claude-running sessions is a
-	// separate enhancement.
+func TestComposeStatusRowsExcludesUntaggedTmuxWithoutKnownAgent(t *testing.T) {
+	// With pane data showing only bash/tmux/admin processes, untagged sessions
+	// are still dropped — no known agent is running anywhere.
 	now := time.Unix(2_000_000, 0).UTC()
 	sessions := []core.Session{
 		{SlotID: "work-shell"}, {SlotID: "irssi"}, {SlotID: "admin"},
 	}
-	got := composeStatusRows(nil, sessions, now)
+	panes := map[string][]string{
+		"work-shell": {"bash"},
+		"irssi":      {"irssi"},
+		"admin":      {"tmux"},
+	}
+	got := composeStatusRows(nil, sessions, panes, now)
 	if len(got) != 0 {
-		t.Errorf("expected no rows from sessions-only input, got %+v", got)
+		t.Errorf("expected no rows, got %+v", got)
+	}
+}
+
+func TestComposeStatusRowsIncludesUntaggedTmuxRunningClaude(t *testing.T) {
+	// Untagged tmux session whose pane runs claude must surface as kind=tmux.
+	now := time.Unix(2_000_000, 0).UTC()
+	sessions := []core.Session{
+		{SlotID: "bare-claude", State: "attached", TmuxName: "bare-claude", PID: 5555, Age: 5 * time.Minute},
+		{SlotID: "shell-only", State: "detached", TmuxName: "shell-only", Age: time.Hour},
+	}
+	panes := map[string][]string{
+		"bare-claude": {"bash", "claude"},
+		"shell-only":  {"bash"},
+	}
+	got := composeStatusRows(nil, sessions, panes, now)
+	if len(got) != 1 {
+		t.Fatalf("expected 1 row, got %+v", got)
+	}
+	if got[0].Slot != "bare-claude" || got[0].Kind != "tmux" || got[0].PID != 5555 {
+		t.Errorf("row mismatch: %+v", got[0])
 	}
 }
 
 func TestComposeStatusRowsAppendsWorktreeToRepo(t *testing.T) {
 	now := time.Unix(2_000_000, 0).UTC()
 	slots := []core.Slot{{ID: "bridge-wt-feat", Repo: "bridge", Worktree: "feat", Created: now.Add(-time.Hour)}}
-	got := composeStatusRows(slots, nil, now)
+	got := composeStatusRows(slots, nil, nil, now)
 	if len(got) != 1 || got[0].Repo != "bridge [feat]" {
 		t.Errorf("got %+v, want repo=bridge [feat]", got)
 	}
