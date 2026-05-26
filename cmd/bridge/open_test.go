@@ -76,3 +76,39 @@ func TestOpenCaseInsensitive(t *testing.T) {
 		t.Fatalf("run: %v", err)
 	}
 }
+
+func TestOpenKeywordFallback(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	// "br" should match "bridge" via keyword fallback (no exact "br" repo).
+	cmd := exec.Command("go", "run", ".", "open", "br", "--json")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	var sout stringBuf
+	cmd.Stdout = &sout
+	if err := cmd.Run(); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	var r map[string]any
+	_ = json.Unmarshal([]byte(sout.String()), &r)
+	if r["name"] != "bridge" {
+		t.Errorf("expected fallback to bridge, got %+v", r)
+	}
+}
+
+func TestOpenAmbiguousKeyword(t *testing.T) {
+	// writeFakeRepos creates "bridge", "secret", "glrepo" — "e" matches all 3.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := exec.Command("go", "run", ".", "open", "e")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	err := cmd.Run()
+	if err == nil {
+		t.Fatal("expected non-zero exit for ambiguous match")
+	}
+}

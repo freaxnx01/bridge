@@ -42,11 +42,26 @@ func runOpen(cmd *cobra.Command, args []string) error {
 	}
 	repo, ok := findRepoByName(repos, name)
 	if !ok {
-		cmd.SilenceUsage = true
-		cmd.SilenceErrors = true
-		fmt.Fprintf(cmd.ErrOrStderr(), "bridge: unknown repo %q\n", name)
-		os.Exit(2)
+		matches := findReposByKeyword(repos, name)
+		switch len(matches) {
+		case 1:
+			repo = matches[0]
+		case 0:
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			fmt.Fprintf(cmd.ErrOrStderr(), "bridge: unknown repo %q\n", name)
+			os.Exit(2)
+		default:
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			fmt.Fprintf(cmd.ErrOrStderr(), "bridge: %q is ambiguous (%d matches):\n", name, len(matches))
+			for _, m := range matches {
+				fmt.Fprintf(cmd.ErrOrStderr(), "  %s\n", m.Name)
+			}
+			os.Exit(2)
+		}
 	}
+	_ = ok
 	mruPath := filepath.Join(cacheRoot(), "mru")
 	if err := store.MRUTouch(mruPath, repo.Path); err != nil {
 		fmt.Fprintf(cmd.ErrOrStderr(), "warning: MRU touch failed: %v\n", err)
@@ -67,4 +82,16 @@ func findRepoByName(repos []core.Repo, name string) (core.Repo, bool) {
 		}
 	}
 	return core.Repo{}, false
+}
+
+// findReposByKeyword returns repos whose Name contains the substring (case-insensitive).
+func findReposByKeyword(repos []core.Repo, q string) []core.Repo {
+	needle := strings.ToLower(q)
+	var out []core.Repo
+	for _, r := range repos {
+		if strings.Contains(strings.ToLower(r.Name), needle) {
+			out = append(out, r)
+		}
+	}
+	return out
 }
