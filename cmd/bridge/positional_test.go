@@ -2,7 +2,6 @@ package main
 
 import (
 	"os"
-	"os/exec"
 	"strings"
 	"testing"
 )
@@ -10,7 +9,7 @@ import (
 func TestPositionalOpensRepo(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "bridge", "--json")
+	cmd := bridgeCmd("bridge", "--json")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -28,7 +27,7 @@ func TestPositionalOpensRepo(t *testing.T) {
 func TestPreflightPositionalEmitsCD(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "__preflight", "bridge")
+	cmd := bridgeCmd("__preflight", "bridge")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,

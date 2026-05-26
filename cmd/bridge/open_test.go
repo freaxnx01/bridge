@@ -11,7 +11,7 @@ import (
 func TestOpenByExactName(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "open", "bridge", "--json")
+	cmd := bridgeCmd("open", "bridge", "--json")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -37,7 +37,7 @@ func TestOpenByExactName(t *testing.T) {
 func TestOpenUnknownNameExits2(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "open", "does-not-exist")
+	cmd := bridgeCmd("open", "does-not-exist")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -67,7 +67,7 @@ func TestOpenUnknownNameExits2(t *testing.T) {
 func TestOpenCaseInsensitive(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "open", "BRIDGE", "--json")
+	cmd := bridgeCmd("open", "BRIDGE", "--json")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -81,7 +81,7 @@ func TestOpenKeywordFallback(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	// "br" should match "bridge" via keyword fallback (no exact "br" repo).
-	cmd := exec.Command("go", "run", ".", "open", "br", "--json")
+	cmd := bridgeCmd("open", "br", "--json")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -102,7 +102,7 @@ func TestOpenAmbiguousKeyword(t *testing.T) {
 	// writeFakeRepos creates "bridge", "secret", "glrepo" — "e" matches all 3.
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "open", "e")
+	cmd := bridgeCmd("open", "e")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,

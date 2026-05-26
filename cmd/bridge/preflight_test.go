@@ -8,7 +8,7 @@ import (
 )
 
 func TestPreflightNoArgs(t *testing.T) {
-	out, err := exec.Command("go", "run", ".", "__preflight").CombinedOutput()
+	out, err := bridgeCmd("__preflight").CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
@@ -19,7 +19,7 @@ func TestPreflightNoArgs(t *testing.T) {
 }
 
 func TestPreflightUnknownVerb(t *testing.T) {
-	out, err := exec.Command("go", "run", ".", "__preflight", "list").CombinedOutput()
+	out, err := bridgeCmd("__preflight", "list").CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
@@ -29,7 +29,7 @@ func TestPreflightUnknownVerb(t *testing.T) {
 }
 
 func TestPreflightIsHidden(t *testing.T) {
-	out, err := exec.Command("go", "run", ".", "--help").CombinedOutput()
+	out, err := bridgeCmd("--help").CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
@@ -41,7 +41,7 @@ func TestPreflightIsHidden(t *testing.T) {
 func TestPreflightOpenEmitsCD(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "__preflight", "open", "bridge")
+	cmd := bridgeCmd("__preflight", "open", "bridge")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -59,7 +59,7 @@ func TestPreflightOpenEmitsCD(t *testing.T) {
 func TestPreflightOpenWithAgentEmitsExec(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "__preflight", "open", "bridge", "--agent", "claude")
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
@@ -77,7 +77,7 @@ func TestPreflightOpenWithAgentEmitsExec(t *testing.T) {
 func TestPreflightOpenUnknownRepoExits2(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "__preflight", "open", "nope")
+	cmd := bridgeCmd("__preflight", "open", "nope")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,

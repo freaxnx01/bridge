@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -13,7 +12,7 @@ func TestSessionsJSON(t *testing.T) {
 	fixture := filepath.Join(dir, "tmux.txt")
 	_ = os.WriteFile(fixture, []byte("a|1|1716000000\nb|0|1716000100\n"), 0o644)
 
-	cmd := exec.Command("go", "run", ".", "sessions", "--json")
+	cmd := bridgeCmd("sessions", "--json")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_TMUX_FIXTURE="+fixture,
 		"BRIDGE_NOW=1716000200",

@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -16,7 +15,7 @@ func TestSyncStatusJSON(t *testing.T) {
       "last_run":"2026-05-01T00:00:00Z","queue":["a","b"],"unpushed":["repo/x"]
     }`), 0o644)
 
-	cmd := exec.Command("go", "run", ".", "sync", "--json")
+	cmd := bridgeCmd("sync", "--json")
 	cmd.Env = append(os.Environ(), "XDG_CACHE_HOME="+cache)
 	var sout stringBuf
 	cmd.Stdout = &sout
@@ -34,7 +33,7 @@ func TestSyncStatusJSON(t *testing.T) {
 
 func TestSyncStatusMissing(t *testing.T) {
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "sync", "--json")
+	cmd := bridgeCmd("sync", "--json")
 	cmd.Env = append(os.Environ(), "XDG_CACHE_HOME="+cache)
 	var sout stringBuf
 	cmd.Stdout = &sout
@@ -49,7 +48,7 @@ func TestSyncStatusMissing(t *testing.T) {
 }
 
 func TestSyncNowNotImplemented(t *testing.T) {
-	cmd := exec.Command("go", "run", ".", "sync", "now")
+	cmd := bridgeCmd("sync", "now")
 	err := cmd.Run()
 	if err == nil {
 		t.Fatal("expected non-zero exit (Plan B)")

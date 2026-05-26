@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -21,7 +20,7 @@ func writeSlots(t *testing.T) string {
 
 func TestSlotsJSON(t *testing.T) {
 	cache := writeSlots(t)
-	cmd := exec.Command("go", "run", ".", "slots", "--json")
+	cmd := bridgeCmd("slots", "--json")
 	cmd.Env = append(os.Environ(), "XDG_CACHE_HOME="+cache)
 	var sout stringBuf
 	cmd.Stdout = &sout
@@ -39,7 +38,7 @@ func TestSlotsJSON(t *testing.T) {
 
 func TestSlotsHuman(t *testing.T) {
 	cache := writeSlots(t)
-	cmd := exec.Command("go", "run", ".", "slots")
+	cmd := bridgeCmd("slots")
 	cmd.Env = append(os.Environ(), "XDG_CACHE_HOME="+cache)
 	var sout stringBuf
 	cmd.Stdout = &sout

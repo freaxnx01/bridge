@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"testing"
 )
 
@@ -19,7 +18,7 @@ func TestListRemoteJSON(t *testing.T) {
 	root := writeFakeRepos(t)
 	cacheDir := t.TempDir()
 
-	cmd := exec.Command("go", "run", ".", "list", "-r", "--refresh", "--json")
+	cmd := bridgeCmd("list", "-r", "--refresh", "--json")
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cacheDir,

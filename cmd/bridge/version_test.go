@@ -1,13 +1,12 @@
 package main
 
 import (
-	"os/exec"
 	"strings"
 	"testing"
 )
 
 func TestVersionCommand(t *testing.T) {
-	out, err := exec.Command("go", "run", ".", "--version").CombinedOutput()
+	out, err := bridgeCmd("--version").CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}

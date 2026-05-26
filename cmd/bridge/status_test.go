@@ -3,7 +3,6 @@ package main
 import (
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -15,7 +14,7 @@ func TestStatusHuman(t *testing.T) {
 	_ = os.WriteFile(filepath.Join(cacheDir, "presence.json"), []byte(`{"mode":"away"}`), 0o644)
 	_ = os.WriteFile(filepath.Join(cacheDir, "sync.json"), []byte(`{"unpushed":["x"]}`), 0o644)
 
-	cmd := exec.Command("go", "run", ".", "status")
+	cmd := bridgeCmd("status")
 	cmd.Env = append(os.Environ(),
 		"XDG_CACHE_HOME="+cache,
 		"BRIDGE_TMUX_FIXTURE=",
@@ -33,7 +32,7 @@ func TestStatusHuman(t *testing.T) {
 
 func TestStatusJSON(t *testing.T) {
 	cache := t.TempDir()
-	cmd := exec.Command("go", "run", ".", "status", "--json")
+	cmd := bridgeCmd("status", "--json")
 	cmd.Env = append(os.Environ(), "XDG_CACHE_HOME="+cache)
 	var sout stringBuf
 	cmd.Stdout = &sout

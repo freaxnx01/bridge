@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"os/exec"
 	"testing"
 )
 
@@ -29,7 +28,7 @@ func TestIssuesFetchAndCache(t *testing.T) {
 		"FORGEJO_TOKEN=",
 	)
 
-	cmd := exec.Command("go", "run", ".", "issues", "--json", "--refresh")
+	cmd := bridgeCmd("issues", "--json", "--refresh")
 	cmd.Env = common
 	var sout stringBuf
 	cmd.Stdout = &sout
@@ -48,7 +47,7 @@ func TestIssuesFetchAndCache(t *testing.T) {
 	}
 
 	callsBefore := calls
-	cmd2 := exec.Command("go", "run", ".", "issues", "--json")
+	cmd2 := bridgeCmd("issues", "--json")
 	cmd2.Env = common
 	var sout2 stringBuf
 	cmd2.Stdout = &sout2
