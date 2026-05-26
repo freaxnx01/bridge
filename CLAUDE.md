@@ -1,5 +1,5 @@
 # Commit conventions
 
 - Use **Conventional Commits** format for all commit messages (e.g. `feat: ...`, `fix: ...`).
-- `bridge.sh` and the other bash scripts (`bridge-watcher.sh`, `bridge-autosync.sh`, `bridge-unpushed-warn.sh`) are frozen as of Phase 3 cutover (v2.0.0). Do not edit them — fixes land in the Go binary (`cmd/bridge`). The `_BRIDGE_VERSION` rule is retired.
-- For Go changes, bump the `v2.0.0-go.N` series via `git tag` when shipping; `CHANGELOG.md` entries describe the user-visible changes per release.
+- All code lives in `cmd/bridge` (CLI) and `internal/` (libraries). The frozen bash scripts were deleted in Phase 4 (v2.1.0); the Go binary is the only implementation now.
+- Tag releases as `vX.Y.Z` via `git tag` and add a `CHANGELOG.md` entry describing the user-visible changes per release. The `v2.0.0-go.N` suffix is retired alongside the bash code.

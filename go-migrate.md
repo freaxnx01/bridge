@@ -1,17 +1,10 @@
-# Go migration & update guide
+# Install & update guide
 
-`bridge` is a Go binary as of `v2.0.0` (2026-05-26). The bash code (`bridge.sh` and friends) is frozen in the repo but never sourced — it stays for one release cycle until Phase 4 deletes it (see [#35](https://github.com/freaxnx01/bridge/issues/35)).
+`bridge` is a Go binary at `~/.local/bin/bridge` wrapped by a tiny shell-function shim (`~/.local/share/bridge/bridge-shim.sh`) sourced from `~/.bashrc`. Typing `bridge` invokes the shim, which calls `command bridge __preflight "$@"`, parses a directive (`cd:`, `exec:`, or pass-through), and acts on it. No daemon, no IPC — stateless per invocation.
 
-After cutover, typing `bridge` invokes a tiny shell function (the shim) that calls the Go binary, parses a directive from its `__preflight` output, and acts on it (`cd:`, `exec:`, or pass-through). No daemon, no IPC — stateless per invocation.
+The legacy `bridge.sh` was deleted in v2.1.0 (Phase 4); the Go binary is the only implementation. Pre-cutover hosts (those still sourcing `bridge.sh` from `~/.bashrc`) should migrate per the steps below before pulling past v2.0.
 
-## Two states to distinguish
-
-- **Cut over** — `~/.bashrc` sources `~/.local/share/bridge/bridge-shim.sh`. The shim calls the Go binary at `~/.local/bin/bridge`. This is the post-`v2.0.0` state on a fully migrated machine.
-- **Not cut over** — `~/.bashrc` still sources `bridge.sh`. Needs the one-time activation below.
-
-`bridge --version` tells you which mode you're in: it'll print `bridge v2.x.y (...)` from the Go binary, or it'll be a shell function from `bridge.sh`.
-
-## Updating an already-cut-over machine
+## Updating an already-installed host
 
 ```bash
 cd ~/projects/repos/github/freaxnx01/public/bridge
@@ -27,9 +20,9 @@ If the shim *itself* changed in the pull (rare — check `git diff HEAD@{1} -- s
 make install-shim
 ```
 
-Then **open a new terminal**. The existing shell still has the previous shim function loaded from when `.bashrc` was sourced; only a fresh shell picks up the new shim file.
+Then **open a new terminal**. The existing shell still has the previous shim function loaded; only a fresh shell picks up the new shim file.
 
-## Activating on a fresh machine (one-time)
+## Fresh-install on a new host (one-time)
 
 ```bash
 git clone https://github.com/freaxnx01/bridge ~/projects/repos/github/freaxnx01/public/bridge
@@ -37,21 +30,9 @@ cd ~/projects/repos/github/freaxnx01/public/bridge
 make install-go install-shim
 
 # Back up .bashrc:
-cp ~/.bashrc ~/.bashrc.bak-bridge-cutover-$(date -u +%Y%m%d-%H%M%S)
-```
+cp ~/.bashrc ~/.bashrc.bak-bridge-$(date -u +%Y%m%d-%H%M%S)
 
-Then edit `~/.bashrc`. If a previous bash bridge source line exists, replace it:
-
-```sh
-# from:
-_f=~/projects/repos/github/freaxnx01/public/bridge/bridge.sh; [ -f "$_f" ] && . "$_f"; unset _f
-# to:
-_f=~/.local/share/bridge/bridge-shim.sh; [ -f "$_f" ] && . "$_f"; unset _f
-```
-
-If this is a brand-new install with no prior bridge source line, just append:
-
-```bash
+# Add the shim source line:
 echo '_f=~/.local/share/bridge/bridge-shim.sh; [ -f "$_f" ] && . "$_f"; unset _f' >> ~/.bashrc
 ```
 
@@ -65,6 +46,16 @@ bridge list | head   # → repo listing
 bridge bridge        # → cd's into the bridge repo
 ```
 
+## Migrating from a pre-v2.1 host still on bash bridge
+
+If `~/.bashrc` still sources `bridge.sh`, replace that line **before** pulling past v2.0.0 (after that, the file no longer exists in the tree):
+
+```bash
+sed -i 's|_f=~/projects/repos/github/freaxnx01/public/bridge/bridge.sh|_f=~/.local/share/bridge/bridge-shim.sh|' ~/.bashrc
+```
+
+Then `make install-go install-shim`, open a new terminal, and smoke-test as above. The cache at `~/.cache/bridge/` is forward-compatible for `mru`, `presence.json`, `sync.json`, `repo-meta.json`, `remote.list`. **`slots.json` is not** — if the file is still in the legacy bash shape (object map, not array), delete it before the first Go invocation; the binary repopulates it on the next launch. (v2.0 had a read-compat shim; v2.1 dropped it.)
+
 ## Tab completion for aliases (`brg`, etc.)
 
 `bridge` registers bash completion under its own name only — user wrappers like `brg() { bridge "$@"; }` don't inherit it (#45). To get repo-name completion on an alias, source the cobra-generated completion and then point it at your wrappers:
@@ -77,32 +68,18 @@ complete -o default -o nospace -F __start_bridge brg
 
 (The flags + function name match what `bridge completion bash` registers for `bridge` itself — verify with `complete -p bridge` if your build differs.) zsh and fish have equivalent `bridge completion zsh` / `fish` outputs — wire similarly for their alias mechanisms.
 
-## What runs after the cutover
+## What runs on a configured host
 
 | Component | Path | Role |
 |---|---|---|
 | Shell function `bridge` | `~/.local/share/bridge/bridge-shim.sh` (sourced into shell) | Interactive entry point. Runs `command bridge __preflight "$@"`, parses the directive, acts on it. |
 | Go binary | `~/.local/bin/bridge` (~10 MB ELF) | All actual logic — discovery, picker, launcher, daemons, JSON output. |
-| Cache | `~/.cache/bridge/` | `mru`, `slots.json`, `presence.json`, `sync.json`, `issues.json`, `repo-meta.json`, `remote.list`, `bridge.log`. Written by the Go binary; read-compat with the legacy bash `slots.json` shape for one release cycle. |
-| Bash `bridge.sh` and friends | Repo on disk | **Frozen.** Not sourced. Scheduled for deletion in Phase 4. |
+| Cache | `~/.cache/bridge/` | `mru`, `slots.json`, `presence.json`, `sync.json`, `issues.json`, `repo-meta.json`, `remote.list`, `bridge.log`. |
 
 ## Cross-platform notes
 
 - Linux: `make install-go` writes a Linux ELF; the shim is bash. Launcher uses `tmux`.
 - Windows: cross-compile via `GOOS=windows GOARCH=amd64 go build ./cmd/bridge`, install the resulting `.exe` somewhere on PATH as `bridge.exe`, dot-source `shims/bridge-shim.ps1` from your `$PROFILE`. Launcher uses Windows Terminal (`wt.exe new-tab`). There is no Windows CI; the binary builds clean but the runtime path is exercised manually.
-
-## Rollback
-
-Any machine, any time:
-
-```bash
-# 1. Edit ~/.bashrc back to the bash source line:
-sed -i 's|_f=~/.local/share/bridge/bridge-shim.sh|_f=~/projects/repos/github/freaxnx01/public/bridge/bridge.sh|' ~/.bashrc
-
-# 2. Open a new terminal.
-```
-
-You're back on bash bridge. No data loss: the cache is forward-compatible — the Go binary writes `slots.json` as `{"slots":[...]}`, which the bash bridge treats as malformed and falls back to an empty registry (so worst case is one stale-slot blip until the next launch repopulates it). All other state files (`mru`, `presence.json`, `sync.json`, etc.) round-trip cleanly between the two.
 
 ## What the shim does (full source)
 
@@ -128,12 +105,12 @@ bridge() {
 }
 ```
 
-The `eval exec` is deliberate: the Go binary's `internal/shellbridge` emits sh-quoted argv (so an agent arg like `'echo hi there'` is a single argument), and `eval` is what re-parses those quotes. There's a bats test that round-trips a multi-word `exec:` arg to prove this works (see `shims/bridge-shim.bats`).
+The `eval exec` is deliberate: the Go binary's `internal/shellbridge` emits sh-quoted argv (so an agent arg like `'echo hi there'` is a single argument), and `eval` is what re-parses those quotes. A bats test in `shims/bridge-shim.bats` round-trips a multi-word `exec:` arg to prove this works.
 
 ## When to worry
 
-- `bridge --version` prints something that doesn't look like a Go version string → the binary isn't on PATH, or `~/.bashrc` is still sourcing `bridge.sh`. Check `command -v bridge` should resolve to `~/.local/bin/bridge`.
-- `bridge` works in some shells but not others → only the shells started after the `.bashrc` edit see the new shim. Open a new terminal.
-- `bridge list` is fast but `bridge -r` is slow / fails → the remote-listing path hits GitHub/GitLab/Forgejo. Network or token issue, not a migration issue. See `bridge issues --json` source paths for the expected env vars (`GH_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN`).
-- `bridge slots` shows a stale entry from a long-dead session → known gap, [#39](https://github.com/freaxnx01/bridge/issues/39).
-- Anything else: roll back as above, open an issue, attach `~/.cache/bridge/bridge.log` (rotated, JSON-lines).
+- `bridge --version` prints something that doesn't look like a Go version string → the binary isn't on PATH, or `~/.bashrc` isn't sourcing the shim. Check `command -v bridge` resolves to `~/.local/bin/bridge`.
+- `bridge` works in some shells but not others → only shells started after the `.bashrc` edit see the new shim. Open a new terminal.
+- `bridge -r` is slow / fails → the remote path hits GitHub/GitLab/Forgejo. Network or token issue. Expected env vars: `GH_TOKEN`, `GITLAB_TOKEN`, `FORGEJO_TOKEN`.
+- `bridge slots` shows entries with no `*` (live marker) → those slots' tmux sessions are gone. Run `bridge slots prune` to drop them.
+- Anything else: open an issue, attach `~/.cache/bridge/bridge.log` (rotated, JSON-lines).
