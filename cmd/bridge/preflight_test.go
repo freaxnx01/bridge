@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -118,6 +119,45 @@ func envWithout(name string) []string {
 		out = append(out, e)
 	}
 	return out
+}
+
+func TestPreflightOpenWithAgentRecordsSlot(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	// slots.json should now contain a "bridge" entry with agent=claude.
+	b, err := os.ReadFile(filepath.Join(cache, "bridge", "slots.json"))
+	if err != nil {
+		t.Fatalf("read slots.json: %v", err)
+	}
+	if !strings.Contains(string(b), `"id": "bridge"`) || !strings.Contains(string(b), `"agent": "claude"`) {
+		t.Errorf("slot not recorded as expected: %s", b)
+	}
+
+	// Second invocation must not duplicate; same ID should be replaced.
+	cmd2 := bridgeCmd("__preflight", "open", "bridge", "--agent", "code")
+	cmd2.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	if out, err := cmd2.CombinedOutput(); err != nil {
+		t.Fatalf("run2: %v\n%s", err, out)
+	}
+	b2, _ := os.ReadFile(filepath.Join(cache, "bridge", "slots.json"))
+	// Count occurrences of "id": "bridge" — must be exactly 1.
+	if n := strings.Count(string(b2), `"id": "bridge"`); n != 1 {
+		t.Errorf("expected 1 slot entry, got %d:\n%s", n, b2)
+	}
+	if !strings.Contains(string(b2), `"agent": "code"`) {
+		t.Errorf("expected agent updated to code: %s", b2)
+	}
 }
 
 func TestPreflightOpenUnknownRepoExits2(t *testing.T) {

@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -137,6 +138,16 @@ func preflightOpen(out io.Writer, args []string) error {
 		os.Exit(2)
 	}
 	slot := slotIDFor(repo, "")
+	// Record the slot in the registry. Non-fatal on failure — emitting the
+	// exec directive is still the right thing to do.
+	if err := core.UpsertSlot(filepath.Join(cacheRoot(), "slots.json"), core.Slot{
+		ID:      slot,
+		Repo:    repo.Name,
+		Agent:   agentName,
+		Created: time.Now().UTC(),
+	}); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: slot upsert failed: %v\n", err)
+	}
 	l := launcher.New()
 	var argv []string
 	if os.Getenv("TMUX") != "" {
