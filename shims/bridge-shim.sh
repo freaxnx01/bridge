@@ -11,7 +11,11 @@ bridge() {
     fi
     case "$directive" in
         cd:*)   cd "${directive#cd:}" ;;
-        exec:*) exec ${directive#exec:} ;;
+        # Use `eval` so the sh-quoting that internal/shellbridge emits
+        # (single-quoted args with whitespace) is re-parsed by the shell.
+        # Without eval, the unquoted parameter expansion would word-split
+        # the directive as data, turning literal quotes into argv chars.
+        exec:*) eval "exec ${directive#exec:}" ;;
         noop)   command bridge-go "$@" ;;
         *)
             printf 'bridge: unknown directive: %s\n' "$directive" >&2

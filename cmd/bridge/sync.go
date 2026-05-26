@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -31,11 +32,14 @@ func init() {
 	rootCmd.AddCommand(syncCmd)
 }
 
+// context import kept for future use; current Plan B touches it via runSyncNow's signature.
+var _ = context.Background
+
 func runSync(cmd *cobra.Command, args []string) error {
 	if len(args) > 0 {
 		switch args[0] {
 		case "now":
-			return runSyncNow(cmd)
+			return runSyncNow(cmd.Context(), cmd)
 		}
 		return fmt.Errorf("`bridge sync %s` is not implemented", args[0])
 	}

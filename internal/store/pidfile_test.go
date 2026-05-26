@@ -45,6 +45,41 @@ func TestIsPIDRunningBogus(t *testing.T) {
 	}
 }
 
+func TestAcquirePIDFileSucceedsWhenAbsent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.pid")
+	release, err := AcquirePIDFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	pid, _ := ReadPIDFile(p)
+	if pid != os.Getpid() {
+		t.Errorf("got pid %d, want %d", pid, os.Getpid())
+	}
+}
+
+func TestAcquirePIDFileRejectsLiveHolder(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.pid")
+	release, err := AcquirePIDFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer release()
+	if _, err := AcquirePIDFile(p); err != ErrAlreadyRunning {
+		t.Errorf("got %v, want ErrAlreadyRunning", err)
+	}
+}
+
+func TestAcquirePIDFileReclaimsStale(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "x.pid")
+	_ = WritePIDFile(p, 99999998)
+	release, err := AcquirePIDFile(p)
+	if err != nil {
+		t.Fatalf("got %v, want success after stale", err)
+	}
+	defer release()
+}
+
 func TestRemovePIDFile(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "x.pid")
 	_ = WritePIDFile(p, 1)

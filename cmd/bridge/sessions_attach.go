@@ -11,6 +11,10 @@ var sessionsAttachCmd = &cobra.Command{
 	Short: "Attach to a live session (the shim is responsible for the actual attach via __preflight)",
 	Args:  cobra.MaximumNArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
+		if len(args) == 0 {
+			fmt.Fprintln(cmd.ErrOrStderr(), "bridge sessions attach: pick a slot (run via the shim for an interactive picker)")
+			return nil
+		}
 		fmt.Fprintln(cmd.OutOrStdout(), args[0])
 		return nil
 	},

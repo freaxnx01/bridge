@@ -17,7 +17,7 @@ func TestSyncAutoSingleIteration(t *testing.T) {
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 		"PATH="+bindir+":"+os.Getenv("PATH"),
-		"BRIDGE_DAEMON_MAX_ITERATIONS=1",
+		"BRIDGE_TEST_MAX_ITERATIONS=1",
 	)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v", err)

@@ -74,13 +74,18 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	if existing, _ := store.ReadPIDFile(pidPath); existing > 0 && store.IsPIDRunning(existing) {
-		return fmt.Errorf("watch already running (PID %d)", existing)
-	}
-	if err := store.WritePIDFile(pidPath, os.Getpid()); err != nil {
+	// Install daemon-flavored logger: JSON-lines to bridge.log + stderr at -v/-vv.
+	slog.SetDefault(slog.New(installLogger(os.Stderr, verboseCount, filepath.Join(cacheRoot(), "bridge.log"))))
+
+	release, err := store.AcquirePIDFile(pidPath)
+	if err != nil {
+		if err == store.ErrAlreadyRunning {
+			existing, _ := store.ReadPIDFile(pidPath)
+			return fmt.Errorf("watch already running (PID %d)", existing)
+		}
 		return err
 	}
-	defer store.RemovePIDFile(pidPath)
+	defer release()
 
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
@@ -98,13 +103,21 @@ func runWatch(cmd *cobra.Command, args []string) error {
 	go func() { <-sigCh; cancel() }()
 
 	maxIter := 0
-	if v := os.Getenv("BRIDGE_DAEMON_MAX_ITERATIONS"); v != "" {
+	if v := os.Getenv("BRIDGE_TEST_MAX_ITERATIONS"); v != "" {
+		n, _ := strconv.Atoi(v)
+		maxIter = n
+	} else if v := os.Getenv("BRIDGE_DAEMON_MAX_ITERATIONS"); v != "" {
+		// Deprecated name; kept for one release.
 		n, _ := strconv.Atoi(v)
 		maxIter = n
 	}
 
 	tickInterval := 30 * time.Second
-	if v := os.Getenv("BRIDGE_WATCH_TICK_MS"); v != "" {
+	if v := os.Getenv("BRIDGE_TEST_TICK_MS"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			tickInterval = time.Duration(n) * time.Millisecond
+		}
+	} else if v := os.Getenv("BRIDGE_WATCH_TICK_MS"); v != "" {
 		if n, err := strconv.Atoi(v); err == nil && n > 0 {
 			tickInterval = time.Duration(n) * time.Millisecond
 		}

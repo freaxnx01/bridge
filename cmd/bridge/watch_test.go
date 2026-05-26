@@ -13,9 +13,9 @@ func TestWatchSingleIteration(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
-		"BRIDGE_DAEMON_MAX_ITERATIONS=1",
+		"BRIDGE_TEST_MAX_ITERATIONS=1",
 		// Also need a short tick interval so the test exits via tick after ~30s would be too slow.
-		"BRIDGE_WATCH_TICK_MS=100",
+		"BRIDGE_TEST_TICK_MS=100",
 	)
 	if err := cmd.Run(); err != nil {
 		t.Fatalf("run: %v", err)

@@ -35,14 +35,20 @@ func init() {
 }
 
 func runSyncAuto(cmd *cobra.Command) error {
+	// Install daemon-flavored logger: JSON-lines to bridge.log (rotated), plus
+	// stderr at the verbosity selected by -v/-vv.
+	slog.SetDefault(slog.New(installLogger(os.Stderr, verboseCount, filepath.Join(cacheRoot(), "bridge.log"))))
+
 	pidPath := filepath.Join(cacheRoot(), "sync.pid")
-	if existing, _ := store.ReadPIDFile(pidPath); existing > 0 && store.IsPIDRunning(existing) {
-		return fmt.Errorf("sync --auto already running (PID %d)", existing)
-	}
-	if err := store.WritePIDFile(pidPath, os.Getpid()); err != nil {
+	release, err := store.AcquirePIDFile(pidPath)
+	if err != nil {
+		if err == store.ErrAlreadyRunning {
+			existing, _ := store.ReadPIDFile(pidPath)
+			return fmt.Errorf("sync --auto already running (PID %d)", existing)
+		}
 		return err
 	}
-	defer store.RemovePIDFile(pidPath)
+	defer release()
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -55,7 +61,11 @@ func runSyncAuto(cmd *cobra.Command) error {
 	}()
 
 	maxIter := 0
-	if v := os.Getenv("BRIDGE_DAEMON_MAX_ITERATIONS"); v != "" {
+	if v := os.Getenv("BRIDGE_TEST_MAX_ITERATIONS"); v != "" {
+		n, _ := strconv.Atoi(v)
+		maxIter = n
+	} else if v := os.Getenv("BRIDGE_DAEMON_MAX_ITERATIONS"); v != "" {
+		// Deprecated; kept for one release for in-flight scripts.
 		n, _ := strconv.Atoi(v)
 		maxIter = n
 	}
@@ -64,11 +74,12 @@ func runSyncAuto(cmd *cobra.Command) error {
 	ticker := time.NewTicker(syncInterval)
 	defer ticker.Stop()
 	for {
-		if err := runSyncNow(cmd); err != nil {
+		if err := runSyncNow(ctx, cmd); err != nil {
 			slog.Warn("sync iter failed", "err", err)
 		}
 		iter++
 		if maxIter > 0 && iter >= maxIter {
+			slog.Info("sync auto: BRIDGE_TEST_MAX_ITERATIONS reached, exiting", "iter", iter)
 			return nil
 		}
 		select {

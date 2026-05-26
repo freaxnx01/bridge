@@ -14,13 +14,13 @@ import (
 	"github.com/freaxnx01/bridge/internal/syncer"
 )
 
-func runSyncNow(cmd *cobra.Command) error {
+func runSyncNow(ctx context.Context, cmd *cobra.Command) error {
 	repos, err := core.DiscoverRepos(reposRoot())
 	if err != nil {
 		return err
 	}
 	s := &syncer.Syncer{}
-	res := s.Run(context.Background(), repos)
+	res := s.Run(ctx, repos)
 	state := SyncState{
 		LastRun: time.Now().UTC(),
 	}

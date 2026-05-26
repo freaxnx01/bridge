@@ -3,10 +3,15 @@ package store
 import (
 	"errors"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 )
+
+// ErrAlreadyRunning is returned by AcquirePIDFile when another live process
+// holds the pidfile.
+var ErrAlreadyRunning = errors.New("already running")
 
 // WritePIDFile atomically writes pid to path.
 func WritePIDFile(path string, pid int) error {
@@ -33,6 +38,46 @@ func RemovePIDFile(path string) error {
 		return err
 	}
 	return nil
+}
+
+// AcquirePIDFile atomically claims path for the current process. Uses
+// O_CREATE|O_EXCL to make the create-or-fail check race-free at the FS level.
+// If the file already exists, the holder PID is checked: live → ErrAlreadyRunning,
+// dead → file is removed and we retry once.
+// Returns a release func that removes the file; safe to call on a defer.
+func AcquirePIDFile(path string) (release func() error, err error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		return nil, err
+	}
+	pid := os.Getpid()
+	for retry := 0; retry < 2; retry++ {
+		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
+		if err == nil {
+			if _, werr := f.WriteString(strconv.Itoa(pid) + "\n"); werr != nil {
+				f.Close()
+				os.Remove(path)
+				return nil, werr
+			}
+			if cerr := f.Close(); cerr != nil {
+				os.Remove(path)
+				return nil, cerr
+			}
+			return func() error { return RemovePIDFile(path) }, nil
+		}
+		if !errors.Is(err, os.ErrExist) {
+			return nil, err
+		}
+		// File exists; check whether the holder is alive.
+		existing, _ := ReadPIDFile(path)
+		if existing > 0 && IsPIDRunning(existing) {
+			return nil, ErrAlreadyRunning
+		}
+		// Stale pidfile (writer crashed). Remove and retry.
+		if rerr := os.Remove(path); rerr != nil && !errors.Is(rerr, os.ErrNotExist) {
+			return nil, rerr
+		}
+	}
+	return nil, errors.New("pidfile: race acquiring after retry")
 }
 
 // IsPIDRunning reports whether a process with pid currently exists.

@@ -22,16 +22,19 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "tempdir:", err)
 		os.Exit(1)
 	}
-	defer os.RemoveAll(dir)
 	bridgeBin = filepath.Join(dir, "bridge-go")
 	cmd := exec.Command("go", "build", "-o", bridgeBin, ".")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stderr
 	if err := cmd.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "build:", err)
+		os.RemoveAll(dir)
 		os.Exit(1)
 	}
-	os.Exit(m.Run())
+	// os.Exit skips defers, so clean up explicitly.
+	code := m.Run()
+	os.RemoveAll(dir)
+	os.Exit(code)
 }
 
 // bridgeCmd returns an *exec.Cmd invoking the prebuilt binary with the given args.

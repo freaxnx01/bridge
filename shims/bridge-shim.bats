@@ -23,3 +23,30 @@ teardown_file() {
     [ "$status" -eq 0 ]
     [[ "$output" == *"List local repos"* ]]
 }
+
+@test "exec directive with quoted argv reaches target as a single argv element" {
+    # Stub bridge-go to emit a controlled exec directive whose third argv
+    # element ("hi there") contains whitespace. The shim must re-parse the
+    # directive so 'hi there' arrives as one argv element, not three.
+    stubdir=$(mktemp -d)
+    out=$(mktemp)
+    export TEST_OUT="$out"
+    # Heredoc is single-quoted so no expansion happens inside; the stub
+    # references $TEST_OUT (env-injected) at run time.
+    # After `bash -c CMD _ 'hi there'`, "hi there" is $1 inside CMD ($0 is "_").
+    cat > "$stubdir/bridge-go" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "__preflight" ]; then
+    printf "exec:bash -c '%s' _ '%s'\n" 'printf %s "$1" > '"$TEST_OUT" 'hi there'
+else
+    exit 0
+fi
+STUB
+    chmod +x "$stubdir/bridge-go"
+    PATH="$stubdir:$PATH" bash -c "source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever" || true
+    run cat "$out"
+    [ "$status" -eq 0 ]
+    [ "$output" = "hi there" ]
+    rm -rf "$stubdir" "$out"
+    unset TEST_OUT
+}
