@@ -1,9 +1,12 @@
 package core
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
+	"time"
 )
 
 func TestLoadSlots(t *testing.T) {
@@ -65,6 +68,67 @@ func TestLoadSlotsNullSlotsKey(t *testing.T) {
 	}
 	if len(slots) != 0 {
 		t.Errorf("want empty, got %v", slots)
+	}
+}
+
+func TestWriteSlotsRoundTrip(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "slots.json")
+	want := []Slot{
+		{ID: "a", Repo: "x", Agent: "claude", Created: time.Date(2026, 5, 1, 0, 0, 0, 0, time.UTC)},
+		{ID: "b", Repo: "y", Worktree: "wt-1", Agent: "code", Created: time.Date(2026, 5, 2, 0, 0, 0, 0, time.UTC)},
+	}
+	if err := WriteSlots(p, want); err != nil {
+		t.Fatal(err)
+	}
+	got, err := LoadSlots(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[1].Worktree != "wt-1" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestUpsertSlotAddsNew(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "slots.json")
+	if err := UpsertSlot(p, Slot{ID: "a", Repo: "x", Agent: "claude", Created: time.Now().UTC()}); err != nil {
+		t.Fatal(err)
+	}
+	got, _ := LoadSlots(p)
+	if len(got) != 1 || got[0].ID != "a" {
+		t.Errorf("got %+v", got)
+	}
+}
+
+func TestUpsertSlotReplacesExisting(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "slots.json")
+	_ = UpsertSlot(p, Slot{ID: "a", Repo: "old", Agent: "claude", Created: time.Now().UTC()})
+	_ = UpsertSlot(p, Slot{ID: "a", Repo: "new", Agent: "code", Created: time.Now().UTC()})
+	got, _ := LoadSlots(p)
+	if len(got) != 1 || got[0].Repo != "new" || got[0].Agent != "code" {
+		t.Errorf("expected replaced entry, got %+v", got)
+	}
+}
+
+func TestUpsertSlotConcurrent(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "slots.json")
+	var wg sync.WaitGroup
+	const N = 20
+	for i := 0; i < N; i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			_ = UpsertSlot(p, Slot{
+				ID:      fmt.Sprintf("s%d", i),
+				Repo:    fmt.Sprintf("r%d", i),
+				Created: time.Now().UTC(),
+			})
+		}(i)
+	}
+	wg.Wait()
+	got, _ := LoadSlots(p)
+	if len(got) != N {
+		t.Errorf("expected %d unique slots, got %d", N, len(got))
 	}
 }
 

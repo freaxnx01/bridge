@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"path/filepath"
 	"time"
 
 	"github.com/freaxnx01/bridge/internal/store"
@@ -87,4 +88,53 @@ func LoadSlots(path string) ([]Slot, error) {
 	default:
 		return nil, fmt.Errorf("slots: unexpected JSON shape (first byte %q)", trimmed[0])
 	}
+}
+
+// WriteSlots atomically writes the slot registry to path in Go format
+// ({"slots":[...]}). Concurrent writers serialize via flock on "<path>.lock".
+func WriteSlots(path string, slots []Slot) error {
+	if slots == nil {
+		slots = []Slot{}
+	}
+	lock, err := store.AcquireLock(filepath.Dir(path) + "/slots.lock")
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	return writeSlotsLocked(path, slots)
+}
+
+func writeSlotsLocked(path string, slots []Slot) error {
+	b, err := json.MarshalIndent(slotFile{Slots: slots}, "", "  ")
+	if err != nil {
+		return err
+	}
+	return store.AtomicWrite(path, b)
+}
+
+// UpsertSlot adds slot to the registry, or replaces an existing entry whose
+// ID matches. Read-modify-write is performed under the same flock used by
+// WriteSlots, so concurrent UpsertSlot calls do not lose entries.
+func UpsertSlot(path string, slot Slot) error {
+	lock, err := store.AcquireLock(filepath.Dir(path) + "/slots.lock")
+	if err != nil {
+		return err
+	}
+	defer lock.Release()
+	existing, err := LoadSlots(path)
+	if err != nil {
+		return err
+	}
+	replaced := false
+	for i, s := range existing {
+		if s.ID == slot.ID {
+			existing[i] = slot
+			replaced = true
+			break
+		}
+	}
+	if !replaced {
+		existing = append(existing, slot)
+	}
+	return writeSlotsLocked(path, existing)
 }
