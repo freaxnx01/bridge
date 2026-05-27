@@ -12,7 +12,7 @@ var tuiOnce bool
 
 var tuiCmd = &cobra.Command{
 	Use:   "tui",
-	Short: "Dashboard TUI (Bubbletea — repos, cached issues, and live sessions; actions stubbed, see #72)",
+	Short: "Dashboard TUI (Bubbletea — repos, cached issues, live sessions, Enter actions)",
 	RunE: func(cmd *cobra.Command, args []string) error {
 		return tui.Run(reposRoot(), filepath.Join(cacheRoot(), "issues.json"), filepath.Join(cacheRoot(), "slots.json"), tuiOnce)
 	},

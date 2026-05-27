@@ -84,6 +84,69 @@ func TestHumanAge(t *testing.T) {
 	}
 }
 
+func TestActOnSelectionRepo(t *testing.T) {
+	m := initialModel(
+		[]repo{{name: "bridge", path: "/tmp/repos/bridge", vis: "pub"}},
+		nil, nil,
+	)
+	m.focus = paneRepos
+	newM, cmd := m.actOnSelection()
+	if cmd == nil {
+		t.Fatalf("expected tea.Quit command")
+	}
+	got := newM.(model).action
+	if got.kind != actLaunchRepo {
+		t.Errorf("expected actLaunchRepo, got %d", got.kind)
+	}
+	wantArgv := []string{"tmux", "new-session", "-A", "-s", "bridge", "-c", "/tmp/repos/bridge"}
+	if strings.Join(got.argv, " ") != strings.Join(wantArgv, " ") {
+		t.Errorf("argv mismatch: got %v, want %v", got.argv, wantArgv)
+	}
+}
+
+func TestActOnSelectionIssueWithoutURL(t *testing.T) {
+	m := initialModel(nil, []issue{{num: 64, repo: "x/y", title: "t", url: ""}}, nil)
+	m.focus = paneIssues
+	newM, cmd := m.actOnSelection()
+	if cmd != nil {
+		t.Errorf("expected nil cmd when URL is missing (no quit)")
+	}
+	if newM.(model).action.kind != actNone {
+		t.Errorf("expected actNone when URL missing")
+	}
+	if !strings.Contains(newM.(model).status, "no URL") {
+		t.Errorf("expected status hint about missing URL, got %q", newM.(model).status)
+	}
+}
+
+func TestActOnSelectionSession(t *testing.T) {
+	m := initialModel(nil, nil, []session{{name: "bridge", state: "detached", age: "1h"}})
+	m.focus = paneSessions
+	newM, cmd := m.actOnSelection()
+	if cmd == nil {
+		t.Fatalf("expected tea.Quit command")
+	}
+	got := newM.(model).action
+	wantArgv := []string{"tmux", "attach-session", "-t", "bridge"}
+	if strings.Join(got.argv, " ") != strings.Join(wantArgv, " ") {
+		t.Errorf("argv mismatch: got %v, want %v", got.argv, wantArgv)
+	}
+}
+
+func TestTmuxSafe(t *testing.T) {
+	cases := []struct{ in, want string }{
+		{"bridge", "bridge"},
+		{"public/bridge", "public-bridge"},
+		{"owner/Repo.Name", "owner-Repo.Name"},
+		{"", "repo"},
+	}
+	for _, c := range cases {
+		if got := tmuxSafe(c.in); got != c.want {
+			t.Errorf("tmuxSafe(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
 func TestLoadSessionsToleratesMissingSlots(t *testing.T) {
 	// loadSessions must not panic when slots.json is missing. The host's
 	// tmux state is non-deterministic across CI/dev, so we just assert

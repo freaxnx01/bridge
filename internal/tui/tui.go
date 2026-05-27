@@ -1,16 +1,23 @@
 // Package tui is the bridge dashboard TUI (Bubbletea). All three panels
-// (Repos, Open Issues, Sessions) are wired to real data:
-//   - Repos: core.DiscoverRepos
-//   - Issues: the cache populated by `bridge issues`
-//   - Sessions: live tmux output cross-referenced with the slot registry
+// (Repos, Open Issues, Sessions) are wired to real data and Enter is a
+// real action:
+//   - Repos: core.DiscoverRepos. Enter → `tmux new-session -A -s <slug> -c <path>`.
+//   - Issues: the cache populated by `bridge issues`. Enter → `xdg-open <url>`
+//     (background) so control returns to the parent shell.
+//   - Sessions: live tmux output cross-referenced with the slot registry.
+//     Enter → `tmux attach-session -t <name>`.
 //
-// Actions on Enter / slash commands are still stubs; #72 tracks wiring.
+// The tmux-shaped actions execute via syscall.Exec, so they replace the
+// `bridge tui` process — the user's terminal becomes the new process
+// directly with no nested shells.
 package tui
 
 import (
 	"fmt"
 	"os"
+	"os/exec"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -25,6 +32,7 @@ import (
 
 type repo struct {
 	name   string
+	path   string // filesystem path — needed for the tmux launch on Enter
 	issues int
 	vis    string // pri / pub
 }
@@ -33,13 +41,14 @@ type issue struct {
 	num   int
 	repo  string
 	title string
+	url   string // for the browser-open action
 }
 
 type session struct {
-	name     string
-	state    string // attached / detached / code
-	age      string
-	repo     string
+	name  string
+	state string // attached / detached / code
+	age   string
+	repo  string
 }
 
 // loadRepos turns DiscoverRepos output into the TUI's display shape.
@@ -62,7 +71,7 @@ func loadRepos(root string) []repo {
 		if r.Owner != "" {
 			display = r.Owner + "/" + r.Name
 		}
-		out = append(out, repo{name: display, issues: 0, vis: vis})
+		out = append(out, repo{name: display, path: r.Path, issues: 0, vis: vis})
 	}
 	return out
 }
@@ -78,7 +87,7 @@ func loadIssues(cachePath string) []issue {
 	}
 	out := make([]issue, 0, len(c.Issues))
 	for _, i := range c.Issues {
-		out = append(out, issue{num: i.Number, repo: i.Repo, title: i.Title})
+		out = append(out, issue{num: i.Number, repo: i.Repo, title: i.Title, url: i.URL})
 	}
 	return out
 }
@@ -202,6 +211,28 @@ func (p pane) String() string {
 	return "?"
 }
 
+// actionKind tags what to do after the TUI exits. Set on the model by
+// Enter or a slash command, then drained by Run() after p.Run() returns.
+// Done this way (post-quit dispatch) rather than tea.ExecProcess because
+// open-repo wants to *replace* our process via syscall.Exec, which
+// tea.ExecProcess doesn't expose cleanly.
+type actionKind int
+
+const (
+	actNone actionKind = iota
+	actLaunchRepo
+	actAttachSession
+	actOpenURL
+)
+
+type pendingAction struct {
+	kind actionKind
+	// argv for actLaunchRepo / actAttachSession (executed via syscall.Exec).
+	// url for actOpenURL (xdg-open in background).
+	argv []string
+	url  string
+}
+
 type model struct {
 	width, height int
 
@@ -215,6 +246,8 @@ type model struct {
 	repos    []repo
 	issues   []issue
 	sessions []session
+
+	action pendingAction
 }
 
 func initialModel(repos []repo, issues []issue, sessions []session) model {
@@ -310,7 +343,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m, nil
 		case "enter":
-			return m, m.actOnSelection()
+			return m.actOnSelection()
 		}
 	}
 	return m, nil
@@ -329,11 +362,14 @@ func (m model) runCommand(v string) (tea.Model, tea.Cmd) {
 	case "/q", "/quit", "/exit":
 		return m, tea.Quit
 	case "/attach":
-		m.status = "would attach to selected session (mock)"
+		m.focus = paneSessions
+		return m.actOnSelection()
 	case "/open":
-		m.status = "would open selected repo in browser (mock)"
+		m.focus = paneRepos
+		return m.actOnSelection()
 	case "/issue":
-		m.status = "would open selected issue in browser (mock)"
+		m.focus = paneIssues
+		return m.actOnSelection()
 	case "/help":
 		m.showHelp = true
 	default:
@@ -342,18 +378,71 @@ func (m model) runCommand(v string) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-func (m model) actOnSelection() tea.Cmd {
+// actOnSelection sets m.action and returns tea.Quit so Run() can dispatch
+// after the TUI tears down. Returning early with a status-only update is
+// used for rows that can't act (e.g. an Issues row with no URL).
+func (m model) actOnSelection() (tea.Model, tea.Cmd) {
 	switch m.focus {
 	case paneRepos:
-		m.status = "→ would drill into " + m.repos[m.sel[paneRepos]].name
+		if len(m.repos) == 0 {
+			m.status = "no repos to open"
+			return m, nil
+		}
+		r := m.repos[m.sel[paneRepos]]
+		// `tmux new-session -A -s <slug> -c <path>` creates the session if
+		// missing, attaches if it exists. Slug = repo basename (filtered to
+		// tmux-safe chars). Wiring BRIDGE_DEFAULT_AGENT is a follow-up.
+		slug := tmuxSafe(r.name)
+		m.action = pendingAction{
+			kind: actLaunchRepo,
+			argv: []string{"tmux", "new-session", "-A", "-s", slug, "-c", r.path},
+		}
+		return m, tea.Quit
 	case paneIssues:
+		if len(m.issues) == 0 {
+			m.status = "no issues to open"
+			return m, nil
+		}
 		i := m.issues[m.sel[paneIssues]]
-		m.status = fmt.Sprintf("→ would open #%d in %s", i.num, i.repo)
+		if i.url == "" {
+			m.status = fmt.Sprintf("issue #%d has no URL in the cache", i.num)
+			return m, nil
+		}
+		m.action = pendingAction{kind: actOpenURL, url: i.url}
+		return m, tea.Quit
 	case paneSessions:
+		if len(m.sessions) == 0 {
+			m.status = "no sessions to attach"
+			return m, nil
+		}
 		s := m.sessions[m.sel[paneSessions]]
-		m.status = "→ would attach to " + s.name
+		m.action = pendingAction{
+			kind: actAttachSession,
+			argv: []string{"tmux", "attach-session", "-t", s.name},
+		}
+		return m, tea.Quit
 	}
-	return nil
+	return m, nil
+}
+
+// tmuxSafe drops characters tmux session names disallow. Cheap; not a
+// full sanitiser. Empty input falls back to "repo".
+func tmuxSafe(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "repo"
+	}
+	return b.String()
 }
 
 // --- views ---
@@ -583,9 +672,40 @@ func Run(root, issuesCachePath, slotsPath string, once bool) error {
 		return nil
 	}
 	p := tea.NewProgram(initialModel(repos, issues, sessions), tea.WithAltScreen())
-	if _, err := p.Run(); err != nil {
+	finalModel, err := p.Run()
+	if err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return err
+	}
+	if m, ok := finalModel.(model); ok {
+		return dispatchAction(m.action)
+	}
+	return nil
+}
+
+// dispatchAction is called after the TUI has fully torn down. For
+// tmux-shaped actions we syscall.Exec — the user's terminal becomes
+// the new process directly. For URL actions we shell out in the
+// background so control returns to the parent shell immediately.
+func dispatchAction(a pendingAction) error {
+	switch a.kind {
+	case actNone:
+		return nil
+	case actOpenURL:
+		opener := os.Getenv("BROWSER")
+		if opener == "" {
+			opener = "xdg-open"
+		}
+		return exec.Command(opener, a.url).Start()
+	case actLaunchRepo, actAttachSession:
+		if len(a.argv) == 0 {
+			return nil
+		}
+		bin, err := exec.LookPath(a.argv[0])
+		if err != nil {
+			return fmt.Errorf("%s: %w", a.argv[0], err)
+		}
+		return syscall.Exec(bin, a.argv, os.Environ())
 	}
 	return nil
 }
