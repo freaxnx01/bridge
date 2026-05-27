@@ -20,10 +20,11 @@ var (
 )
 
 var openCmd = &cobra.Command{
-	Use:   "open <name>",
-	Short: "Open a repo (creates/attaches an agent session in Phase 2)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runOpen,
+	Use:               "open <name>",
+	Short:             "Open a repo (creates/attaches an agent session in Phase 2)",
+	Args:              cobra.ExactArgs(1),
+	RunE:              runOpen,
+	ValidArgsFunction: completeRepoName,
 }
 
 func init() {

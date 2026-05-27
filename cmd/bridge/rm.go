@@ -13,10 +13,11 @@ import (
 var rmYes bool
 
 var rmCmd = &cobra.Command{
-	Use:   "rm <name>",
-	Short: "Delete a local repo (refuses without --yes if not a TTY)",
-	Args:  cobra.ExactArgs(1),
-	RunE:  runRm,
+	Use:               "rm <name>",
+	Short:             "Delete a local repo (refuses without --yes if not a TTY)",
+	Args:              cobra.ExactArgs(1),
+	RunE:              runRm,
+	ValidArgsFunction: completeRepoName,
 }
 
 func init() {

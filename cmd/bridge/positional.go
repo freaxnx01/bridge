@@ -13,6 +13,7 @@ var knownVerbs = map[string]bool{
 	"sync": true, "status": true, "issues": true, "open": true,
 	"rm": true, "watch": true, "tui": true, "__preflight": true,
 	"version": true, "help": true, "completion": true,
+	"__complete": true, "__completeNoDesc": true,
 }
 
 // rewritePositional runs in main() before rootCmd.Execute().
