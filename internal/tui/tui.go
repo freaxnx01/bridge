@@ -1,4 +1,7 @@
-package main
+// Package tui is the bridge dashboard TUI (Bubbletea). MVP slice of #64:
+// the repo panel is wired to real `core.DiscoverRepos` output. Issues and
+// sessions remain fixture-driven; promoting those is a follow-up.
+package tui
 
 import (
 	"fmt"
@@ -9,9 +12,11 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+
+	"github.com/freaxnx01/bridge/internal/core"
 )
 
-// --- mock data ---
+// --- data shapes ---
 
 type repo struct {
 	name   string
@@ -32,13 +37,32 @@ type session struct {
 	repo     string
 }
 
-var (
-	mockRepos = []repo{
-		{"public/bridge", 1, "pub"},
-		{"private/ingest-pipeline", 4, "pri"},
-		{"private/dms-core", 7, "pri"},
-		{"public/ai-instructions", 0, "pub"},
+// loadRepos turns DiscoverRepos output into the TUI's display shape.
+// "pri"/"pub" comes from the path-pattern Visibility tag; non-github
+// forges (gitlab, forgejo) default to "pub" since visibility isn't
+// encoded in their path. Issue counts will be 0 until #64's follow-up
+// wires real forge calls.
+func loadRepos(root string) []repo {
+	raw, err := core.DiscoverRepos(root)
+	if err != nil {
+		return nil
 	}
+	out := make([]repo, 0, len(raw))
+	for _, r := range raw {
+		vis := "pub"
+		if r.Visibility == "private" {
+			vis = "pri"
+		}
+		display := r.Name
+		if r.Owner != "" {
+			display = r.Owner + "/" + r.Name
+		}
+		out = append(out, repo{name: display, issues: 0, vis: vis})
+	}
+	return out
+}
+
+var (
 	mockIssues = []issue{
 		{30, "public/bridge", "feat(dashboard): TUI / styled output for --dashboard"},
 		{142, "private/ingest-pipeline", "fix: retry on transient 503 from upstream"},
@@ -135,18 +159,25 @@ type model struct {
 	cmd      textinput.Model
 	status   string
 	showHelp bool
+
+	repos []repo
 }
 
-func initialModel() model {
+func initialModel(repos []repo) model {
 	ti := textinput.New()
 	ti.Placeholder = "type a /command or text…"
 	ti.Prompt = ""
 	ti.CharLimit = 200
 	ti.Width = 60
+	status := "ready"
+	if len(repos) == 0 {
+		status = "no local repos found under BRIDGE_REPOS_ROOT"
+	}
 	return model{
 		focus:  paneIssues,
 		cmd:    ti,
-		status: "ready",
+		status: status,
+		repos:  repos,
 	}
 }
 
@@ -155,7 +186,7 @@ func (m model) Init() tea.Cmd { return textinput.Blink }
 func (m *model) rowCount(p pane) int {
 	switch p {
 	case paneRepos:
-		return len(mockRepos)
+		return len(m.repos)
 	case paneIssues:
 		return len(mockIssues)
 	case paneSessions:
@@ -256,7 +287,7 @@ func (m model) runCommand(v string) (tea.Model, tea.Cmd) {
 func (m model) actOnSelection() tea.Cmd {
 	switch m.focus {
 	case paneRepos:
-		m.status = "→ would drill into " + mockRepos[m.sel[paneRepos]].name
+		m.status = "→ would drill into " + m.repos[m.sel[paneRepos]].name
 	case paneIssues:
 		i := mockIssues[m.sel[paneIssues]]
 		m.status = fmt.Sprintf("→ would open #%d in %s", i.num, i.repo)
@@ -273,7 +304,7 @@ func (m model) viewRepos(w, h int) string {
 	focused := m.focus == paneRepos
 	var b strings.Builder
 	b.WriteString(titleStyle(focused).Render(" Repos ") + "\n\n")
-	for i, r := range mockRepos {
+	for i, r := range m.repos {
 		visRaw := r.vis
 		visStyled := pubStyle.Render(visRaw)
 		if r.vis == "pri" {
@@ -477,17 +508,22 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-func main() {
-	if len(os.Args) > 1 && os.Args[1] == "--once" {
-		m := initialModel()
+// Run launches the dashboard TUI against repos discovered under root.
+// `once` renders one fixed-size frame to stdout and returns (smoke-test
+// path so CI can exercise the view without a real TTY).
+func Run(root string, once bool) error {
+	repos := loadRepos(root)
+	if once {
+		m := initialModel(repos)
 		m.width, m.height = 130, 42
 		fmt.Print(m.View())
 		fmt.Println()
-		return
+		return nil
 	}
-	p := tea.NewProgram(initialModel(), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(repos), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
-		os.Exit(1)
+		return err
 	}
+	return nil
 }
