@@ -116,10 +116,20 @@ Most bash-era behavior was ported during cutover; the remaining subsystems were 
 ## Editing
 
 - Go code lives in `cmd/bridge/` (CLI) and `internal/` (libraries).
-- Tests: `go test ./...`. Per-package: `go test ./cmd/bridge -run TestXxx`.
 - Install locally: `make install-go`. Build only: `make build-go`.
 - See [`CLAUDE.md`](CLAUDE.md) for commit conventions (Conventional Commits; tag releases as `vX.Y.Z`).
 - Design docs: `docs/specs/2026-05-25-bridge-core-redesign-design.md`. Plans: `docs/plans/2026-05-26-bridge-core-redesign-plan-{a,b,b1,c}.md`.
+
+## Testing
+
+| Layer | Command | What it covers |
+|---|---|---|
+| Unit | `go test ./...` | Pure Go logic across all `internal/` and `cmd/bridge` packages. |
+| Shim (bash) | `make test-shim` (requires `bats`) | The `bridge()` shell function's directive protocol: `cd:`, `exec:`, `noop`, `cancel`. |
+| E2E | `go test -tags=e2e ./e2e/...` | The built binary against a fixture repos-root. Asserts stdout/exit-code/shim-directive contract per subcommand (`list`, `open`, `sessions`, `completion`, `sync`). |
+| Cross-platform | GitHub Actions matrix | All of the above on `ubuntu-latest`, `macos-latest`, `windows-latest`. See `.github/workflows/go.yml`. |
+
+Run a single test: `go test ./cmd/bridge -run TestXxx`. Verbose: add `-v`. To benchmark a change in the e2e binary build cost, e2e tests share one built binary per `go test` invocation via `sync.Once`.
 
 ## Windows
 
