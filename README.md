@@ -133,6 +133,12 @@ Bash equivalent (Linux/macOS) — add to `~/.bashrc`:
 
 ```bash
 command -v bridge >/dev/null && source <(bridge completion bash)
+# Optional: meta-keyword fallback so `bridge open nextgen<tab>` expands to
+# `ArchiveRestApiNextGen` for a repo with "nextgen" in its repo-meta.json
+# topics or description. Cobra's primary completion can't do this because
+# its compgen filter drops non-prefix-matching suggestions.
+[ -f ~/.local/share/bridge/bridge-completion-meta.sh ] && \
+    source ~/.local/share/bridge/bridge-completion-meta.sh
 ```
 
 ## Known limitations

@@ -57,6 +57,62 @@ STUB
     unset TEST_OUT
 }
 
+@test "completion meta-augmenter populates COMPREPLY when cobra returns empty (#65)" {
+    # When cobra's primary completion compgen-filters everything out (e.g. a
+    # meta-only keyword), the augmenter must fall back to `bridge
+    # __complete-meta` and set COMPREPLY directly. Use a stub bridge that
+    # emits one meta hit so we don't need a populated cache.
+    stubdir=$(mktemp -d)
+    cat > "$stubdir/bridge" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "__complete-meta" ]; then
+    echo "ArchiveRestApiNextGen"
+    exit 0
+fi
+# Anything else from this stub is unexpected in this test.
+exit 1
+STUB
+    chmod +x "$stubdir/bridge"
+    run bash -c "
+        export PATH=\"$stubdir:\$PATH\"
+        # Hand-define __start_bridge to simulate cobra's empty return.
+        __start_bridge() { COMPREPLY=(); }
+        source $BATS_TEST_DIRNAME/bridge-completion-meta.sh
+        COMP_WORDS=(bridge open nextgen)
+        COMP_CWORD=2
+        __start_bridge
+        printf '%s\n' \"\${COMPREPLY[@]}\"
+    "
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"ArchiveRestApiNextGen"* ]]
+    rm -rf "$stubdir"
+}
+
+@test "completion meta-augmenter is a no-op when cobra already has hits" {
+    # The augmenter must not clobber cobra's COMPREPLY. If cobra found
+    # matches, the meta lookup should not run at all.
+    stubdir=$(mktemp -d)
+    cat > "$stubdir/bridge" <<'STUB'
+#!/usr/bin/env bash
+echo "META RAN — augmenter is overriding cobra hits" >&2
+exit 1
+STUB
+    chmod +x "$stubdir/bridge"
+    run bash -c "
+        export PATH=\"$stubdir:\$PATH\"
+        __start_bridge() { COMPREPLY=(canonical-hit); }
+        source $BATS_TEST_DIRNAME/bridge-completion-meta.sh
+        COMP_WORDS=(bridge open whatever)
+        COMP_CWORD=2
+        __start_bridge
+        printf '%s\n' \"\${COMPREPLY[@]}\"
+    "
+    [ "$status" -eq 0 ]
+    [ "$output" = "canonical-hit" ]
+    [[ "$output" != *"META RAN"* ]]
+    rm -rf "$stubdir"
+}
+
 @test "cancel directive exits 0 without calling binary fallback (#63)" {
     # If the shim treated cancel like noop, it would re-run `bridge -r`, which
     # would hit the legacy rewrite (-r → list -r) and dump the text list to

@@ -34,8 +34,10 @@ install-go: build-go
 install-shim:
 	install -d $(HOME)/.local/share/bridge
 	install -m 0644 shims/bridge-shim.sh $(HOME)/.local/share/bridge/bridge-shim.sh
+	install -m 0644 shims/bridge-completion-meta.sh $(HOME)/.local/share/bridge/bridge-completion-meta.sh
 	@echo
 	@echo "Shim installed to $(HOME)/.local/share/bridge/bridge-shim.sh"
+	@echo "Completion meta-augmenter at $(HOME)/.local/share/bridge/bridge-completion-meta.sh (optional)"
 	@echo "See go-migrate.md for the ~/.bashrc source line."
 
 # install bundles the binary + shell shim. Verbs like `open` and `sessions

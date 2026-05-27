@@ -2,6 +2,7 @@ package main
 
 import (
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -75,6 +76,53 @@ func TestCompleteRootLevel(t *testing.T) {
 	out, _ = cmd.CombinedOutput()
 	if !strings.Contains(string(out), "list") {
 		t.Errorf("subcommand 'list' missing from root-level 'li' completion:\n%s", out)
+	}
+}
+
+func TestCompleteMetaSubcommand(t *testing.T) {
+	// __complete-meta returns repo names that match prefix in Desc/Topics
+	// only — basename hits are filtered out (cobra's primary completion
+	// already handled those). Output is one name per line, no compgen
+	// filter applied.
+	root := writeFakeRepos(t)
+	// Drop a repo-meta.json so the meta path has something to find.
+	cache := t.TempDir()
+	metaJSON := `{
+        "github/freaxnx01/public/bridge": {"topics": ["devtools"], "description": "the bridge tool"},
+        "github/freaxnx01/private/secret": {"topics": ["nextgen", "internal"], "description": ""}
+    }`
+	if err := os.WriteFile(filepath.Join(cache, "repo-meta.json"), []byte(metaJSON), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("__complete-meta", "nextgen")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+filepath.Dir(cache),
+	)
+	// __complete-meta reads from $XDG_CACHE_HOME/bridge/repo-meta.json, so
+	// nest the meta file accordingly.
+	bridgeCache := filepath.Join(filepath.Dir(cache), "bridge")
+	_ = os.MkdirAll(bridgeCache, 0o755)
+	_ = os.WriteFile(filepath.Join(bridgeCache, "repo-meta.json"), []byte(metaJSON), 0o644)
+
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("__complete-meta: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "secret" {
+		t.Errorf("expected 'secret' (matched via topic 'nextgen'), got %q", got)
+	}
+
+	// Basename hit must be excluded — cobra's primary handled those.
+	cmd = bridgeCmd("__complete-meta", "bridge")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+filepath.Dir(cache),
+	)
+	out, _ = cmd.CombinedOutput()
+	if strings.Contains(string(out), "bridge") {
+		t.Errorf("basename hit leaked into meta output: %s", out)
 	}
 }
 
