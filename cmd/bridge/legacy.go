@@ -22,6 +22,7 @@ var legacyVerbForwards = map[string][]string{
 //	bridge -D <name> [trailing...]   → bridge rm <name> --yes [trailing...]
 //	bridge -a [trailing...]          → bridge sessions attach [trailing...]
 //	bridge --attach [trailing...]    → bridge sessions attach [trailing...]
+//	bridge --dashboard [trailing...] → bridge tui [trailing...]
 //	bridge away|back|auto            → bridge presence away|back|auto
 //
 // Known modern verbs and __preflight are left alone.
@@ -46,6 +47,10 @@ func rewriteLegacyArgs(args []string) []string {
 	switch first {
 	case "--status":
 		out := []string{args[0], "status"}
+		out = append(out, args[2:]...)
+		return out
+	case "--dashboard":
+		out := []string{args[0], "tui"}
 		out = append(out, args[2:]...)
 		return out
 	case "-r":
@@ -102,6 +107,8 @@ func rewriteLegacyPreflight(args []string) []string {
 	switch first {
 	case "--status":
 		return append([]string{"status"}, args[1:]...)
+	case "--dashboard":
+		return append([]string{"tui"}, args[1:]...)
 	case "-a", "--attach":
 		return append([]string{"sessions", "attach"}, args[1:]...)
 	case "-D":

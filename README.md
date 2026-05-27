@@ -47,9 +47,11 @@ bridge sync [now|--auto]
 bridge list [-r] [--refresh]    # text dump (scripts); -r adds remote rows
 bridge issues                   # open issues across forges (TTL cache)
 bridge watch                    # long-running watcher of ~/projects/repos/
+bridge tui                      # Bubbletea dashboard (repos / cached issues / live sessions; Enter to act)
+bridge --dashboard              # alias for `bridge tui` (legacy spelling)
 ```
 
-Legacy flag spellings (`-r`, `--refresh`, `-D`, `-a`/`--attach`, `--status`, `away`/`back`/`auto`) are silently rewritten to the modern subcommand form so bash-bridge muscle memory keeps working. See `cmd/bridge/legacy.go`.
+Legacy flag spellings (`-r`, `--refresh`, `-D`, `-a`/`--attach`, `--status`, `--dashboard`, `away`/`back`/`auto`) are silently rewritten to the modern subcommand form so bash-bridge muscle memory keeps working. See `cmd/bridge/legacy.go`.
 
 JSON output for every read command is documented in [`docs/cli-json-schema.md`](docs/cli-json-schema.md).
 

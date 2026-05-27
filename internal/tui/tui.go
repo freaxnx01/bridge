@@ -168,6 +168,15 @@ func panelStyle(focused bool) lipgloss.Style {
 		Padding(0, 1)
 }
 
+// renderPanel wraps panelStyle with the +2 width/+2 height correction for
+// the border. lipgloss's .Width/.Height set the *content* dimensions
+// (padding included, border excluded), so passing the outer dimensions
+// without subtracting the border emits 2 trailing cells per row and an
+// extra blank line — the .Width-vs-rounded-border glitch tracked in #73.
+func renderPanel(focused bool, outerW, outerH int, content string) string {
+	return panelStyle(focused).Width(outerW - 2).Height(outerH - 2).Render(content)
+}
+
 func titleStyle(focused bool) lipgloss.Style {
 	c := colTitle
 	if !focused {
@@ -474,7 +483,7 @@ func (m model) viewRepos(w, h int) string {
 		}
 		b.WriteString(line + "\n")
 	}
-	return panelStyle(focused).Width(w).Height(h).Render(b.String())
+	return renderPanel(focused, w, h, b.String())
 }
 
 func (m model) viewIssues(w, h int) string {
@@ -504,7 +513,7 @@ func (m model) viewIssues(w, h int) string {
 		}
 		b.WriteString(line + "\n")
 	}
-	return panelStyle(focused).Width(w).Height(h).Render(b.String())
+	return renderPanel(focused, w, h, b.String())
 }
 
 func (m model) viewSessions(w, h int) string {
@@ -538,7 +547,7 @@ func (m model) viewSessions(w, h int) string {
 		}
 		b.WriteString(line + "\n")
 	}
-	return panelStyle(focused).Width(w).Height(h).Render(b.String())
+	return renderPanel(focused, w, h, b.String())
 }
 
 func (m model) viewHeader(w int) string {

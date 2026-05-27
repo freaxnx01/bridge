@@ -99,6 +99,22 @@ func TestRewriteLegacyPreflightStatus(t *testing.T) {
 	}
 }
 
+func TestRewriteLegacyDashboard(t *testing.T) {
+	got := rewriteLegacyArgs([]string{"bridge", "--dashboard"})
+	want := []string{"bridge", "tui"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
+func TestRewriteLegacyPreflightDashboard(t *testing.T) {
+	got := rewriteLegacyPreflight([]string{"--dashboard"})
+	want := []string{"tui"}
+	if !reflect.DeepEqual(got, want) {
+		t.Errorf("got %v want %v", got, want)
+	}
+}
+
 func TestRewriteLegacyShortArgs(t *testing.T) {
 	// Just program name — no rewrite, no panic.
 	in := []string{"bridge"}
