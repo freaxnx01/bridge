@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# UserPromptSubmit hook for clrepo presence-aware Telegram pages.
+# UserPromptSubmit hook for bridge presence-aware Telegram pages.
 #
 # Removes the per-slot idle marker so a debounced page that hasn't
 # fired yet is silently cancelled.
@@ -10,7 +10,7 @@
 set -u
 
 SLOT="${1:-}"
-CACHE="$HOME/.cache/clrepo"
+CACHE="$HOME/.cache/bridge"
 LOG="$CACHE/hooks.log"
 
 # Drain stdin so Claude Code doesn't see a SIGPIPE
