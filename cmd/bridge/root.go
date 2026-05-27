@@ -23,7 +23,8 @@ cd's into it via the shell shim.
 
 Cache lives at ~/.cache/bridge/ (overridable via XDG_CACHE_HOME).
 Repo discovery walks ~/projects/repos/ (overridable via BRIDGE_REPOS_ROOT).`,
-	Version: versionString(),
+	Version:           versionString(),
+	ValidArgsFunction: completeRepoName,
 }
 
 func versionString() string {

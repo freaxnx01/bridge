@@ -123,6 +123,18 @@ Most bash-era behavior was ported during cutover; the remaining subsystems were 
 
 Cross-compile via `GOOS=windows GOARCH=amd64 go build ./cmd/bridge`. Install the `.exe` on PATH as `bridge.exe`, dot-source `shims/bridge-shim.ps1` from `$PROFILE`. Launcher uses Windows Terminal (`wt.exe new-tab`). No Windows CI; the binary builds clean but the runtime path is exercised manually.
 
+Tab completion for repo names — add to `$PROFILE`:
+
+```powershell
+bridge.exe completion powershell | Out-String | Invoke-Expression
+```
+
+Bash equivalent (Linux/macOS) — add to `~/.bashrc`:
+
+```bash
+command -v bridge >/dev/null && source <(bridge completion bash)
+```
+
 ## Known limitations
 
 - Picker is local-only; remote-only entries can't be selected for clone yet ([#54](https://github.com/freaxnx01/bridge/issues/54)).

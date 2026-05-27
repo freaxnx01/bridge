@@ -54,6 +54,30 @@ func TestCompleteRmAlsoCompletes(t *testing.T) {
 	}
 }
 
+func TestCompleteRootLevel(t *testing.T) {
+	// `bridge bri<tab>` should suggest the bridge repo (root-level
+	// ValidArgsFunction). Verb completions like `bridge li<tab>` keep
+	// working because cobra merges subcommand names with the args
+	// function's output.
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("__complete", "bri")
+	cmd.Env = append(os.Environ(), "BRIDGE_REPOS_ROOT="+root)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("__complete bri: %v\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "bridge") {
+		t.Errorf("expected 'bridge' in root-level completion of 'bri':\n%s", out)
+	}
+
+	cmd = bridgeCmd("__complete", "li")
+	cmd.Env = append(os.Environ(), "BRIDGE_REPOS_ROOT="+root)
+	out, _ = cmd.CombinedOutput()
+	if !strings.Contains(string(out), "list") {
+		t.Errorf("subcommand 'list' missing from root-level 'li' completion:\n%s", out)
+	}
+}
+
 func TestCompleteOpenNoSecondArg(t *testing.T) {
 	// Once a repo arg is present, completion should return nothing — open
 	// only takes a single positional. Asserts the `len(args) >= 1` guard.
