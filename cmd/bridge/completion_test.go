@@ -32,10 +32,14 @@ func TestCompleteOpenAllRepos(t *testing.T) {
 }
 
 func TestCompleteOpenPrefixCaseInsensitive(t *testing.T) {
+	// Typing "BRI" must produce a suggestion that survives bash's
+	// case-sensitive compgen post-filter. We splice the typed casing onto
+	// the canonical name, so the suggestion is "BRIdge" — same repo, just
+	// case-rewritten to start with what the user typed.
 	root := writeFakeRepos(t)
 	out := runComplete(t, root, "open", "BRI")
-	if !strings.Contains(out, "bridge") {
-		t.Errorf("expected 'bridge' in completion of 'BRI', got:\n%s", out)
+	if !strings.Contains(out, "BRIdge") {
+		t.Errorf("expected 'BRIdge' (typed-case + canonical tail) in completion of 'BRI', got:\n%s", out)
 	}
 	if strings.Contains(out, "secret") || strings.Contains(out, "glrepo") {
 		t.Errorf("non-matching repos leaked into prefix completion:\n%s", out)

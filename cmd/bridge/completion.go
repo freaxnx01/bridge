@@ -24,9 +24,21 @@ func completeRepoName(cmd *cobra.Command, args []string, toComplete string) ([]s
 	needle := strings.ToLower(toComplete)
 	out := make([]string, 0, len(repos))
 	for _, r := range repos {
-		if needle == "" || strings.HasPrefix(strings.ToLower(r.Name), needle) {
+		if needle == "" {
 			out = append(out, r.Name)
+			continue
 		}
+		lower := strings.ToLower(r.Name)
+		if !strings.HasPrefix(lower, needle) {
+			continue
+		}
+		// Bash's compgen post-filters suggestions case-sensitively against
+		// the typed prefix. To get true case-insensitive completion without
+		// requiring `completion-ignore-case on` in ~/.inputrc, splice the
+		// user's typed casing onto the canonical repo name. The resolver
+		// (findRepoByName) is already case-insensitive, so accepting e.g.
+		// "BRIdge" still opens the "bridge" repo.
+		out = append(out, toComplete+r.Name[len(toComplete):])
 	}
 	sort.Strings(out)
 	return out, cobra.ShellCompDirectiveNoFileComp
