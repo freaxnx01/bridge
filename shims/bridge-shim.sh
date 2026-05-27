@@ -1,3 +1,4 @@
+# shellcheck shell=bash
 # bridge-shim.sh — sourced from ~/.bashrc once Phase 3 cuts over.
 # Calls the Go binary's __preflight subcommand and acts on its directive.
 # Keep this file small (≤20 lines of logic). Anything complex belongs in the binary.
@@ -15,7 +16,7 @@ bridge() {
         return $rc
     fi
     case "$directive" in
-        cd:*)   cd "${directive#cd:}" ;;
+        cd:*)   cd "${directive#cd:}" || return ;;
         # Use `eval` so the sh-quoting that internal/shellbridge emits
         # (single-quoted args with whitespace) is re-parsed by the shell.
         # Without eval, the unquoted parameter expansion would word-split
