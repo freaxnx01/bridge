@@ -2,6 +2,11 @@
 # Calls the Go binary's __preflight subcommand and acts on its directive.
 # Keep this file small (≤20 lines of logic). Anything complex belongs in the binary.
 
+# Sentinel for the binary so verbs like `sessions attach` / `open` can detect
+# they're running under a shell that has the shim loaded. Without this, those
+# verbs emit `exec:`/`cd:` directives that nothing consumes — silent no-op.
+export BRIDGE_SHIM_LOADED=1
+
 bridge() {
     local directive rc
     directive=$(command bridge __preflight "$@")

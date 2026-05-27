@@ -35,6 +35,16 @@ func init() {
 }
 
 func runOpen(cmd *cobra.Command, args []string) error {
+	// --json is for programmatic consumers (agents, scripts, CI) that read the
+	// output rather than expecting a side-effect cd. Skip the shim check there;
+	// elsewhere we need the shim to actually consume the cd: directive.
+	if !openJSON {
+		if err := requireShim(); err != nil {
+			cmd.SilenceUsage = true
+			cmd.SilenceErrors = true
+			return err
+		}
+	}
 	name := args[0]
 	repos, err := core.DiscoverRepos(reposRoot())
 	if err != nil {
