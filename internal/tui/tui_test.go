@@ -67,6 +67,35 @@ func TestLoadIssuesMissingCacheReturnsEmpty(t *testing.T) {
 	}
 }
 
+func TestHumanAge(t *testing.T) {
+	cases := []struct {
+		d    time.Duration
+		want string
+	}{
+		{30 * time.Second, "30s"},
+		{2 * time.Minute, "2m"},
+		{3 * time.Hour, "3h"},
+		{50 * time.Hour, "2d"},
+	}
+	for _, c := range cases {
+		if got := humanAge(c.d); got != c.want {
+			t.Errorf("humanAge(%s) = %q, want %q", c.d, got, c.want)
+		}
+	}
+}
+
+func TestLoadSessionsToleratesMissingSlots(t *testing.T) {
+	// loadSessions must not panic when slots.json is missing. The host's
+	// tmux state is non-deterministic across CI/dev, so we just assert
+	// the call returns and every result row has a non-empty name
+	// (cross-referenced or not).
+	for _, s := range loadSessions("/no/such/slots.json") {
+		if s.name == "" {
+			t.Errorf("session row with empty name: %+v", s)
+		}
+	}
+}
+
 func TestLoadReposMissingRootReturnsEmpty(t *testing.T) {
 	if got := loadRepos("/no/such/dir/here"); got != nil && len(got) != 0 {
 		t.Errorf("expected empty, got %v", got)
@@ -82,7 +111,7 @@ func TestRunOnceRendersFrame(t *testing.T) {
 	r, w, _ := os.Pipe()
 	saved := os.Stdout
 	os.Stdout = w
-	err := Run(root, "", true)
+	err := Run(root, "", "", true)
 	w.Close()
 	os.Stdout = saved
 	if err != nil {

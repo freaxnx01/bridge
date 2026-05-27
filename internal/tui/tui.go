@@ -1,7 +1,10 @@
-// Package tui is the bridge dashboard TUI (Bubbletea). Repos + issues
-// panels are wired to real data (DiscoverRepos and the issues cache
-// populated by `bridge issues`). Sessions remain fixture-driven; #71
-// tracks that.
+// Package tui is the bridge dashboard TUI (Bubbletea). All three panels
+// (Repos, Open Issues, Sessions) are wired to real data:
+//   - Repos: core.DiscoverRepos
+//   - Issues: the cache populated by `bridge issues`
+//   - Sessions: live tmux output cross-referenced with the slot registry
+//
+// Actions on Enter / slash commands are still stubs; #72 tracks wiring.
 package tui
 
 import (
@@ -80,13 +83,53 @@ func loadIssues(cachePath string) []issue {
 	return out
 }
 
-var (
-	mockSessions = []session{
-		{"bridge:main", "attached", "2h ago", "public/bridge"},
-		{"ingest:bug-142", "detached", "5m ago", "private/ingest-pipeline"},
-		{"dms:perf-91", "code", "yesterday", "private/dms-core"},
+// loadSessions returns the live tmux sessions cross-referenced against
+// the slot registry. Slots are keyed by ID; live sessions are matched by
+// SlotID (which == tmux session name in the current registry shape).
+// Stale slots (registered but their tmux session is gone) are dropped.
+// Live tmux sessions without a matching slot are still shown — the
+// dashboard should reflect ground truth, not just what bridge launched.
+func loadSessions(slotsPath string) []session {
+	live, _ := core.LiveSessions()
+	if len(live) == 0 {
+		return nil
 	}
-)
+	slots, _ := core.LoadSlots(slotsPath)
+	bySlotID := make(map[string]core.Slot, len(slots))
+	for _, s := range slots {
+		bySlotID[s.ID] = s
+	}
+	out := make([]session, 0, len(live))
+	for _, s := range live {
+		repo := ""
+		if slot, ok := bySlotID[s.SlotID]; ok {
+			repo = slot.Repo
+			if slot.Worktree != "" {
+				repo = repo + ":" + slot.Worktree
+			}
+		}
+		out = append(out, session{
+			name:  s.TmuxName,
+			state: s.State,
+			age:   humanAge(s.Age),
+			repo:  repo,
+		})
+	}
+	return out
+}
+
+func humanAge(d time.Duration) string {
+	switch {
+	case d < time.Minute:
+		return fmt.Sprintf("%ds", int(d.Seconds()))
+	case d < time.Hour:
+		return fmt.Sprintf("%dm", int(d.Minutes()))
+	case d < 24*time.Hour:
+		return fmt.Sprintf("%dh", int(d.Hours()))
+	default:
+		return fmt.Sprintf("%dd", int(d.Hours()/24))
+	}
+}
 
 // --- styles (btop-inspired) ---
 
@@ -169,11 +212,12 @@ type model struct {
 	status   string
 	showHelp bool
 
-	repos  []repo
-	issues []issue
+	repos    []repo
+	issues   []issue
+	sessions []session
 }
 
-func initialModel(repos []repo, issues []issue) model {
+func initialModel(repos []repo, issues []issue, sessions []session) model {
 	ti := textinput.New()
 	ti.Placeholder = "type a /command or text…"
 	ti.Prompt = ""
@@ -186,11 +230,12 @@ func initialModel(repos []repo, issues []issue) model {
 		status = "no cached issues — run `bridge issues --refresh` to warm the cache"
 	}
 	return model{
-		focus:  paneIssues,
-		cmd:    ti,
-		status: status,
-		repos:  repos,
-		issues: issues,
+		focus:    paneIssues,
+		cmd:      ti,
+		status:   status,
+		repos:    repos,
+		issues:   issues,
+		sessions: sessions,
 	}
 }
 
@@ -203,7 +248,7 @@ func (m *model) rowCount(p pane) int {
 	case paneIssues:
 		return len(m.issues)
 	case paneSessions:
-		return len(mockSessions)
+		return len(m.sessions)
 	}
 	return 0
 }
@@ -305,7 +350,7 @@ func (m model) actOnSelection() tea.Cmd {
 		i := m.issues[m.sel[paneIssues]]
 		m.status = fmt.Sprintf("→ would open #%d in %s", i.num, i.repo)
 	case paneSessions:
-		s := mockSessions[m.sel[paneSessions]]
+		s := m.sessions[m.sel[paneSessions]]
 		m.status = "→ would attach to " + s.name
 	}
 	return nil
@@ -377,7 +422,7 @@ func (m model) viewSessions(w, h int) string {
 	focused := m.focus == paneSessions
 	var b strings.Builder
 	b.WriteString(titleStyle(focused).Render(" Sessions ") + "\n\n")
-	for i, s := range mockSessions {
+	for i, s := range m.sessions {
 		var dot string
 		switch s.state {
 		case "attached":
@@ -521,22 +566,23 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-// Run launches the dashboard TUI against repos discovered under root and
-// issues read from the on-disk cache at issuesCachePath (empty string =
-// no issues, panel renders empty with a hint in the status line).
+// Run launches the dashboard TUI. Each data source is loaded once at
+// startup; refresh-on-tick is a follow-up. Empty paths or absent data
+// render the affected panel empty.
 // `once` renders one fixed-size frame to stdout and returns (smoke-test
 // path so CI can exercise the view without a real TTY).
-func Run(root, issuesCachePath string, once bool) error {
+func Run(root, issuesCachePath, slotsPath string, once bool) error {
 	repos := loadRepos(root)
 	issues := loadIssues(issuesCachePath)
+	sessions := loadSessions(slotsPath)
 	if once {
-		m := initialModel(repos, issues)
+		m := initialModel(repos, issues, sessions)
 		m.width, m.height = 130, 42
 		fmt.Print(m.View())
 		fmt.Println()
 		return nil
 	}
-	p := tea.NewProgram(initialModel(repos, issues), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(repos, issues, sessions), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return err
