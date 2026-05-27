@@ -80,6 +80,7 @@ func TestOpenUnknownNameExits2(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_SHIM_LOADED=1",
 	)
 	var serr stringBuf
 	cmd.Stderr = &serr
@@ -137,6 +138,48 @@ func TestOpenKeywordFallback(t *testing.T) {
 	}
 }
 
+func TestOpenWithoutShimFailsLoudly(t *testing.T) {
+	// `bridge open foo` outside the shim used to print the repo path and exit 0
+	// (silent no-op — see #66). It must now error usefully.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("open", "bridge")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"BRIDGE_REPOS_ROOT=" + root,
+		"XDG_CACHE_HOME=" + cache,
+		// no BRIDGE_SHIM_LOADED
+	}
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit, got success: %s", out)
+	}
+	if !contains(string(out), "shim") {
+		t.Errorf("expected error mentioning shim, got: %s", out)
+	}
+}
+
+func TestOpenJSONBypassesShimCheck(t *testing.T) {
+	// --json is for programmatic consumers (agents, scripts, CI). It must
+	// produce output without the shim being loaded.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("open", "bridge", "--json")
+	cmd.Env = []string{
+		"PATH=" + os.Getenv("PATH"),
+		"BRIDGE_REPOS_ROOT=" + root,
+		"XDG_CACHE_HOME=" + cache,
+		// no BRIDGE_SHIM_LOADED
+	}
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("expected success even without shim (--json), got: %v\n%s", err, out)
+	}
+	if !contains(string(out), `"name": "bridge"`) {
+		t.Errorf("expected JSON for bridge, got: %s", out)
+	}
+}
+
 func TestOpenAmbiguousKeyword(t *testing.T) {
 	// writeFakeRepos creates "bridge", "secret", "glrepo" — "e" matches all 3.
 	root := writeFakeRepos(t)
@@ -145,6 +188,7 @@ func TestOpenAmbiguousKeyword(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_SHIM_LOADED=1",
 	)
 	err := cmd.Run()
 	if err == nil {

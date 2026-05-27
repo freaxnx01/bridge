@@ -12,6 +12,12 @@ teardown_file() {
     rm -rf "$BRIDGE_TEST_DIR"
 }
 
+@test "sourcing the shim exports BRIDGE_SHIM_LOADED=1 (#66)" {
+    run bash -c "source $BATS_TEST_DIRNAME/bridge-shim.sh; echo \"\$BRIDGE_SHIM_LOADED\""
+    [ "$status" -eq 0 ]
+    [ "$output" = "1" ]
+}
+
 @test "no-arg preflight is noop (shim falls through)" {
     run bash -c "source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge --version"
     [ "$status" -eq 0 ]

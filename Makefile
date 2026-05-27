@@ -1,13 +1,14 @@
-.PHONY: help all build-go test-go test-shim install-go install-shim
+.PHONY: help all build-go test-go test-shim install install-go install-shim
 
 BATS ?= bats
 
 help:
 	@echo "Targets:"
+	@echo "  make install      Install binary + shell shim (recommended default)"
 	@echo "  make build-go     Build the Go binary into ./bridge-go"
 	@echo "  make test-go      Run go test ./..."
 	@echo "  make test-shim    Run shims/bridge-shim.bats (requires bats)"
-	@echo "  make install-go   Install Go binary as ~/.local/bin/bridge"
+	@echo "  make install-go   Install Go binary as ~/.local/bin/bridge (no shim)"
 	@echo "  make install-shim Install bridge-shim.sh to ~/.local/share/bridge/"
 	@echo "  make all          Run test-go + test-shim"
 
@@ -36,3 +37,10 @@ install-shim:
 	@echo
 	@echo "Shim installed to $(HOME)/.local/share/bridge/bridge-shim.sh"
 	@echo "See go-migrate.md for the ~/.bashrc source line."
+
+# install bundles the binary + shell shim. Verbs like `open` and `sessions
+# attach` need the shim to actually cd/attach, so binary-only installs leave
+# the user with a partially-broken bridge. Make this the recommended default.
+install: install-go install-shim
+	@echo
+	@echo 'Bridge installed. Start a new shell (or `source ~/.bashrc`) to pick up the shim.'

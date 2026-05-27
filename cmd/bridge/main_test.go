@@ -39,6 +39,12 @@ func TestMain(m *testing.M) {
 
 // bridgeCmd returns an *exec.Cmd invoking the prebuilt binary with the given args.
 // Drop-in replacement for exec.Command("go", "run", ".", args...).
+//
+// By default the env carries BRIDGE_SHIM_LOADED=1 so shim-dependent verbs
+// (`open`, `sessions attach`) don't trip their no-shim guard inside tests.
+// Tests that want to exercise the guard should override cmd.Env explicitly.
 func bridgeCmd(args ...string) *exec.Cmd {
-	return exec.Command(bridgeBin, args...)
+	cmd := exec.Command(bridgeBin, args...)
+	cmd.Env = append(os.Environ(), "BRIDGE_SHIM_LOADED=1")
+	return cmd
 }

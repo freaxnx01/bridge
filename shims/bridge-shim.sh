@@ -1,6 +1,12 @@
+# shellcheck shell=bash
 # bridge-shim.sh — sourced from ~/.bashrc once Phase 3 cuts over.
 # Calls the Go binary's __preflight subcommand and acts on its directive.
 # Keep this file small (≤20 lines of logic). Anything complex belongs in the binary.
+
+# Sentinel for the binary so verbs like `sessions attach` / `open` can detect
+# they're running under a shell that has the shim loaded. Without this, those
+# verbs emit `exec:`/`cd:` directives that nothing consumes — silent no-op.
+export BRIDGE_SHIM_LOADED=1
 
 bridge() {
     local directive rc
@@ -10,7 +16,7 @@ bridge() {
         return $rc
     fi
     case "$directive" in
-        cd:*)   cd "${directive#cd:}" ;;
+        cd:*)   cd "${directive#cd:}" || return ;;
         # Use `eval` so the sh-quoting that internal/shellbridge emits
         # (single-quoted args with whitespace) is re-parsed by the shell.
         # Without eval, the unquoted parameter expansion would word-split

@@ -25,6 +25,20 @@ func TestPreflightSessionsAttachEmitsExec(t *testing.T) {
 	}
 }
 
+func TestSessionsAttachWithoutShimFailsLoudly(t *testing.T) {
+	// `bridge sessions attach foo` outside the shim used to print the slot
+	// name and exit 0 (silent no-op — see #66). It must now error usefully.
+	cmd := bridgeCmd("sessions", "attach", "foo")
+	cmd.Env = []string{"PATH=" + os.Getenv("PATH")} // no BRIDGE_SHIM_LOADED
+	out, err := cmd.CombinedOutput()
+	if err == nil {
+		t.Fatalf("expected non-zero exit, got success: %s", out)
+	}
+	if !strings.Contains(string(out), "shim") {
+		t.Errorf("expected error mentioning shim, got: %s", out)
+	}
+}
+
 func TestSessionsAttachUnknownExits2(t *testing.T) {
 	dir := t.TempDir()
 	fixture := filepath.Join(dir, "tmux.txt")
