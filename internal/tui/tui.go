@@ -1,6 +1,7 @@
-// Package tui is the bridge dashboard TUI (Bubbletea). MVP slice of #64:
-// the repo panel is wired to real `core.DiscoverRepos` output. Issues and
-// sessions remain fixture-driven; promoting those is a follow-up.
+// Package tui is the bridge dashboard TUI (Bubbletea). Repos + issues
+// panels are wired to real data (DiscoverRepos and the issues cache
+// populated by `bridge issues`). Sessions remain fixture-driven; #71
+// tracks that.
 package tui
 
 import (
@@ -14,6 +15,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/forge"
 )
 
 // --- data shapes ---
@@ -62,16 +64,23 @@ func loadRepos(root string) []repo {
 	return out
 }
 
-var (
-	mockIssues = []issue{
-		{30, "public/bridge", "feat(dashboard): TUI / styled output for --dashboard"},
-		{142, "private/ingest-pipeline", "fix: retry on transient 503 from upstream"},
-		{139, "private/ingest-pipeline", "feat: parquet writer backpressure"},
-		{138, "private/ingest-pipeline", "chore: bump pyarrow to 17.x"},
-		{91, "private/dms-core", "perf: index rebuild parallelism"},
-		{88, "private/dms-core", "feat: stamp-level retention overrides"},
-		{84, "private/dms-core", "fix: trustee group resolution on rename"},
+// loadIssues reads the on-disk issue cache populated by `bridge issues`.
+// Cache-only — the TUI must not block on a forge call at startup; the user
+// runs `bridge issues --refresh` to warm the cache out of band. Missing
+// or empty cache returns an empty slice (panel renders with no rows).
+func loadIssues(cachePath string) []issue {
+	c, err := forge.ReadIssueCache(cachePath)
+	if err != nil {
+		return nil
 	}
+	out := make([]issue, 0, len(c.Issues))
+	for _, i := range c.Issues {
+		out = append(out, issue{num: i.Number, repo: i.Repo, title: i.Title})
+	}
+	return out
+}
+
+var (
 	mockSessions = []session{
 		{"bridge:main", "attached", "2h ago", "public/bridge"},
 		{"ingest:bug-142", "detached", "5m ago", "private/ingest-pipeline"},
@@ -160,10 +169,11 @@ type model struct {
 	status   string
 	showHelp bool
 
-	repos []repo
+	repos  []repo
+	issues []issue
 }
 
-func initialModel(repos []repo) model {
+func initialModel(repos []repo, issues []issue) model {
 	ti := textinput.New()
 	ti.Placeholder = "type a /command or text…"
 	ti.Prompt = ""
@@ -172,12 +182,15 @@ func initialModel(repos []repo) model {
 	status := "ready"
 	if len(repos) == 0 {
 		status = "no local repos found under BRIDGE_REPOS_ROOT"
+	} else if len(issues) == 0 {
+		status = "no cached issues — run `bridge issues --refresh` to warm the cache"
 	}
 	return model{
 		focus:  paneIssues,
 		cmd:    ti,
 		status: status,
 		repos:  repos,
+		issues: issues,
 	}
 }
 
@@ -188,7 +201,7 @@ func (m *model) rowCount(p pane) int {
 	case paneRepos:
 		return len(m.repos)
 	case paneIssues:
-		return len(mockIssues)
+		return len(m.issues)
 	case paneSessions:
 		return len(mockSessions)
 	}
@@ -289,7 +302,7 @@ func (m model) actOnSelection() tea.Cmd {
 	case paneRepos:
 		m.status = "→ would drill into " + m.repos[m.sel[paneRepos]].name
 	case paneIssues:
-		i := mockIssues[m.sel[paneIssues]]
+		i := m.issues[m.sel[paneIssues]]
 		m.status = fmt.Sprintf("→ would open #%d in %s", i.num, i.repo)
 	case paneSessions:
 		s := mockSessions[m.sel[paneSessions]]
@@ -340,7 +353,7 @@ func (m model) viewIssues(w, h int) string {
 	if titleW < 10 {
 		titleW = 10
 	}
-	for i, is := range mockIssues {
+	for i, is := range m.issues {
 		numRaw := fmt.Sprintf("#%-4d", is.num)
 		num := accentStyle.Render(numRaw)
 		repoRaw := truncate(is.repo, repoW)
@@ -508,19 +521,22 @@ func truncate(s string, n int) string {
 	return s[:n-1] + "…"
 }
 
-// Run launches the dashboard TUI against repos discovered under root.
+// Run launches the dashboard TUI against repos discovered under root and
+// issues read from the on-disk cache at issuesCachePath (empty string =
+// no issues, panel renders empty with a hint in the status line).
 // `once` renders one fixed-size frame to stdout and returns (smoke-test
 // path so CI can exercise the view without a real TTY).
-func Run(root string, once bool) error {
+func Run(root, issuesCachePath string, once bool) error {
 	repos := loadRepos(root)
+	issues := loadIssues(issuesCachePath)
 	if once {
-		m := initialModel(repos)
+		m := initialModel(repos, issues)
 		m.width, m.height = 130, 42
 		fmt.Print(m.View())
 		fmt.Println()
 		return nil
 	}
-	p := tea.NewProgram(initialModel(repos), tea.WithAltScreen())
+	p := tea.NewProgram(initialModel(repos, issues), tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintln(os.Stderr, "error:", err)
 		return err
