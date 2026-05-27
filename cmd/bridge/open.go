@@ -47,7 +47,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		}
 	}
 	name := args[0]
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := reposWithMeta()
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
@@ -102,14 +102,50 @@ func findRepoByName(repos []core.Repo, name string) (core.Repo, bool) {
 	return core.Repo{}, false
 }
 
-// findReposByKeyword returns repos whose Name contains the substring (case-insensitive).
+// findReposByKeyword returns repos that match q (case-insensitive substring)
+// in their Name, Desc, or any Topic. Name matches take precedence: if any
+// repo's Name contains q, only Name-matchers are returned, so a typo on a
+// real basename doesn't fall through to a noisy meta hit. Empty matches
+// fall back to meta (Desc + Topics) so `bridge open nextgen` resolves to a
+// repo with "nextgen" in its topics even though no basename contains it.
+//
+// Topics and Desc are only populated if the caller merged repo-meta.json
+// (via core.MergeRepoMeta) onto the discovered repos beforehand.
 func findReposByKeyword(repos []core.Repo, q string) []core.Repo {
 	needle := strings.ToLower(q)
-	var out []core.Repo
+	var nameHits, metaHits []core.Repo
 	for _, r := range repos {
 		if strings.Contains(strings.ToLower(r.Name), needle) {
-			out = append(out, r)
+			nameHits = append(nameHits, r)
+			continue
+		}
+		if strings.Contains(strings.ToLower(r.Desc), needle) {
+			metaHits = append(metaHits, r)
+			continue
+		}
+		for _, t := range r.Topics {
+			if strings.Contains(strings.ToLower(t), needle) {
+				metaHits = append(metaHits, r)
+				break
+			}
 		}
 	}
-	return out
+	if len(nameHits) > 0 {
+		return nameHits
+	}
+	return metaHits
+}
+
+// reposWithMeta returns DiscoverRepos enriched with cached topics +
+// description so keyword search can fall back from basename to meta. Best
+// effort — a missing/unreadable cache leaves repos un-enriched.
+func reposWithMeta() ([]core.Repo, error) {
+	repos, err := core.DiscoverRepos(reposRoot())
+	if err != nil {
+		return nil, err
+	}
+	if meta, err := core.LoadRepoMeta(filepath.Join(cacheRoot(), "repo-meta.json")); err == nil {
+		repos = core.MergeRepoMeta(repos, reposRoot(), meta)
+	}
+	return repos, nil
 }

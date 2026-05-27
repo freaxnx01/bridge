@@ -182,7 +182,7 @@ func preflightOpen(out io.Writer, args []string) error {
 	if name == "" {
 		return shellbridge.EmitNoop(out)
 	}
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := reposWithMeta()
 	if err != nil {
 		return err
 	}
