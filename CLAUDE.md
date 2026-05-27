@@ -65,6 +65,30 @@ Cross-compile for Windows:
 GOOS=windows GOARCH=amd64 go build ./cmd/bridge
 ```
 
+## Cross-shell parity (bash + PowerShell)
+
+bridge must work end-to-end under both **bash** (Linux/macOS) and
+**PowerShell** (Windows). Treat parity as a hard requirement, not a
+nice-to-have.
+
+- Two shims ship side-by-side: `shims/bridge-shim.sh` and
+  `shims/bridge-shim.ps1`. Any change to the `__preflight` directive
+  protocol must update both — and add a test in `shims/bridge-shim.bats`
+  (bash) plus an equivalent for the `.ps1` shim.
+- Tab-completion goes through Cobra's `ValidArgsFunction`; one
+  registration emits scripts for both shells via `bridge completion bash`
+  and `bridge completion powershell`. Don't write shell-specific
+  completion logic in the shim.
+- Launcher paths differ — tmux on Unix, Windows Terminal (`wt.exe`) on
+  Windows — but both go through `internal/launcher` argv construction;
+  don't fork that.
+- If a feature genuinely can't be parity (e.g. relies on tmux), say so
+  explicitly in the PR description and degrade gracefully on the other
+  platform rather than crashing.
+- There is no Windows CI yet (see README), so the PowerShell path must
+  be exercised manually for every change touching the shim, launcher,
+  completion, or filesystem semantics. The PR template enforces this.
+
 ## Commit & release conventions
 
 - Use **Conventional Commits** format for all commit messages
