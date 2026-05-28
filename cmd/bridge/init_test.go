@@ -271,6 +271,30 @@ func TestInitBashAliasAddsMissingOnly(t *testing.T) {
 	}
 }
 
+func TestInitBashAliasPrefixNotFalselyDetected(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	// Pre-existing brg binding. Adding alias "br" (a prefix of "brg") must
+	// NOT be skipped by a naive substring match against the brg line.
+	initial := "complete -o default -o nospace -F __start_bridge brg\n"
+	if err := os.WriteFile(rc, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash", "--alias", "br")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	if got := strings.Count(s, "__start_bridge br\n"); got != 1 {
+		t.Errorf("br line should be added exactly once; got %d in:\n%s", got, s)
+	}
+	if got := strings.Count(s, "__start_bridge brg\n"); got != 1 {
+		t.Errorf("brg line should remain exactly once; got %d in:\n%s", got, s)
+	}
+}
+
 func TestInitBashDryRunNoFileChange(t *testing.T) {
 	home := t.TempDir()
 	rc := filepath.Join(home, ".bashrc")
