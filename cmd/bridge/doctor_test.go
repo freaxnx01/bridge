@@ -118,6 +118,50 @@ func TestDoctorFailsWhenRcMissingCompletion(t *testing.T) {
 	}
 }
 
+func TestDoctorReportsRegisteredAliasCompletions(t *testing.T) {
+	home, pathDir := doctorHome(t)
+	root := writeFakeRepos(t)
+	// Append `complete -F __start_bridge` lines for br and brg.
+	rc := filepath.Join(home, ".bashrc")
+	existing, _ := os.ReadFile(rc)
+	aliasLines := `
+declare -F __start_bridge >/dev/null && \
+    complete -o default -o nospace -F __start_bridge br
+declare -F __start_bridge >/dev/null && \
+    complete -o default -o nospace -F __start_bridge brg
+`
+	if err := os.WriteFile(rc, append(existing, []byte(aliasLines)...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("doctor")
+	cmd.Env = append(doctorEnv(home, pathDir, root), "BRIDGE_SHIM_LOADED=1")
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	if !strings.Contains(s, "alias completions") {
+		t.Errorf("expected 'alias completions' check line:\n%s", s)
+	}
+	for _, name := range []string{"br", "brg"} {
+		if !strings.Contains(s, name) {
+			t.Errorf("expected alias %q in output:\n%s", name, s)
+		}
+	}
+}
+
+func TestDoctorReportsNoAliasCompletionsWhenAbsent(t *testing.T) {
+	home, pathDir := doctorHome(t)
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("doctor")
+	cmd.Env = append(doctorEnv(home, pathDir, root), "BRIDGE_SHIM_LOADED=1")
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	if !strings.Contains(s, "alias completions") {
+		t.Errorf("expected 'alias completions' check line:\n%s", s)
+	}
+	if !strings.Contains(s, "(none") {
+		t.Errorf("expected '(none ...)' hint when no aliases registered:\n%s", s)
+	}
+}
+
 func TestDoctorReportsDefaultAgentPass(t *testing.T) {
 	home, pathDir := doctorHome(t)
 	root := writeFakeRepos(t)
