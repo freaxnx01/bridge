@@ -91,7 +91,7 @@ func TestPreflightOpenEmitsCD(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	cmd := bridgeCmd("__preflight", "open", "bridge")
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(envWithout("BRIDGE_DEFAULT_AGENT", "BRIDGE_DEFAULT_AGENT_ARGS"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 	)
@@ -152,7 +152,7 @@ func TestPreflightOpenWithWorktreeCDOnly(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	cmd := bridgeCmd("__preflight", "open", "bridge", "-w", "feature-x")
-	cmd.Env = append(envWithout("TMUX"),
+	cmd.Env = append(envWithout("TMUX", "BRIDGE_DEFAULT_AGENT", "BRIDGE_DEFAULT_AGENT_ARGS"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 	)
@@ -188,14 +188,24 @@ func TestPreflightOpenWithAgentInsideTmuxEmitsSwitchClient(t *testing.T) {
 	}
 }
 
-// envWithout returns os.Environ() with any entry whose key equals name removed.
-func envWithout(name string) []string {
+// envWithout returns os.Environ() with any entry whose key matches one of
+// names removed. Variadic so test callers can strip several inherited vars
+// in one call (commonly TMUX, BRIDGE_DEFAULT_AGENT, BRIDGE_DEFAULT_AGENT_ARGS
+// — anything that would leak from the developer's shell into a test process
+// and flip directives from cd: to exec:).
+func envWithout(names ...string) []string {
 	src := os.Environ()
 	out := make([]string, 0, len(src))
-	prefix := name + "="
+	prefixes := make([]string, len(names))
+	for i, n := range names {
+		prefixes[i] = n + "="
+	}
+NextLine:
 	for _, e := range src {
-		if strings.HasPrefix(e, prefix) {
-			continue
+		for _, p := range prefixes {
+			if strings.HasPrefix(e, p) {
+				continue NextLine
+			}
 		}
 		out = append(out, e)
 	}

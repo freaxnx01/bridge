@@ -187,7 +187,24 @@ func runDoctorChecks() []checkResult {
 		})
 	}
 
-	// 11. BRIDGE_DEFAULT_AGENT (auto-launch on `bridge <repo>`)
+	// 11. Alias completions wired via `complete -F __start_bridge <name>`.
+	// Informational only — every host's alias set is personal. Lists the
+	// names found; "(none)" prompts the user that `bridge init --alias`
+	// exists. The cobra-installed `bridge` registration is excluded.
+	aliases := scanAliasCompletions(rcContent)
+	{
+		detail := strings.Join(aliases, ", ")
+		if detail == "" {
+			detail = "(none — wire with `bridge init --alias=br,brg`)"
+		}
+		out = append(out, checkResult{
+			name:   "alias completions",
+			status: statusPass,
+			detail: detail,
+		})
+	}
+
+	// 12. BRIDGE_DEFAULT_AGENT (auto-launch on `bridge <repo>`)
 	agent := os.Getenv("BRIDGE_DEFAULT_AGENT")
 	args := os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS")
 	switch {
@@ -232,6 +249,49 @@ func fileCheck(name, path, remediate string) checkResult {
 		detail:    path + " missing",
 		remediate: remediate,
 	}
+}
+
+// scanAliasCompletions returns the alias names found in lines like
+// `complete -o default -F __start_bridge <name>`. The cobra-default
+// `bridge` registration is filtered out so only user-wired aliases show
+// up. Names containing non-identifier characters are skipped defensively.
+func scanAliasCompletions(rcContent string) []string {
+	var out []string
+	seen := map[string]bool{}
+	for _, line := range strings.Split(rcContent, "\n") {
+		idx := strings.Index(line, "__start_bridge")
+		if idx < 0 {
+			continue
+		}
+		rest := strings.TrimSpace(line[idx+len("__start_bridge"):])
+		if rest == "" {
+			continue
+		}
+		// Take the first whitespace-separated token.
+		name := strings.Fields(rest)[0]
+		if name == "bridge" || seen[name] {
+			continue
+		}
+		// Defensive: only emit names that look like a shell identifier.
+		if !isShellIdent(name) {
+			continue
+		}
+		seen[name] = true
+		out = append(out, name)
+	}
+	return out
+}
+
+func isShellIdent(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if !(r == '_' || (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+			return false
+		}
+	}
+	return true
 }
 
 func rcLineCheck(name, rc, detect string) checkResult {

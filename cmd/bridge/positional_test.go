@@ -28,7 +28,7 @@ func TestPreflightPositionalEmitsCD(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	cmd := bridgeCmd("__preflight", "bridge")
-	cmd.Env = append(os.Environ(),
+	cmd.Env = append(envWithout("BRIDGE_DEFAULT_AGENT", "BRIDGE_DEFAULT_AGENT_ARGS"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 	)

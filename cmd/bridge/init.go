@@ -54,12 +54,13 @@ empty value to leave them untouched.`,
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
 		agent, _ := cmd.Flags().GetString("agent")
 		agentArgs, _ := cmd.Flags().GetString("agent-args")
+		aliases, _ := cmd.Flags().GetString("alias")
 		if shell == "" {
 			shell = detectShell()
 		}
 		switch shell {
 		case "bash":
-			return initBash(cmd.OutOrStdout(), dryRun, agent, agentArgs)
+			return initBash(cmd.OutOrStdout(), dryRun, agent, agentArgs, aliases)
 		case "powershell", "pwsh":
 			return initPowerShell(cmd.OutOrStdout(), dryRun)
 		default:
@@ -73,6 +74,7 @@ func init() {
 	initCmd.Flags().Bool("dry-run", false, "print what would change without modifying files")
 	initCmd.Flags().String("agent", "", "set BRIDGE_DEFAULT_AGENT (e.g. claude); enables auto-launch on `bridge <repo>`")
 	initCmd.Flags().String("agent-args", "", "set BRIDGE_DEFAULT_AGENT_ARGS (e.g. \"--remote-control --dangerously-skip-permissions\")")
+	initCmd.Flags().String("alias", "", "comma-separated shell aliases/functions to wire to bridge completion (e.g. br,brg)")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -83,7 +85,7 @@ func detectShell() string {
 	return "bash"
 }
 
-func initBash(out io.Writer, dryRun bool, agent, agentArgs string) error {
+func initBash(out io.Writer, dryRun bool, agent, agentArgs, aliases string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
@@ -97,6 +99,16 @@ func initBash(out io.Writer, dryRun bool, agent, agentArgs string) error {
 	for _, line := range bashManagedLines {
 		if !strings.Contains(content, line.detect) {
 			toAdd = append(toAdd, line.body)
+		}
+	}
+	// Alias completion lines. Each adds a guarded `complete -F __start_bridge
+	// <name>` line so the alias inherits bridge's tab-completion (cobra binds
+	// `complete -F __start_bridge bridge` only). The declare-F guard makes
+	// the line a no-op when completion didn't load (e.g. binary missing).
+	for _, name := range parseAliases(aliases) {
+		detect := "complete -o default -o nospace -F __start_bridge " + name
+		if !strings.Contains(content, detect) {
+			toAdd = append(toAdd, "declare -F __start_bridge >/dev/null && \\\n    "+detect)
 		}
 	}
 	var sourceBlock string
@@ -175,6 +187,23 @@ func upsertExport(content, name, value string) (string, bool) {
 		content += "\n"
 	}
 	return content + target + "\n", true
+}
+
+// parseAliases splits a comma-separated alias list and trims each name.
+// Empty entries are dropped. Returns nil for an empty input.
+func parseAliases(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, name := range parts {
+		name = strings.TrimSpace(name)
+		if name != "" {
+			out = append(out, name)
+		}
+	}
+	return out
 }
 
 // shellQuote returns a POSIX-safe representation of value for a bash export

@@ -178,6 +178,99 @@ func TestInitBashAgentIdempotentWhenUnchanged(t *testing.T) {
 	}
 }
 
+func TestInitBashAliasAddsCompleteLine(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash", "--alias", "br")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	want := `complete -o default -o nospace -F __start_bridge br`
+	if !strings.Contains(s, want) {
+		t.Errorf("expected %q in .bashrc; got:\n%s", want, s)
+	}
+	// Guard must be present so the line no-ops when completion hasn't loaded.
+	if !strings.Contains(s, "declare -F __start_bridge >/dev/null") {
+		t.Errorf("expected declare -F guard in alias line:\n%s", s)
+	}
+}
+
+func TestInitBashAliasMultiple(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash", "--alias", "br,brg")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	for _, name := range []string{"br", "brg"} {
+		want := `__start_bridge ` + name
+		if !strings.Contains(s, want) {
+			t.Errorf("expected alias %q complete line; got:\n%s", name, s)
+		}
+	}
+}
+
+func TestInitBashAliasIdempotent(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	first := bridgeCmd("init", "--shell", "bash", "--alias", "br")
+	first.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := first.CombinedOutput(); err != nil {
+		t.Fatalf("init first: %v\n%s", err, out)
+	}
+	afterFirst, _ := os.ReadFile(rc)
+	second := bridgeCmd("init", "--shell", "bash", "--alias", "br")
+	second.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := second.CombinedOutput(); err != nil {
+		t.Fatalf("init second: %v\n%s", err, out)
+	}
+	afterSecond, _ := os.ReadFile(rc)
+	if string(afterFirst) != string(afterSecond) {
+		t.Errorf("second call mutated content;\nfirst:\n%s\nsecond:\n%s", afterFirst, afterSecond)
+	}
+	if got := strings.Count(string(afterSecond), "__start_bridge br"); got != 1 {
+		t.Errorf("expected exactly one br complete line, got %d", got)
+	}
+}
+
+func TestInitBashAliasAddsMissingOnly(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	// Pre-existing br line; init --alias=br,brg should add only brg.
+	initial := "complete -o default -o nospace -F __start_bridge br\n"
+	if err := os.WriteFile(rc, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash", "--alias", "br,brg")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	if got := strings.Count(s, "__start_bridge br\n"); got != 1 {
+		t.Errorf("br line should still be present exactly once; got %d in:\n%s", got, s)
+	}
+	if !strings.Contains(s, "__start_bridge brg") {
+		t.Errorf("brg should have been added; got:\n%s", s)
+	}
+}
+
 func TestInitBashDryRunNoFileChange(t *testing.T) {
 	home := t.TempDir()
 	rc := filepath.Join(home, ".bashrc")

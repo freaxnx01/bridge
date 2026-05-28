@@ -149,10 +149,11 @@ bridge doctor       # verify
 - The meta-augmenter source line so `bridge nextgen<TAB>` expands to `ArchiveRestApiNextGen` (basename substring, plus description/topic keywords from `repo-meta.json`). Cobra's primary completion can't do this — its `compgen` filter drops non-prefix-matching suggestions.
 - With `--agent`: `export BRIDGE_DEFAULT_AGENT=<name>` so `bridge <repo>` auto-launches the agent in tmux.
 - With `--agent-args`: `export BRIDGE_DEFAULT_AGENT_ARGS="..."` — flags appended to the agent's argv at launch.
+- With `--alias=br,brg`: a `complete -F __start_bridge <name>` line per alias (guarded by `declare -F`), so `br <repo><TAB>` inherits bridge's completion. Cobra registers completion under `bridge` only, so wrappers/aliases need this explicit binding.
 
-Run `bridge init` again any time; it's idempotent. Source lines are append-if-missing; export lines (`--agent`, `--agent-args`) are replace-in-place so changing your default agent is one command. Use `--dry-run` to preview, `--shell powershell` to print the Windows recipe instead. Skip both flags if you don't want auto-launch.
+Run `bridge init` again any time; it's idempotent. Source lines and alias lines are append-if-missing; export lines (`--agent`, `--agent-args`) are replace-in-place so changing your default agent is one command. Use `--dry-run` to preview, `--shell powershell` to print the Windows recipe instead. Skip flags you don't need — `bridge init` alone wires only the shim + completion sources.
 
-`bridge doctor` checks: binary on PATH, shim files installed, rc lines present, `bash-completion` package available, shim loaded in current shell, repos root walkable, `repo-meta.json` cache, and `BRIDGE_DEFAULT_AGENT` / `BRIDGE_DEFAULT_AGENT_ARGS`. Any `FAIL` exits non-zero.
+`bridge doctor` checks: binary on PATH, shim files installed, rc lines present, `bash-completion` package available, shim loaded in current shell, repos root walkable, `repo-meta.json` cache, registered alias completions, and `BRIDGE_DEFAULT_AGENT` / `BRIDGE_DEFAULT_AGENT_ARGS`. Any `FAIL` exits non-zero.
 
 ## Auto-launching an agent on `bridge <repo>`
 
