@@ -106,9 +106,12 @@ func initBash(out io.Writer, dryRun bool, agent, agentArgs, aliases string) erro
 	// `complete -F __start_bridge bridge` only). The declare-F guard makes
 	// the line a no-op when completion didn't load (e.g. binary missing).
 	for _, name := range parseAliases(aliases) {
-		detect := "complete -o default -o nospace -F __start_bridge " + name
-		if !strings.Contains(content, detect) {
-			toAdd = append(toAdd, "declare -F __start_bridge >/dev/null && \\\n    "+detect)
+		line := "complete -o default -o nospace -F __start_bridge " + name
+		// Whole-line match (binding terminated by newline or end-of-file) so a
+		// shorter alias like "br" isn't falsely detected inside a longer "brg"
+		// binding via a bare substring search.
+		if !strings.Contains(content, line+"\n") && !strings.HasSuffix(content, line) {
+			toAdd = append(toAdd, "declare -F __start_bridge >/dev/null && \\\n    "+line)
 		}
 	}
 	var sourceBlock string
