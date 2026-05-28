@@ -27,20 +27,16 @@ Then **open a new terminal**. The existing shell still has the previous shim fun
 ```bash
 git clone https://github.com/freaxnx01/bridge ~/projects/repos/github/freaxnx01/public/bridge
 cd ~/projects/repos/github/freaxnx01/public/bridge
-make install-go install-shim
-
-# Back up .bashrc:
+make install                                # binary + shim + meta-augmenter
 cp ~/.bashrc ~/.bashrc.bak-bridge-$(date -u +%Y%m%d-%H%M%S)
-
-# Add the shim source line:
-echo '_f=~/.local/share/bridge/bridge-shim.sh; [ -f "$_f" ] && . "$_f"; unset _f' >> ~/.bashrc
+bridge init                                 # idempotently adds shim + completion source lines
 ```
 
 Open a new terminal and smoke-test:
 
 ```bash
+bridge doctor        # → all PASS (repo-meta.json cache may WARN; harmless)
 type bridge          # → "bridge is a function"
-declare -f bridge    # → should show the shim body (case "$directive" in ...)
 bridge --version     # → "bridge v2.x.y (commit ..., built ...)"
 bridge list | head   # → repo listing
 bridge bridge        # → cd's into the bridge repo

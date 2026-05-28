@@ -131,27 +131,32 @@ Most bash-era behavior was ported during cutover; the remaining subsystems were 
 
 Run a single test: `go test ./cmd/bridge -run TestXxx`. Verbose: add `-v`. To benchmark a change in the e2e binary build cost, e2e tests share one built binary per `go test` invocation via `sync.Once`.
 
+## Setting up on a new machine
+
+```bash
+git clone https://github.com/freaxnx01/bridge ~/projects/repos/github/freaxnx01/public/bridge
+cd ~/projects/repos/github/freaxnx01/public/bridge
+make install        # binary + shim + meta-augmenter
+bridge init         # idempotently add shim + completion source lines to ~/.bashrc
+exec bash -l        # pick up the new lines
+bridge doctor       # verify
+```
+
+`bridge init` writes:
+
+- The shim source line so `bridge` becomes a shell function (needed for `open`/`sessions attach` to actually `cd`/`exec`).
+- `source <(bridge completion bash)` for tab-completion.
+- The meta-augmenter source line so `bridge nextgen<TAB>` expands to `ArchiveRestApiNextGen` (basename substring, plus description/topic keywords from `repo-meta.json`). Cobra's primary completion can't do this — its `compgen` filter drops non-prefix-matching suggestions.
+
+Run `bridge init` again any time; it's idempotent and only appends missing lines. Use `--dry-run` to preview, `--shell powershell` to print the Windows recipe instead.
+
+`bridge doctor` checks: binary on PATH, shim files installed, rc lines present, `bash-completion` package available, shim loaded in current shell, repos root walkable, and the `repo-meta.json` cache. Any `FAIL` exits non-zero.
+
 ## Windows
 
 Cross-compile via `GOOS=windows GOARCH=amd64 go build ./cmd/bridge`. Install the `.exe` on PATH as `bridge.exe`, dot-source `shims/bridge-shim.ps1` from `$PROFILE`. Launcher uses Windows Terminal (`wt.exe new-tab`). No Windows CI; the binary builds clean but the runtime path is exercised manually.
 
-Tab completion for repo names — add to `$PROFILE`:
-
-```powershell
-bridge.exe completion powershell | Out-String | Invoke-Expression
-```
-
-Bash equivalent (Linux/macOS) — add to `~/.bashrc`:
-
-```bash
-command -v bridge >/dev/null && source <(bridge completion bash)
-# Optional: meta-keyword fallback so `bridge open nextgen<tab>` expands to
-# `ArchiveRestApiNextGen` for a repo with "nextgen" in its repo-meta.json
-# topics or description. Cobra's primary completion can't do this because
-# its compgen filter drops non-prefix-matching suggestions.
-[ -f ~/.local/share/bridge/bridge-completion-meta.sh ] && \
-    source ~/.local/share/bridge/bridge-completion-meta.sh
-```
+Tab completion: run `bridge.exe init --shell powershell` and paste the printed lines into `$PROFILE` (or run it directly on the Windows host to have it write `$PROFILE` itself). The PowerShell side currently wires the cobra-generated completion only — no meta-augmenter yet.
 
 ## Known limitations
 
