@@ -41,11 +41,16 @@ func TestInitBashAppendsAllToFreshRc(t *testing.T) {
 func TestInitBashIdempotent(t *testing.T) {
 	home := t.TempDir()
 	rc := filepath.Join(home, ".bashrc")
+	// A fully-configured rc: all three source lines plus the default agent
+	// export. A no-flag `bridge init` over this must be a no-op — the default
+	// agent-fill is skipped because BRIDGE_DEFAULT_AGENT is already present.
 	initial := `# user content
 _f=~/.local/share/bridge/bridge-shim.sh; [ -f "$_f" ] && . "$_f"; unset _f
 command -v bridge >/dev/null && source <(bridge completion bash)
 [ -f ~/.local/share/bridge/bridge-completion-meta.sh ] && \
     source ~/.local/share/bridge/bridge-completion-meta.sh
+export BRIDGE_DEFAULT_AGENT=claude
+export BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"
 `
 	if err := os.WriteFile(rc, []byte(initial), 0o644); err != nil {
 		t.Fatal(err)
@@ -292,6 +297,53 @@ func TestInitBashAliasPrefixNotFalselyDetected(t *testing.T) {
 	}
 	if got := strings.Count(s, "__start_bridge brg\n"); got != 1 {
 		t.Errorf("brg line should remain exactly once; got %d in:\n%s", got, s)
+	}
+}
+
+func TestInitBashDefaultsAgentToClaudeOnFreshRc(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Plain `bridge init` with no --agent: should default the auto-launch
+	// agent to claude with the bash bridge's default flags.
+	cmd := bridgeCmd("init", "--shell", "bash")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	if !strings.Contains(s, "export BRIDGE_DEFAULT_AGENT=claude") {
+		t.Errorf("expected default claude agent export; got:\n%s", s)
+	}
+	if !strings.Contains(s, `export BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"`) {
+		t.Errorf("expected default agent args export; got:\n%s", s)
+	}
+}
+
+func TestInitBashDefaultAgentDoesNotClobberExisting(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	// User already configured a different default agent — a plain `bridge
+	// init` (e.g. to refresh completion) must not overwrite it with claude.
+	initial := "export BRIDGE_DEFAULT_AGENT=opencode\n"
+	if err := os.WriteFile(rc, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	if !strings.Contains(s, "export BRIDGE_DEFAULT_AGENT=opencode") {
+		t.Errorf("existing opencode agent should be preserved; got:\n%s", s)
+	}
+	if strings.Contains(s, "export BRIDGE_DEFAULT_AGENT=claude") {
+		t.Errorf("default-fill should not clobber existing agent with claude; got:\n%s", s)
 	}
 }
 
