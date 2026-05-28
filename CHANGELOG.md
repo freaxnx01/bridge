@@ -5,6 +5,16 @@ All notable changes to bridge are documented here.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `bridge init` now defaults the auto-launch agent to **claude** when `--agent` is omitted and no `BRIDGE_DEFAULT_AGENT` export exists yet, writing `BRIDGE_DEFAULT_AGENT=claude` and `BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"`. A plain `bridge init` now makes `bridge <repo>` open a tmux-wrapped claude session out of the box, matching the bash bridge's default. An existing export is never overwritten, so re-running init to refresh completion leaves a customized agent (e.g. opencode) intact. (bash only; the PowerShell `init` writer still does not emit agent exports.)
+
+### Fixed
+
+- `bridge init --alias=<name>` no longer skips an alias whose name is a prefix of an already-wired one (e.g. `br` vs an existing `brg`). Detection now matches the whole binding line instead of a bare substring (#81).
+
 ## [2.1.0] - 2026-05-26
 
 ### Removed

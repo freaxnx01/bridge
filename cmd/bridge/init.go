@@ -48,7 +48,12 @@ left in place — safe to run repeatedly. Use --dry-run to preview.
 Pass --agent and --agent-args to also write BRIDGE_DEFAULT_AGENT and
 BRIDGE_DEFAULT_AGENT_ARGS exports so ` + "`bridge <repo>`" + ` auto-launches the
 configured agent. Existing export lines are replaced in place; pass an
-empty value to leave them untouched.`,
+empty value to leave them untouched.
+
+When --agent is omitted and no BRIDGE_DEFAULT_AGENT export exists yet, init
+defaults it to claude with --remote-control --dangerously-skip-permissions,
+so a plain ` + "`bridge init`" + ` makes ` + "`bridge <repo>`" + ` open a tmux-wrapped claude
+session out of the box. An existing export is never overwritten.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		shell, _ := cmd.Flags().GetString("shell")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
@@ -117,6 +122,20 @@ func initBash(out io.Writer, dryRun bool, agent, agentArgs, aliases string) erro
 	var sourceBlock string
 	if len(toAdd) > 0 {
 		sourceBlock = "\n" + bashManagedHeader + "\n" + strings.Join(toAdd, "\n") + "\n"
+	}
+
+	// Default the auto-launch agent to claude on first init: when the user
+	// passes no --agent and no BRIDGE_DEFAULT_AGENT export exists yet, a plain
+	// `bridge init` reproduces the bash bridge's default — `bridge <repo>`
+	// opens a tmux-wrapped claude session with --remote-control and
+	// --dangerously-skip-permissions. This is a default-fill, not a forced
+	// set: an existing export (e.g. a user who chose opencode) is left intact,
+	// so re-running init to refresh completion never clobbers it.
+	if agent == "" && !strings.Contains(content, "export BRIDGE_DEFAULT_AGENT=") {
+		agent = "claude"
+		if agentArgs == "" {
+			agentArgs = "--remote-control --dangerously-skip-permissions"
+		}
 	}
 
 	// Export lines (BRIDGE_DEFAULT_AGENT*) — replace-in-place semantics, so
@@ -211,7 +230,7 @@ func parseAliases(s string) []string {
 
 // shellQuote returns a POSIX-safe representation of value for a bash export
 // line. Strings without metachars are returned as-is; otherwise wrapped in
-// double quotes with embedded `"`, `$`, `\`, and `` ` `` escaped.
+// double quotes with embedded `"`, `$`, `\`, and “ ` “ escaped.
 func shellQuote(value string) string {
 	if value == "" {
 		return `""`
