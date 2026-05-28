@@ -152,6 +152,19 @@ Run `bridge init` again any time; it's idempotent and only appends missing lines
 
 `bridge doctor` checks: binary on PATH, shim files installed, rc lines present, `bash-completion` package available, shim loaded in current shell, repos root walkable, and the `repo-meta.json` cache. Any `FAIL` exits non-zero.
 
+## Auto-launching an agent on `bridge <repo>`
+
+By default, `bridge <repo>` just `cd`s into the repo. To restore the bash bridge's behavior of auto-launching Claude (or any other agent) in tmux with your preferred flags, set two env vars in your shell rc:
+
+```bash
+export BRIDGE_DEFAULT_AGENT=claude
+export BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"
+```
+
+Both apply to `bridge <repo>`, `bridge open <repo>`, and the interactive picker. Explicit `--agent X` on the command line overrides `BRIDGE_DEFAULT_AGENT`; the `*_ARGS` env var is only appended when the agent comes from the env-var default (so launching `--agent code` doesn't get Claude's flags). Unset both and you're back to cd-only.
+
+Known agents: `claude`, `copilot`, `opencode`, `code`. See `internal/agents/agents.go`.
+
 ## Windows
 
 Cross-compile via `GOOS=windows GOARCH=amd64 go build ./cmd/bridge`. Install the `.exe` on PATH as `bridge.exe`, dot-source `shims/bridge-shim.ps1` from `$PROFILE`. Launcher uses Windows Terminal (`wt.exe new-tab`). No Windows CI; the binary builds clean but the runtime path is exercised manually.

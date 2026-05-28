@@ -120,13 +120,10 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 	}
 
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
-	if agent := os.Getenv("BRIDGE_DEFAULT_AGENT"); agent != "" {
-		spec, err := agents.Resolve(agent)
+	if spec, ok := resolveDefaultAgent(); ok {
+		argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
 		if err == nil {
-			argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
-			if err == nil {
-				return shellbridge.EmitExec(out, argv)
-			}
+			return shellbridge.EmitExec(out, argv)
 		}
 	}
 	return shellbridge.EmitCD(out, repo.Path)
@@ -145,16 +142,34 @@ func preflightPicker(out io.Writer) error {
 		return shellbridge.EmitCancel(out)
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
-	if agent := os.Getenv("BRIDGE_DEFAULT_AGENT"); agent != "" {
-		spec, err := agents.Resolve(agent)
+	if spec, ok := resolveDefaultAgent(); ok {
+		argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
 		if err == nil {
-			argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
-			if err == nil {
-				return shellbridge.EmitExec(out, argv)
-			}
+			return shellbridge.EmitExec(out, argv)
 		}
 	}
 	return shellbridge.EmitCD(out, r.Path)
+}
+
+// resolveDefaultAgent reads BRIDGE_DEFAULT_AGENT and returns its spec, with
+// BRIDGE_DEFAULT_AGENT_ARGS (space-split) appended to Args. Returns ok=false
+// when the env var is unset or the agent name is unknown. The args env var
+// only applies when the agent comes from the default — an explicit `--agent`
+// on the command line uses agents.Resolve directly and doesn't pick up
+// default args (so launching `code` doesn't get claude's flags).
+func resolveDefaultAgent() (agents.AgentSpec, bool) {
+	name := os.Getenv("BRIDGE_DEFAULT_AGENT")
+	if name == "" {
+		return agents.AgentSpec{}, false
+	}
+	spec, err := agents.Resolve(name)
+	if err != nil {
+		return agents.AgentSpec{}, false
+	}
+	if extra := os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS"); extra != "" {
+		spec.Args = append(spec.Args, strings.Fields(extra)...)
+	}
+	return spec, true
 }
 
 func preflightOpen(out io.Writer, args []string) error {
@@ -206,13 +221,23 @@ func preflightOpen(out io.Writer, args []string) error {
 		workDir = filepath.Join(repo.Path, ".worktrees", worktree)
 	}
 
-	if agentName == "" {
-		return shellbridge.EmitCD(out, workDir)
-	}
-	spec, err := agents.Resolve(agentName)
-	if err != nil {
-		fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
-		os.Exit(2)
+	// Explicit --agent wins. Otherwise fall back to BRIDGE_DEFAULT_AGENT so
+	// `bridge <repo>` auto-launches when the user has it configured —
+	// matching the picker entry points and the bash bridge's UX.
+	var spec agents.AgentSpec
+	if agentName != "" {
+		spec, err = agents.Resolve(agentName)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
+			os.Exit(2)
+		}
+	} else {
+		var ok bool
+		spec, ok = resolveDefaultAgent()
+		if !ok {
+			return shellbridge.EmitCD(out, workDir)
+		}
+		agentName = spec.Name
 	}
 	slot := slotIDFor(repo, worktree)
 	// Record the slot in the registry. Non-fatal on failure — emitting the
