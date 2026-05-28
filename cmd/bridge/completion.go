@@ -68,15 +68,19 @@ var completeMetaCmd = &cobra.Command{
 		if err != nil {
 			return nil
 		}
-		// Skip basename hits: cobra's primary completion already handled
-		// those. We only want repos that match in Desc or Topics.
+		// Skip basename prefix hits — cobra's primary completion already
+		// handled those. We want basename substring hits (e.g. `nextgen`
+		// → `ArchiveRestApiNextGen`) plus Desc/Topics matches, all of
+		// which cobra's compgen filter would drop.
 		needle := strings.ToLower(prefix)
 		seen := map[string]bool{}
 		for _, r := range repos {
-			if strings.Contains(strings.ToLower(r.Name), needle) {
+			lname := strings.ToLower(r.Name)
+			if strings.HasPrefix(lname, needle) {
 				continue
 			}
-			match := strings.Contains(strings.ToLower(r.Desc), needle)
+			match := strings.Contains(lname, needle) ||
+				strings.Contains(strings.ToLower(r.Desc), needle)
 			if !match {
 				for _, t := range r.Topics {
 					if strings.Contains(strings.ToLower(t), needle) {
