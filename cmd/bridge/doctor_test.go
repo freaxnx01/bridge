@@ -57,12 +57,24 @@ command -v bridge >/dev/null && source <(bridge completion bash)
 // (or omits it) per test.
 func doctorEnv(home, pathDir, reposRoot string) []string {
 	env := []string{}
+	stripped := map[string]bool{
+		"HOME=": true, "PATH=": true,
+		"BRIDGE_SHIM_LOADED=":       true,
+		"BRIDGE_REPOS_ROOT=":        true,
+		"BRIDGE_DEFAULT_AGENT=":     true,
+		"BRIDGE_DEFAULT_AGENT_ARGS=": true,
+	}
 	for _, kv := range os.Environ() {
-		if strings.HasPrefix(kv, "HOME=") || strings.HasPrefix(kv, "PATH=") ||
-			strings.HasPrefix(kv, "BRIDGE_SHIM_LOADED=") || strings.HasPrefix(kv, "BRIDGE_REPOS_ROOT=") {
-			continue
+		skip := false
+		for prefix := range stripped {
+			if strings.HasPrefix(kv, prefix) {
+				skip = true
+				break
+			}
 		}
-		env = append(env, kv)
+		if !skip {
+			env = append(env, kv)
+		}
 	}
 	env = append(env,
 		"HOME="+home,
@@ -103,6 +115,65 @@ func TestDoctorFailsWhenRcMissingCompletion(t *testing.T) {
 	}
 	if !strings.Contains(s, "bridge init") {
 		t.Errorf("expected remediation to suggest `bridge init`; got:\n%s", s)
+	}
+}
+
+func TestDoctorReportsDefaultAgentPass(t *testing.T) {
+	home, pathDir := doctorHome(t)
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("doctor")
+	cmd.Env = append(doctorEnv(home, pathDir, root),
+		"BRIDGE_SHIM_LOADED=1",
+		"BRIDGE_DEFAULT_AGENT=claude",
+		"BRIDGE_DEFAULT_AGENT_ARGS=--remote-control",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("doctor: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, "BRIDGE_DEFAULT_AGENT") {
+		t.Errorf("expected BRIDGE_DEFAULT_AGENT line in output:\n%s", s)
+	}
+	if !strings.Contains(s, "claude") {
+		t.Errorf("expected agent name 'claude' in output:\n%s", s)
+	}
+	if !strings.Contains(s, "--remote-control") {
+		t.Errorf("expected args echoed in output:\n%s", s)
+	}
+}
+
+func TestDoctorReportsDefaultAgentWarnWhenUnset(t *testing.T) {
+	home, pathDir := doctorHome(t)
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("doctor")
+	cmd.Env = append(doctorEnv(home, pathDir, root), "BRIDGE_SHIM_LOADED=1")
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	// Find the BRIDGE_DEFAULT_AGENT line and confirm WARN status.
+	if !strings.Contains(s, "WARN") || !strings.Contains(s, "BRIDGE_DEFAULT_AGENT") {
+		t.Errorf("expected WARN on BRIDGE_DEFAULT_AGENT when unset:\n%s", s)
+	}
+	if !strings.Contains(s, "bridge init") {
+		t.Errorf("expected remediation suggesting `bridge init`:\n%s", s)
+	}
+}
+
+func TestDoctorFailsOnUnknownAgent(t *testing.T) {
+	home, pathDir := doctorHome(t)
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("doctor")
+	cmd.Env = append(doctorEnv(home, pathDir, root),
+		"BRIDGE_SHIM_LOADED=1",
+		"BRIDGE_DEFAULT_AGENT=bogus-agent",
+	)
+	out, _ := cmd.CombinedOutput()
+	s := string(out)
+	if !strings.Contains(s, "FAIL") {
+		t.Errorf("expected FAIL on unknown agent name:\n%s", s)
+	}
+	if !strings.Contains(s, "bogus-agent") {
+		t.Errorf("expected unknown agent name in output:\n%s", s)
 	}
 }
 

@@ -87,6 +87,97 @@ func TestInitBashAddsMissingOnly(t *testing.T) {
 	}
 }
 
+func TestInitBashWritesAgentExport(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash", "--agent", "claude")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	if !strings.Contains(string(got), `export BRIDGE_DEFAULT_AGENT=claude`) {
+		t.Errorf("expected BRIDGE_DEFAULT_AGENT export; got:\n%s", got)
+	}
+}
+
+func TestInitBashWritesAgentArgsExportQuoted(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash",
+		"--agent", "claude",
+		"--agent-args", "--remote-control --dangerously-skip-permissions")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	want := `export BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"`
+	if !strings.Contains(string(got), want) {
+		t.Errorf("expected quoted args export:\nwant: %s\ngot:\n%s", want, got)
+	}
+}
+
+func TestInitBashAgentReplacesExisting(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	initial := "export BRIDGE_DEFAULT_AGENT=opencode\n# trailing user line\n"
+	if err := os.WriteFile(rc, []byte(initial), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	cmd := bridgeCmd("init", "--shell", "bash", "--agent", "claude")
+	cmd.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("init: %v\n%s", err, out)
+	}
+	got, _ := os.ReadFile(rc)
+	s := string(got)
+	if strings.Contains(s, "opencode") {
+		t.Errorf("expected old value 'opencode' to be replaced; got:\n%s", s)
+	}
+	if !strings.Contains(s, `export BRIDGE_DEFAULT_AGENT=claude`) {
+		t.Errorf("expected new value 'claude'; got:\n%s", s)
+	}
+	if !strings.Contains(s, "# trailing user line") {
+		t.Errorf("user content lost; got:\n%s", s)
+	}
+	// Only one export line should remain (the replaced one).
+	if got := strings.Count(s, "export BRIDGE_DEFAULT_AGENT="); got != 1 {
+		t.Errorf("expected exactly one BRIDGE_DEFAULT_AGENT export, got %d; content:\n%s", got, s)
+	}
+}
+
+func TestInitBashAgentIdempotentWhenUnchanged(t *testing.T) {
+	home := t.TempDir()
+	rc := filepath.Join(home, ".bashrc")
+	if err := os.WriteFile(rc, []byte(""), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// First call writes.
+	first := bridgeCmd("init", "--shell", "bash", "--agent", "claude")
+	first.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := first.CombinedOutput(); err != nil {
+		t.Fatalf("init first: %v\n%s", err, out)
+	}
+	afterFirst, _ := os.ReadFile(rc)
+	// Second call with same flags must produce identical content.
+	second := bridgeCmd("init", "--shell", "bash", "--agent", "claude")
+	second.Env = append(os.Environ(), "HOME="+home, "BRIDGE_SHIM_LOADED=1")
+	if out, err := second.CombinedOutput(); err != nil {
+		t.Fatalf("init second: %v\n%s", err, out)
+	}
+	afterSecond, _ := os.ReadFile(rc)
+	if string(afterFirst) != string(afterSecond) {
+		t.Errorf("second call mutated content;\nfirst:\n%s\nsecond:\n%s", afterFirst, afterSecond)
+	}
+}
+
 func TestInitBashDryRunNoFileChange(t *testing.T) {
 	home := t.TempDir()
 	rc := filepath.Join(home, ".bashrc")
