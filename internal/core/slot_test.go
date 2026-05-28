@@ -41,6 +41,85 @@ func TestLoadSlotsNullSlotsKey(t *testing.T) {
 	}
 }
 
+func TestLoadSlotsLegacyShapeBacksUpAndStartsFresh(t *testing.T) {
+	// The bash bridge wrote slots.json as a top-level object map keyed by
+	// slot id. Unmarshaling that into our slotFile{Slots []Slot} fails
+	// with "cannot unmarshal object into Go struct field slotFile.slots
+	// of type []core.Slot". LoadSlots should recover by renaming the
+	// legacy file to a .bak and returning an empty registry, so the
+	// caller (UpsertSlot) doesn't trip on every invocation.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "slots.json")
+	legacy := `{"slots": {"bridge-main": {"repo": "bridge", "agent": "claude"}}}`
+	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	slots, err := LoadSlots(p)
+	if err != nil {
+		t.Fatalf("expected nil error on legacy shape, got %v", err)
+	}
+	if len(slots) != 0 {
+		t.Errorf("expected empty slot list after legacy migration, got %+v", slots)
+	}
+	// Original file should be gone.
+	if _, statErr := os.Stat(p); statErr == nil {
+		t.Errorf("expected slots.json to be renamed; still present")
+	}
+	// A .bak with the legacy content should exist somewhere in dir.
+	entries, _ := os.ReadDir(dir)
+	foundBak := false
+	for _, e := range entries {
+		if filepath.Ext(e.Name()) == ".bak" {
+			body, _ := os.ReadFile(filepath.Join(dir, e.Name()))
+			if string(body) == legacy {
+				foundBak = true
+			}
+		}
+	}
+	if !foundBak {
+		t.Errorf("expected a .bak with the legacy content; dir entries: %v", entries)
+	}
+}
+
+func TestLoadSlotsCorruptIsBackedUp(t *testing.T) {
+	dir := t.TempDir()
+	p := filepath.Join(dir, "slots.json")
+	if err := os.WriteFile(p, []byte("not json at all"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	slots, err := LoadSlots(p)
+	if err != nil {
+		t.Fatalf("expected nil error on corrupt file (recoverable), got %v", err)
+	}
+	if len(slots) != 0 {
+		t.Errorf("expected empty slot list after corrupt-file recovery, got %+v", slots)
+	}
+	if _, statErr := os.Stat(p); statErr == nil {
+		t.Errorf("expected corrupt slots.json to be renamed; still present")
+	}
+}
+
+func TestUpsertSlotAfterLegacyMigration(t *testing.T) {
+	// End-to-end: legacy file present, UpsertSlot should silently migrate
+	// and succeed, leaving a Go-shape slots.json with one entry.
+	dir := t.TempDir()
+	p := filepath.Join(dir, "slots.json")
+	legacy := `{"slots": {"bridge-main": {"repo": "bridge", "agent": "claude"}}}`
+	if err := os.WriteFile(p, []byte(legacy), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := UpsertSlot(p, Slot{ID: "new", Repo: "x", Agent: "claude", Created: time.Now().UTC()}); err != nil {
+		t.Fatalf("UpsertSlot after legacy: %v", err)
+	}
+	got, err := LoadSlots(p)
+	if err != nil {
+		t.Fatalf("LoadSlots after upsert: %v", err)
+	}
+	if len(got) != 1 || got[0].ID != "new" {
+		t.Errorf("expected one fresh slot, got %+v", got)
+	}
+}
+
 func TestWriteSlotsRoundTrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "slots.json")
 	want := []Slot{

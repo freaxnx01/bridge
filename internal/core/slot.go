@@ -2,6 +2,7 @@ package core
 
 import (
 	"encoding/json"
+	"os"
 	"path/filepath"
 	"time"
 
@@ -22,6 +23,13 @@ type slotFile struct {
 
 // LoadSlots reads the slot registry written by WriteSlots.
 // Empty / missing / null "slots" returns (nil, nil).
+//
+// Recovery: a slot file written in the legacy bash-bridge shape (top-level
+// object map) or otherwise unparseable is renamed to "<path>.legacy-<ts>.bak"
+// and an empty registry is returned. The data is ephemeral cached state, so
+// losing it on first Go invocation is harmless; the alternative is failing
+// every UpsertSlot call on the upgrade host. The .bak is left in place so
+// the user can inspect it if curious.
 func LoadSlots(path string) ([]Slot, error) {
 	b, err := store.ReadFile(path)
 	if err != nil || len(b) == 0 {
@@ -29,7 +37,9 @@ func LoadSlots(path string) ([]Slot, error) {
 	}
 	var f slotFile
 	if err := json.Unmarshal(b, &f); err != nil {
-		return nil, err
+		backup := path + ".legacy-" + time.Now().UTC().Format("20060102-150405") + ".bak"
+		_ = os.Rename(path, backup)
+		return nil, nil
 	}
 	return f.Slots, nil
 }
