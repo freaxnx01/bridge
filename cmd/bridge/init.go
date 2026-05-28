@@ -43,16 +43,23 @@ var initCmd = &cobra.Command{
 	Short: "Wire shim + tab-completion into your shell rc file (idempotent)",
 	Long: `init appends the source lines bridge needs into your shell rc file
 (~/.bashrc for bash, $PROFILE for powershell). Lines already present are
-left in place — safe to run repeatedly. Use --dry-run to preview.`,
+left in place — safe to run repeatedly. Use --dry-run to preview.
+
+Pass --agent and --agent-args to also write BRIDGE_DEFAULT_AGENT and
+BRIDGE_DEFAULT_AGENT_ARGS exports so ` + "`bridge <repo>`" + ` auto-launches the
+configured agent. Existing export lines are replaced in place; pass an
+empty value to leave them untouched.`,
 	RunE: func(cmd *cobra.Command, args []string) error {
 		shell, _ := cmd.Flags().GetString("shell")
 		dryRun, _ := cmd.Flags().GetBool("dry-run")
+		agent, _ := cmd.Flags().GetString("agent")
+		agentArgs, _ := cmd.Flags().GetString("agent-args")
 		if shell == "" {
 			shell = detectShell()
 		}
 		switch shell {
 		case "bash":
-			return initBash(cmd.OutOrStdout(), dryRun)
+			return initBash(cmd.OutOrStdout(), dryRun, agent, agentArgs)
 		case "powershell", "pwsh":
 			return initPowerShell(cmd.OutOrStdout(), dryRun)
 		default:
@@ -64,6 +71,8 @@ left in place — safe to run repeatedly. Use --dry-run to preview.`,
 func init() {
 	initCmd.Flags().String("shell", "", "shell to configure (bash, powershell); default: auto-detect")
 	initCmd.Flags().Bool("dry-run", false, "print what would change without modifying files")
+	initCmd.Flags().String("agent", "", "set BRIDGE_DEFAULT_AGENT (e.g. claude); enables auto-launch on `bridge <repo>`")
+	initCmd.Flags().String("agent-args", "", "set BRIDGE_DEFAULT_AGENT_ARGS (e.g. \"--remote-control --dangerously-skip-permissions\")")
 	rootCmd.AddCommand(initCmd)
 }
 
@@ -74,44 +83,121 @@ func detectShell() string {
 	return "bash"
 }
 
-func initBash(out io.Writer, dryRun bool) error {
+func initBash(out io.Writer, dryRun bool, agent, agentArgs string) error {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return err
 	}
 	rc := filepath.Join(home, ".bashrc")
 	existing, _ := os.ReadFile(rc) // missing file → empty content, will be created
+	content := string(existing)
 
+	// Source lines (shim/completion/augmenter) — append-if-missing block.
 	var toAdd []string
 	for _, line := range bashManagedLines {
-		if !strings.Contains(string(existing), line.detect) {
+		if !strings.Contains(content, line.detect) {
 			toAdd = append(toAdd, line.body)
 		}
 	}
+	var sourceBlock string
+	if len(toAdd) > 0 {
+		sourceBlock = "\n" + bashManagedHeader + "\n" + strings.Join(toAdd, "\n") + "\n"
+	}
 
-	if len(toAdd) == 0 {
+	// Export lines (BRIDGE_DEFAULT_AGENT*) — replace-in-place semantics, so
+	// `bridge init --agent=opencode` after `--agent=claude` actually swaps
+	// the value rather than leaving the stale line.
+	exports := []struct{ name, value string }{
+		{"BRIDGE_DEFAULT_AGENT", agent},
+		{"BRIDGE_DEFAULT_AGENT_ARGS", agentArgs},
+	}
+	exportSummary := []string{}
+	for _, e := range exports {
+		if e.value == "" {
+			continue
+		}
+		var changed bool
+		content, changed = upsertExport(content, e.name, e.value)
+		if changed {
+			exportSummary = append(exportSummary, fmt.Sprintf(`export %s=%s`, e.name, shellQuote(e.value)))
+		}
+	}
+
+	if sourceBlock == "" && len(exportSummary) == 0 {
 		fmt.Fprintf(out, "✓ ~/.bashrc already configured for bridge; nothing to add.\n")
 		return nil
 	}
 
-	block := "\n" + bashManagedHeader + "\n" + strings.Join(toAdd, "\n") + "\n"
+	finalContent := content + sourceBlock
 
 	if dryRun {
-		fmt.Fprintf(out, "Would append to %s:\n%s", rc, block)
+		if sourceBlock != "" {
+			fmt.Fprintf(out, "Would append to %s:\n%s", rc, sourceBlock)
+		}
+		for _, l := range exportSummary {
+			fmt.Fprintf(out, "Would set in %s: %s\n", rc, l)
+		}
 		return nil
 	}
 
-	f, err := os.OpenFile(rc, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
-	if err != nil {
+	if err := os.WriteFile(rc, []byte(finalContent), 0o644); err != nil {
 		return err
 	}
-	defer f.Close()
-	if _, err := f.WriteString(block); err != nil {
-		return err
+	added := 0
+	if sourceBlock != "" {
+		added = len(toAdd)
 	}
-	fmt.Fprintf(out, "✓ Appended %d line(s) to %s\n", len(toAdd), rc)
-	fmt.Fprintf(out, "  Run `exec bash -l` (or open a new shell) to activate.\n")
+	fmt.Fprintf(out, "✓ Updated %s (%d source line(s) added, %d export(s) set)\n", rc, added, len(exportSummary))
+	if added > 0 || len(exportSummary) > 0 {
+		fmt.Fprintf(out, "  Run `exec bash -l` (or open a new shell) to activate.\n")
+	}
 	return nil
+}
+
+// upsertExport replaces an existing `export NAME=...` line in content (any
+// quoting), or appends a fresh one. Returns (newContent, changedFromInput).
+// Idempotent when the existing value already matches.
+func upsertExport(content, name, value string) (string, bool) {
+	target := fmt.Sprintf(`export %s=%s`, name, shellQuote(value))
+	prefix := "export " + name + "="
+	lines := strings.Split(content, "\n")
+	for i, l := range lines {
+		if strings.HasPrefix(strings.TrimLeft(l, " \t"), prefix) {
+			if l == target {
+				return content, false
+			}
+			lines[i] = target
+			return strings.Join(lines, "\n"), true
+		}
+	}
+	// Append at end of content (caller may add its own block separator).
+	if content != "" && !strings.HasSuffix(content, "\n") {
+		content += "\n"
+	}
+	return content + target + "\n", true
+}
+
+// shellQuote returns a POSIX-safe representation of value for a bash export
+// line. Strings without metachars are returned as-is; otherwise wrapped in
+// double quotes with embedded `"`, `$`, `\`, and `` ` `` escaped.
+func shellQuote(value string) string {
+	if value == "" {
+		return `""`
+	}
+	if !strings.ContainsAny(value, " \t\"'$`\\\n") {
+		return value
+	}
+	var b strings.Builder
+	b.WriteByte('"')
+	for _, r := range value {
+		switch r {
+		case '"', '$', '`', '\\':
+			b.WriteByte('\\')
+		}
+		b.WriteRune(r)
+	}
+	b.WriteByte('"')
+	return b.String()
 }
 
 // initPowerShell writes the equivalent lines to $PROFILE on Windows, or

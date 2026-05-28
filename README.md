@@ -137,20 +137,35 @@ Run a single test: `go test ./cmd/bridge -run TestXxx`. Verbose: add `-v`. To be
 git clone https://github.com/freaxnx01/bridge ~/projects/repos/github/freaxnx01/public/bridge
 cd ~/projects/repos/github/freaxnx01/public/bridge
 make install        # binary + shim + meta-augmenter
-bridge init         # idempotently add shim + completion source lines to ~/.bashrc
+bridge init --agent=claude --agent-args="--remote-control --dangerously-skip-permissions"
 exec bash -l        # pick up the new lines
 bridge doctor       # verify
 ```
 
-`bridge init` writes:
+`bridge init` writes to `~/.bashrc`:
 
 - The shim source line so `bridge` becomes a shell function (needed for `open`/`sessions attach` to actually `cd`/`exec`).
 - `source <(bridge completion bash)` for tab-completion.
 - The meta-augmenter source line so `bridge nextgen<TAB>` expands to `ArchiveRestApiNextGen` (basename substring, plus description/topic keywords from `repo-meta.json`). Cobra's primary completion can't do this — its `compgen` filter drops non-prefix-matching suggestions.
+- With `--agent`: `export BRIDGE_DEFAULT_AGENT=<name>` so `bridge <repo>` auto-launches the agent in tmux.
+- With `--agent-args`: `export BRIDGE_DEFAULT_AGENT_ARGS="..."` — flags appended to the agent's argv at launch.
 
-Run `bridge init` again any time; it's idempotent and only appends missing lines. Use `--dry-run` to preview, `--shell powershell` to print the Windows recipe instead.
+Run `bridge init` again any time; it's idempotent. Source lines are append-if-missing; export lines (`--agent`, `--agent-args`) are replace-in-place so changing your default agent is one command. Use `--dry-run` to preview, `--shell powershell` to print the Windows recipe instead. Skip both flags if you don't want auto-launch.
 
-`bridge doctor` checks: binary on PATH, shim files installed, rc lines present, `bash-completion` package available, shim loaded in current shell, repos root walkable, and the `repo-meta.json` cache. Any `FAIL` exits non-zero.
+`bridge doctor` checks: binary on PATH, shim files installed, rc lines present, `bash-completion` package available, shim loaded in current shell, repos root walkable, `repo-meta.json` cache, and `BRIDGE_DEFAULT_AGENT` / `BRIDGE_DEFAULT_AGENT_ARGS`. Any `FAIL` exits non-zero.
+
+## Auto-launching an agent on `bridge <repo>`
+
+By default, `bridge <repo>` just `cd`s into the repo. Set two env vars (manually, or via `bridge init --agent=... --agent-args=...`) to restore the bash bridge's behavior of auto-launching the agent in tmux with your preferred flags:
+
+```bash
+export BRIDGE_DEFAULT_AGENT=claude
+export BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"
+```
+
+Both apply to `bridge <repo>`, `bridge open <repo>`, and the interactive picker. Explicit `--agent X` on the command line overrides `BRIDGE_DEFAULT_AGENT`; the `*_ARGS` env var is only appended when the agent comes from the env-var default (so launching `--agent code` doesn't get Claude's flags). Unset both and you're back to cd-only.
+
+Known agents: `claude`, `copilot`, `opencode`, `code`. See `internal/agents/agents.go`.
 
 ## Windows
 

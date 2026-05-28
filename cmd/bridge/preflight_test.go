@@ -241,6 +241,116 @@ func TestPreflightOpenWithAgentRecordsSlot(t *testing.T) {
 	}
 }
 
+func TestPreflightOpenAutoLaunchesWithDefaultAgentEnv(t *testing.T) {
+	// `bridge open <name>` with BRIDGE_DEFAULT_AGENT set and no --agent flag
+	// should auto-launch the agent (parity with the bash bridge and with
+	// the picker entry points, which already consult this env var).
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_DEFAULT_AGENT=claude",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(s, "exec:") {
+		t.Errorf("expected exec: directive when BRIDGE_DEFAULT_AGENT is set, got %q", s)
+	}
+	if !strings.Contains(s, " claude") {
+		t.Errorf("expected claude in argv: %q", s)
+	}
+}
+
+func TestPreflightOpenAppendsDefaultAgentArgs(t *testing.T) {
+	// BRIDGE_DEFAULT_AGENT_ARGS is appended to the agent spec's Args so the
+	// user can wire `--remote-control --dangerously-skip-permissions`
+	// (claude's typical interactive setup) once in their shell rc.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_DEFAULT_AGENT=claude",
+		"BRIDGE_DEFAULT_AGENT_ARGS=--remote-control --dangerously-skip-permissions",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := strings.TrimSpace(string(out))
+	if !strings.Contains(s, "--remote-control") {
+		t.Errorf("missing --remote-control in argv: %q", s)
+	}
+	if !strings.Contains(s, "--dangerously-skip-permissions") {
+		t.Errorf("missing --dangerously-skip-permissions in argv: %q", s)
+	}
+}
+
+func TestPreflightOpenExplicitAgentOverridesEnv(t *testing.T) {
+	// `--agent code` on the command line wins over BRIDGE_DEFAULT_AGENT=claude.
+	// The default-args env var still applies to whichever agent is launched.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "code")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_DEFAULT_AGENT=claude",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := strings.TrimSpace(string(out))
+	if !strings.Contains(s, " code") {
+		t.Errorf("explicit --agent code should win; got %q", s)
+	}
+	if strings.Contains(s, " claude") {
+		t.Errorf("claude should not appear when --agent code is passed: %q", s)
+	}
+}
+
+func TestPreflightOpenNoAgentNoEnvStillCDs(t *testing.T) {
+	// Without --agent and without BRIDGE_DEFAULT_AGENT, the historical cd-only
+	// path is preserved — important so users who don't want auto-launch can
+	// just unset the env var.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge")
+	env := envWithout("TMUX")
+	env = stripPrefix(env, "BRIDGE_DEFAULT_AGENT=")
+	env = stripPrefix(env, "BRIDGE_DEFAULT_AGENT_ARGS=")
+	cmd.Env = append(env,
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := strings.TrimSpace(string(out))
+	if !strings.HasPrefix(s, "cd:") {
+		t.Errorf("expected cd: directive without default-agent env, got %q", s)
+	}
+}
+
+func stripPrefix(env []string, prefix string) []string {
+	out := env[:0]
+	for _, e := range env {
+		if strings.HasPrefix(e, prefix) {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}
+
 func TestPreflightOpenUnknownRepoExits2(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()

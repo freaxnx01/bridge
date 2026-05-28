@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
+
+	"github.com/freaxnx01/bridge/internal/agents"
 )
 
 type checkStatus int
@@ -183,6 +185,38 @@ func runDoctorChecks() []checkResult {
 			detail:    "not present — meta-keyword TAB fallback has no data",
 			remediate: "run `bridge sync` (or similar) to populate; basename completion still works",
 		})
+	}
+
+	// 11. BRIDGE_DEFAULT_AGENT (auto-launch on `bridge <repo>`)
+	agent := os.Getenv("BRIDGE_DEFAULT_AGENT")
+	args := os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS")
+	switch {
+	case agent == "":
+		out = append(out, checkResult{
+			name:      "BRIDGE_DEFAULT_AGENT (auto-launch)",
+			status:    statusWarn,
+			detail:    "unset — `bridge <repo>` will only cd, no agent launch",
+			remediate: "run `bridge init --agent=claude --agent-args=\"--remote-control --dangerously-skip-permissions\"`",
+		})
+	default:
+		if _, err := agents.Resolve(agent); err != nil {
+			out = append(out, checkResult{
+				name:      "BRIDGE_DEFAULT_AGENT",
+				status:    statusFail,
+				detail:    fmt.Sprintf("%q: %v", agent, err),
+				remediate: "use one of: claude, copilot, opencode, code",
+			})
+		} else {
+			detail := agent
+			if args != "" {
+				detail += " (args: " + args + ")"
+			}
+			out = append(out, checkResult{
+				name:   "BRIDGE_DEFAULT_AGENT (auto-launch)",
+				status: statusPass,
+				detail: detail,
+			})
+		}
 	}
 
 	return out
