@@ -50,7 +50,7 @@ If `~/.bashrc` still sources `bridge.sh`, replace that line **before** pulling p
 sed -i 's|_f=~/projects/repos/github/freaxnx01/public/bridge/bridge.sh|_f=~/.local/share/bridge/bridge-shim.sh|' ~/.bashrc
 ```
 
-Then `make install-go install-shim`, open a new terminal, and smoke-test as above. The cache at `~/.cache/bridge/` is forward-compatible for `mru`, `presence.json`, `sync.json`, `repo-meta.json`, `remote.list`. **`slots.json` is not** — if the file is still in the legacy bash shape (object map, not array), delete it before the first Go invocation; the binary repopulates it on the next launch. (v2.0 had a read-compat shim; v2.1 dropped it.)
+Then `make install-go install-shim`, open a new terminal, and smoke-test as above. The cache at `~/.cache/bridge/` is forward-compatible for `mru`, `presence.json`, `sync.json`, `repo-meta.json`, `remote.list`, and `slots.json` — `LoadSlots` auto-migrates a legacy bash-shape file by renaming it to `slots.json.legacy-<UTC>.bak` and starting fresh on the first Go invocation (#79).
 
 ## Tab completion for aliases (`brg`, etc.)
 
