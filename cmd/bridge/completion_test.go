@@ -126,6 +126,26 @@ func TestCompleteMetaSubcommand(t *testing.T) {
 	}
 }
 
+func TestCompleteMetaBasenameSubstring(t *testing.T) {
+	// `bridge nextgen<TAB>` should expand to ArchiveRestApiNextGen via
+	// basename substring match (the user's primary case). Cobra's primary
+	// completion only does prefix; the augmenter falls back to
+	// __complete-meta, which must return basename-substring hits in
+	// addition to desc/topics matches. Pure prefix hits stay excluded —
+	// cobra primary already handled those.
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("__complete-meta", "idge")
+	cmd.Env = append(os.Environ(), "BRIDGE_REPOS_ROOT="+root)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("__complete-meta idge: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "bridge" {
+		t.Errorf("expected 'bridge' (basename substring of 'idge'), got %q", got)
+	}
+}
+
 func TestCompleteOpenNoSecondArg(t *testing.T) {
 	// Once a repo arg is present, completion should return nothing — open
 	// only takes a single positional. Asserts the `len(args) >= 1` guard.
