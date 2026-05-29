@@ -25,7 +25,8 @@ a tmux-wrapped agent session (Claude Code, Copilot, opencode, VS Code) or
 cd's into it via the shell shim.
 
 Cache lives at ~/.cache/bridge/ (overridable via XDG_CACHE_HOME).
-Repo discovery walks ~/projects/repos/ (overridable via BRIDGE_REPOS_ROOT).`,
+Repo discovery walks ~/projects/repos/ (overridable via -B/--base,
+BRIDGE_BASE, BRIDGE_REPOS_ROOT, or $XDG_CONFIG_HOME/bridge/base).`,
 	Version:           versionString(),
 	ValidArgsFunction: completeRepoName,
 }
@@ -42,6 +43,7 @@ var verboseCount int
 
 func init() {
 	rootCmd.PersistentFlags().CountVarP(&verboseCount, "verbose", "v", "increase log verbosity (-v info, -vv debug)")
+	rootCmd.PersistentFlags().StringSliceVarP(&baseFlag, "base", "B", nil, "repo discovery base (repeatable; overrides BRIDGE_BASE / BRIDGE_REPOS_ROOT)")
 	rootCmd.PersistentPreRunE = func(cmd *cobra.Command, args []string) error {
 		slog.SetDefault(slog.New(installLogger(os.Stderr, verboseCount, "")))
 		// Best-effort: TTL-gated check against GitHub /releases/latest so

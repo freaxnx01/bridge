@@ -83,7 +83,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 		// unreadable cache leaves the Repo untouched. Cache is populated by
 		// `bridge list -r [--refresh]`.
 		if meta, err := core.LoadRepoMeta(filepath.Join(cacheRoot(), "repo-meta.json")); err == nil {
-			repo = core.MergeRepoMeta([]core.Repo{repo}, reposRoot(), meta)[0]
+			repo = core.MergeRepoMeta([]core.Repo{repo}, reposRoots(), meta)[0]
 		}
 		return emitJSON(cmd.OutOrStdout(), repo)
 	}
@@ -140,12 +140,12 @@ func findReposByKeyword(repos []core.Repo, q string) []core.Repo {
 // description so keyword search can fall back from basename to meta. Best
 // effort — a missing/unreadable cache leaves repos un-enriched.
 func reposWithMeta() ([]core.Repo, error) {
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := discoverAllRoots()
 	if err != nil {
 		return nil, err
 	}
 	if meta, err := core.LoadRepoMeta(filepath.Join(cacheRoot(), "repo-meta.json")); err == nil {
-		repos = core.MergeRepoMeta(repos, reposRoot(), meta)
+		repos = core.MergeRepoMeta(repos, reposRoots(), meta)
 	}
 	return repos, nil
 }

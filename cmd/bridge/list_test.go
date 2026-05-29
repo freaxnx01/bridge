@@ -88,6 +88,77 @@ func TestListLocalJSON(t *testing.T) {
 	}
 }
 
+// --- multi-base discovery integration (#86) ---
+
+func TestListSpansMultipleBases(t *testing.T) {
+	baseA := t.TempDir()
+	baseB := t.TempDir()
+	for _, p := range []string{
+		filepath.Join(baseA, "github", "ownerA", "public", "alpha"),
+		filepath.Join(baseB, "github", "ownerB", "public", "beta"),
+	} {
+		if err := os.MkdirAll(p, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	cmd := bridgeCmd("list")
+	cmd.Env = append(envWithout("BRIDGE_REPOS_ROOT", "BRIDGE_BASE"),
+		"BRIDGE_BASE="+baseA+string(os.PathListSeparator)+baseB,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !contains(s, "alpha") || !contains(s, "beta") {
+		t.Errorf("expected both repos in output, got: %s", s)
+	}
+}
+
+func TestListBaseFlagOverridesEnv(t *testing.T) {
+	envBase := t.TempDir()
+	flagBase := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(envBase, "github", "o", "public", "fromenv"), 0o755)
+	_ = os.MkdirAll(filepath.Join(flagBase, "github", "o", "public", "fromflag"), 0o755)
+
+	cmd := bridgeCmd("--base", flagBase, "list")
+	cmd.Env = append(envWithout("BRIDGE_REPOS_ROOT", "BRIDGE_BASE"),
+		"BRIDGE_BASE="+envBase,
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !contains(s, "fromflag") {
+		t.Errorf("expected fromflag, got: %s", s)
+	}
+	if contains(s, "fromenv") {
+		t.Errorf("flag should override env; got env-repo in output: %s", s)
+	}
+}
+
+func TestListMissingBaseWarns(t *testing.T) {
+	base := t.TempDir()
+	_ = os.MkdirAll(filepath.Join(base, "github", "o", "public", "real"), 0o755)
+	cmd := bridgeCmd("list")
+	cmd.Env = append(envWithout("BRIDGE_REPOS_ROOT", "BRIDGE_BASE"),
+		"BRIDGE_BASE="+base+string(os.PathListSeparator)+"/nope/does/not/exist",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !contains(s, "real") {
+		t.Errorf("real base ignored: %s", s)
+	}
+	if !contains(s, "warning") || !contains(s, "/nope/does/not/exist") {
+		t.Errorf("expected missing-base warning, got: %s", s)
+	}
+}
+
 func contains(s, sub string) bool { return len(s) >= len(sub) && (indexOf(s, sub) >= 0) }
 func indexOf(s, sub string) int {
 	for i := 0; i+len(sub) <= len(s); i++ {

@@ -37,14 +37,6 @@ func init() {
 	rootCmd.AddCommand(listCmd)
 }
 
-func reposRoot() string {
-	if v := os.Getenv("BRIDGE_REPOS_ROOT"); v != "" {
-		return v
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "projects", "repos")
-}
-
 func cacheRoot() string {
 	if v := os.Getenv("XDG_CACHE_HOME"); v != "" {
 		return filepath.Join(v, "bridge")
@@ -54,8 +46,7 @@ func cacheRoot() string {
 }
 
 func runList(cmd *cobra.Command, args []string) error {
-	root := reposRoot()
-	local, err := core.DiscoverRepos(root)
+	local, err := discoverAllRoots()
 	if err != nil {
 		return fmt.Errorf("discover: %w", err)
 	}
@@ -199,7 +190,18 @@ func loadOrFetchRemote(ctx context.Context, local []core.Repo, refresh bool) ([]
 			return c.Repos, nil
 		}
 	}
-	targets := discoverRemoteTargets(reposRoot())
+	var targets []remoteTarget
+	seenTargets := map[string]bool{}
+	for _, root := range reposRoots() {
+		for _, t := range discoverRemoteTargets(root) {
+			key := t.Forge + "|" + t.Owner + "|" + t.Dir
+			if seenTargets[key] {
+				continue
+			}
+			seenTargets[key] = true
+			targets = append(targets, t)
+		}
+	}
 	var all []forge.RepoRef
 	var firstErr error
 	for _, t := range targets {

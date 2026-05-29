@@ -7,7 +7,6 @@ import (
 	"github.com/spf13/cobra"
 	"golang.org/x/term"
 
-	"github.com/freaxnx01/bridge/internal/core"
 )
 
 var rmYes bool
@@ -27,7 +26,7 @@ func init() {
 
 func runRm(cmd *cobra.Command, args []string) error {
 	name := args[0]
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := discoverAllRoots()
 	if err != nil {
 		return err
 	}

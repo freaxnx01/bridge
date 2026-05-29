@@ -7,7 +7,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/freaxnx01/bridge/internal/core"
 )
 
 // completeRepoName is a cobra ValidArgsFunction for subcommands that take a
@@ -18,7 +17,7 @@ func completeRepoName(cmd *cobra.Command, args []string, toComplete string) ([]s
 	if len(args) >= 1 {
 		return nil, cobra.ShellCompDirectiveNoFileComp
 	}
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := discoverAllRoots()
 	if err != nil {
 		return nil, cobra.ShellCompDirectiveError
 	}

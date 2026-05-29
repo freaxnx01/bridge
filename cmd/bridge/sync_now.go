@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/store"
 	"github.com/freaxnx01/bridge/internal/syncer"
 )
@@ -25,7 +24,7 @@ func runSyncNow(ctx context.Context, cmd *cobra.Command) error {
 	}
 	defer lock.Release()
 
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := discoverAllRoots()
 	if err != nil {
 		return err
 	}

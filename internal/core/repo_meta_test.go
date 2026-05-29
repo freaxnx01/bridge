@@ -53,7 +53,7 @@ func TestMergeRepoMeta(t *testing.T) {
 		"github/me/public/bridge": {Description: "the bridge", Topics: []string{"cli"}, DefaultBranch: "main", RemoteURL: "https://github.com/me/bridge"},
 		// foo intentionally absent — should stay sparse
 	}
-	got := MergeRepoMeta(repos, root, meta)
+	got := MergeRepoMeta(repos, []string{root}, meta)
 	if got[0].Desc != "the bridge" || got[0].DefaultBranch != "main" || got[0].RemoteURL == "" {
 		t.Errorf("bridge enrichment failed: %+v", got[0])
 	}
@@ -66,7 +66,7 @@ func TestMergeRepoMetaPreservesExisting(t *testing.T) {
 	root := "/r"
 	repos := []Repo{{Name: "bridge", Path: root + "/p", Desc: "existing", Topics: []string{"x"}}}
 	meta := map[string]RepoMeta{"p": {Description: "FROM CACHE", Topics: []string{"y"}}}
-	got := MergeRepoMeta(repos, root, meta)
+	got := MergeRepoMeta(repos, []string{root}, meta)
 	if got[0].Desc != "existing" || !reflect.DeepEqual(got[0].Topics, []string{"x"}) {
 		t.Errorf("merge clobbered existing values: %+v", got[0])
 	}

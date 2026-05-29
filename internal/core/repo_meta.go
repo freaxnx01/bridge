@@ -38,16 +38,18 @@ func LoadRepoMeta(path string) (map[string]RepoMeta, error) {
 }
 
 // MergeRepoMeta fills empty Topics / Desc / DefaultBranch / RemoteURL fields on
-// each repo from meta keyed by the repo's path-relative-to-reposRoot. Existing
-// non-empty fields are preserved. Missing cache entries leave fields untouched.
-// Pure function — testable without disk.
-func MergeRepoMeta(repos []Repo, reposRoot string, meta map[string]RepoMeta) []Repo {
+// each repo from meta keyed by the repo's path-relative-to-its-base. With
+// multiple roots configured (gap G3 / #86) each repo's path is matched
+// against every root and the first one yielding a "non-escaping" relative
+// path wins. Existing non-empty fields are preserved. Missing cache entries
+// leave fields untouched. Pure function — testable without disk.
+func MergeRepoMeta(repos []Repo, reposRoots []string, meta map[string]RepoMeta) []Repo {
 	if len(meta) == 0 {
 		return repos
 	}
 	out := make([]Repo, len(repos))
 	for i, r := range repos {
-		rel := relUnder(reposRoot, r.Path)
+		rel := bestRelUnder(reposRoots, r.Path)
 		m, ok := meta[rel]
 		if !ok {
 			out[i] = r
@@ -76,4 +78,21 @@ func relUnder(base, p string) string {
 		return p
 	}
 	return filepath.ToSlash(strings.TrimPrefix(rel, "./"))
+}
+
+// bestRelUnder returns the shortest non-escaping rel-path of p under any of
+// the bases. An "escaping" rel starts with "../" (the base is unrelated to
+// p). Falls back to p when no base matches.
+func bestRelUnder(bases []string, p string) string {
+	best := p
+	for _, b := range bases {
+		r := relUnder(b, p)
+		if strings.HasPrefix(r, "../") || r == ".." {
+			continue
+		}
+		if best == p || len(r) < len(best) {
+			best = r
+		}
+	}
+	return best
 }

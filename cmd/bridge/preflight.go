@@ -84,8 +84,9 @@ func dispatchPreflight(out io.Writer, args []string) error {
 // `direnv exec <parent> git clone <url>` to acquire credentials, then emits
 // a directive as if the repo were local. See #54.
 func preflightPickerWithRemote(out io.Writer, refresh bool) error {
+	// Clone target uses the primary base (first entry of reposRoots).
 	root := reposRoot()
-	local, err := core.DiscoverRepos(root)
+	local, err := discoverAllRoots()
 	if err != nil {
 		return err
 	}
@@ -135,7 +136,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 }
 
 func preflightPicker(out io.Writer) error {
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := discoverAllRoots()
 	if err != nil {
 		return err
 	}

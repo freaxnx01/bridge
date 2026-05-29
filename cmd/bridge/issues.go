@@ -9,7 +9,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -40,7 +39,7 @@ func runIssues(cmd *cobra.Command, args []string) error {
 			return renderIssues(cmd, c.Issues)
 		}
 	}
-	repos, err := core.DiscoverRepos(reposRoot())
+	repos, err := discoverAllRoots()
 	if err != nil {
 		return err
 	}
