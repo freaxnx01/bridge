@@ -496,6 +496,102 @@ func TestPreflightOpenDefaultAgentClaudeNamesSession(t *testing.T) {
 	}
 }
 
+// --- relabel hook install integration (#85) ---
+
+func TestPreflightOpenClaudeInstallsRelabelHook(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	configDir := t.TempDir()
+	bridgeCache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"CLAUDE_CONFIG_DIR="+configDir,
+		"BRIDGE_CACHE="+bridgeCache,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+
+	label, err := os.ReadFile(filepath.Join(configDir, "bridge-label"))
+	if err != nil {
+		t.Fatalf("read bridge-label: %v", err)
+	}
+	if string(label) != "bridge" {
+		t.Errorf("label = %q, want %q", label, "bridge")
+	}
+
+	settings, err := os.ReadFile(filepath.Join(configDir, "settings.json"))
+	if err != nil {
+		t.Fatalf("read settings.json: %v", err)
+	}
+	s := string(settings)
+	if !strings.Contains(s, `"SessionStart"`) {
+		t.Errorf("settings.json missing SessionStart entry: %s", s)
+	}
+	if !strings.Contains(s, `"matcher": "clear"`) {
+		t.Errorf("settings.json missing matcher 'clear': %s", s)
+	}
+	if !strings.Contains(s, "relabel.sh 0") {
+		t.Errorf("settings.json missing relabel.sh command: %s", s)
+	}
+
+	scriptPath := filepath.Join(bridgeCache, "hooks", "relabel.sh")
+	if fi, err := os.Stat(scriptPath); err != nil {
+		t.Errorf("extracted script missing: %v", err)
+	} else if fi.Mode().Perm()&0o100 == 0 {
+		t.Errorf("extracted script not executable: %v", fi.Mode())
+	}
+}
+
+func TestPreflightOpenClaudeWorktreeLabelIncludesWorktree(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	configDir := t.TempDir()
+	bridgeCache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "-w", "feature-x", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"CLAUDE_CONFIG_DIR="+configDir,
+		"BRIDGE_CACHE="+bridgeCache,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	label, err := os.ReadFile(filepath.Join(configDir, "bridge-label"))
+	if err != nil {
+		t.Fatalf("read bridge-label: %v", err)
+	}
+	if string(label) != "bridge [feature-x]" {
+		t.Errorf("label = %q, want %q", label, "bridge [feature-x]")
+	}
+}
+
+func TestPreflightOpenNonClaudeAgentSkipsRelabelHook(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	configDir := t.TempDir()
+	bridgeCache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "code")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"CLAUDE_CONFIG_DIR="+configDir,
+		"BRIDGE_CACHE="+bridgeCache,
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "bridge-label")); !os.IsNotExist(err) {
+		t.Errorf("non-claude agent unexpectedly wrote bridge-label (err=%v)", err)
+	}
+	if _, err := os.Stat(filepath.Join(configDir, "settings.json")); !os.IsNotExist(err) {
+		t.Errorf("non-claude agent unexpectedly wrote settings.json (err=%v)", err)
+	}
+}
+
 func TestPreflightOpenNonClaudeAgentUnchanged(t *testing.T) {
 	// A non-claude agent (code) must not get -n injected.
 	root := writeFakeRepos(t)

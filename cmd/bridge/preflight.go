@@ -13,6 +13,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/hooks"
 	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/shellbridge"
 	"github.com/freaxnx01/bridge/internal/store"
@@ -122,6 +123,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
 	if spec, ok := resolveDefaultAgent(); ok {
 		spec = withClaudeName(spec, repo, "")
+		ensureClaudeRelabel(spec, repo, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
 		if err == nil {
 			return shellbridge.EmitExec(out, argv)
@@ -145,6 +147,7 @@ func preflightPicker(out io.Writer) error {
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
 	if spec, ok := resolveDefaultAgent(); ok {
 		spec = withClaudeName(spec, r, "")
+		ensureClaudeRelabel(spec, r, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
 		if err == nil {
 			return shellbridge.EmitExec(out, argv)
@@ -242,6 +245,7 @@ func preflightOpen(out io.Writer, args []string) error {
 		agentName = spec.Name
 	}
 	spec = withClaudeName(spec, repo, worktree)
+	ensureClaudeRelabel(spec, repo, worktree)
 	slot := slotIDFor(repo, worktree)
 	// Record the slot in the registry. Non-fatal on failure — emitting the
 	// exec directive is still the right thing to do.
@@ -317,4 +321,17 @@ func withClaudeName(spec agents.AgentSpec, repo core.Repo, worktree string) agen
 	}
 	spec.Args = append([]string{"-n", displayName(repo, worktree)}, spec.Args...)
 	return spec
+}
+
+// ensureClaudeRelabel installs the SessionStart[clear] hook for claude
+// launches so the display label set via `-n` can be restored via /rename
+// after /clear wipes it (#85). Non-claude agents are a no-op. Errors are
+// non-fatal: the launch itself is the primary action.
+func ensureClaudeRelabel(spec agents.AgentSpec, repo core.Repo, worktree string) {
+	if spec.Name != "claude" {
+		return
+	}
+	if err := hooks.EnsureRelabel(hooks.EffectiveConfigDir(), displayName(repo, worktree)); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: relabel hook install failed: %v\n", err)
+	}
 }
