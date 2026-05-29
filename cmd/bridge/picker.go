@@ -30,13 +30,13 @@ func pickRepo(repos []core.Repo) (core.Repo, bool, error) {
 		return core.Repo{}, false, errors.New("fzf not found in PATH; install fzf or set BRIDGE_DEFAULT_AGENT to skip picker")
 	}
 	sort.Slice(repos, func(i, j int) bool {
-		return strings.ToLower(localEntryLabel(repos[i])) < strings.ToLower(localEntryLabel(repos[j]))
+		return localSortKey(repos[i]) < localSortKey(repos[j])
 	})
 	var input bytes.Buffer
 	for _, r := range repos {
 		input.WriteString(localEntryLabel(r) + "\t" + r.Path + "\n")
 	}
-	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--layout=reverse")
+	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--layout=reverse", "--tiebreak=index")
 	cmd.Stdin = &input
 	cmd.Stderr = os.Stderr
 	var out bytes.Buffer
@@ -84,7 +84,7 @@ func pickSession(sessions []core.Session) string {
 	for _, s := range sessions {
 		input.WriteString(s.SlotID + "\n")
 	}
-	cmd := exec.Command("fzf", "--prompt=session> ", "--layout=reverse")
+	cmd := exec.Command("fzf", "--prompt=session> ", "--layout=reverse", "--tiebreak=index")
 	cmd.Stdin = &input
 	cmd.Stderr = os.Stderr
 	var out bytes.Buffer

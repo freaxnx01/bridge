@@ -55,6 +55,34 @@ func remoteEntryLabel(r forge.RepoRef) string {
 	return entryLabel(r.Forge, r.Owner, r.Visibility, r.Name)
 }
 
+// entrySortKey returns a comparison key that orders entries by:
+//
+//	forge ASC → visibility (private < public < other) → owner ASC → name ASC
+//
+// Built so private repos always group before public within the same forge,
+// regardless of alphabet (the lexical fallback "private" < "public" is
+// coincidence we don't want to rely on if a third visibility ever shows up).
+func entrySortKey(forge, owner, vis, name string) string {
+	var visRank string
+	switch vis {
+	case "private":
+		visRank = "0"
+	case "public":
+		visRank = "1"
+	default:
+		visRank = "2"
+	}
+	return strings.ToLower(forge) + "\x00" + visRank + "\x00" + strings.ToLower(owner) + "\x00" + strings.ToLower(name)
+}
+
+func localSortKey(r core.Repo) string {
+	return entrySortKey(r.Forge, r.Owner, r.Visibility, r.Name)
+}
+
+func remoteSortKey(r forge.RepoRef) string {
+	return entrySortKey(r.Forge, r.Owner, r.Visibility, r.Name)
+}
+
 // pickRepoOrRemote runs an fzf picker over local repos plus remote-only refs.
 // Remote rows are prefixed with "↓ " (bash bridge convention) so they're
 // visually distinct. Remote entries whose forge+owner+name matches a local
@@ -97,12 +125,10 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 	}
 	var rows []row
 	for _, r := range local {
-		lbl := localEntryLabel(r)
-		rows = append(rows, row{lbl, strings.ToLower(lbl), "local", r.Path})
+		rows = append(rows, row{localEntryLabel(r), localSortKey(r), "local", r.Path})
 	}
 	for _, r := range remote {
-		lbl := remoteEntryLabel(r)
-		rows = append(rows, row{"↓ " + lbl, strings.ToLower(lbl), "remote", r.Forge + "|" + r.Owner + "|" + r.Name})
+		rows = append(rows, row{"↓ " + remoteEntryLabel(r), remoteSortKey(r), "remote", r.Forge + "|" + r.Owner + "|" + r.Name})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].sortKey != rows[j].sortKey {
@@ -114,7 +140,7 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 	for _, r := range rows {
 		fmt.Fprintf(&input, "%s\t%s\t%s\n", r.display, r.kind, r.key)
 	}
-	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--ansi", "--layout=reverse")
+	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--ansi", "--layout=reverse", "--tiebreak=index")
 	cmd.Stdin = &input
 	cmd.Stderr = os.Stderr
 	var out bytes.Buffer
@@ -212,7 +238,15 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	}
 
 	fmt.Fprintf(os.Stderr, "bridge: cloning %s → %s\n", url, targetDir)
-	cmd := exec.Command("direnv", "exec", parentDir, "git", "clone", url, targetDir)
+	// Inline credential helper per forge: lets git read the PAT/token from
+	// the env that direnv injects, without ever writing it to .git/config.
+	// Mirrors the bash _bridge_git_clone_in pattern.
+	gitArgs := []string{}
+	if helper := cloneCredentialHelper(ref.Forge); helper != "" {
+		gitArgs = append(gitArgs, "-c", helper)
+	}
+	gitArgs = append(gitArgs, "clone", url, targetDir)
+	cmd := exec.Command("direnv", append([]string{"exec", parentDir, "git"}, gitArgs...)...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {
@@ -221,6 +255,20 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 		return "", fmt.Errorf("clone: %w", err)
 	}
 	return targetDir, nil
+}
+
+// cloneCredentialHelper returns a git -c value that wires an inline credential
+// helper for the given forge. The helper reads the PAT/token from the env at
+// credential-prompt time (so it's never persisted in .git/config or visible
+// in /proc command-line listings). Empty string = no helper, plain clone.
+func cloneCredentialHelper(forge string) string {
+	switch forge {
+	case "ado":
+		return `credential.https://dev.azure.com.helper=!f() { echo username=x; echo "password=${AZURE_DEVOPS_EXT_PAT:-$ADO_PAT}"; }; f`
+	case "github":
+		return `credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_TOKEN:-$GITHUB_TOKEN}"; }; f`
+	}
+	return ""
 }
 
 // remoteCloneDirs derives (parent_dir, target_dir) for a remote ref under
