@@ -7,13 +7,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.0] - 2026-05-29
+
 ### Added
 
-- `bridge init` now defaults the auto-launch agent to **claude** when `--agent` is omitted and no `BRIDGE_DEFAULT_AGENT` export exists yet, writing `BRIDGE_DEFAULT_AGENT=claude` and `BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"`. A plain `bridge init` now makes `bridge <repo>` open a tmux-wrapped claude session out of the box, matching the bash bridge's default. An existing export is never overwritten, so re-running init to refresh completion leaves a customized agent (e.g. opencode) intact. (bash only; the PowerShell `init` writer still does not emit agent exports.)
+- **`bridge tui` — live dashboard** (#64). The dashboard PoC is promoted to a first-class command; `bridge --dashboard` is an alias (#73). Panels are wired to real state: Open Issues reads the on-disk issue cache (#70), Sessions reflects live tmux + `slots.json` (#71), and Enter / slash-command actions are interactive (#72).
+- **Repo-name tab-completion restored** (#65). `bridge open`/`bridge rm` and the bare `bridge <repo>` root complete on repo basenames, case-insensitively (#33dc336). Meta-keywords resolve and complete via a keyword resolver plus a tab-time augmenter shim (`shims/bridge-completion-meta.sh`), with substring-basename matching and cross-machine setup wired through `init`/`doctor` (#76). README documents the PowerShell completion install.
+- **Azure DevOps forge support** (#118e628). `bridge list -r` lists ADO repos, triggered by `AZURE_DEVOPS_ORG_URL` + `AZURE_DEVOPS_EXT_PAT`/`ADO_PAT` (loaded via direnv). Clones land at `ado/<project>/<repo>`, matching the old bash layout.
+- **Picker overhaul** (#4c8ba38). All fzf pickers render entries as `forge/visibility/name` (github) or `forge/project/name` (ado/gitlab), sorted by that key, with the filter bar moved to the top (`--layout=reverse`).
+- **Claude session naming at launch** (#84). Launching a claude session now passes `-n <repo>` (or `<repo> [<worktree>]`), restoring the bash bridge's launch label across all picker and open call sites. Non-claude agents are unaffected.
+- **`bridge <repo>` auto-launches `BRIDGE_DEFAULT_AGENT`** (#77) instead of only `cd`'ing, when the export is set.
+- **Alias completion setup + checks** (#78). `bridge init --alias=br,brg` writes guarded `complete -F __start_bridge <name>` lines (one per alias), and `bridge doctor` reports which aliased completions are registered.
+- `bridge init` now defaults the auto-launch agent to **claude** when `--agent` is omitted and no `BRIDGE_DEFAULT_AGENT` export exists yet, writing `BRIDGE_DEFAULT_AGENT=claude` and `BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permissions"` (#82). A plain `bridge init` now makes `bridge <repo>` open a tmux-wrapped claude session out of the box, matching the bash bridge's default. An existing export is never overwritten, so re-running init to refresh completion leaves a customized agent (e.g. opencode) intact. (bash only; the PowerShell `init` writer still does not emit agent exports.)
 
 ### Fixed
 
+- `bridge --refresh` run from a single direnv scope no longer obliterates other forges' cache entries. Remote discovery now walks `.envrc` targets under the repos root and fetches each forge with `direnv exec <dir>`, so every forge keeps the right credentials regardless of the parent shell's direnv state (#eee6e6c).
+- Picker now groups **private repos before public** via an explicit visibility rank, reads clone credentials inline via `git -c credential.helper` for ADO/GitHub HTTPS clones (PAT never persists to `.git/config` or argv), and uses `--tiebreak=index` so filtered results stay in pre-sorted order instead of fzf's length-bias scoring (#9f30202).
+- Legacy bash-shape `~/.cache/bridge/slots.json` is silently migrated on first Go invocation — the file is renamed to `<path>.legacy-<UTC>.bak` and a fresh registry is used, eliminating the per-call `slot upsert failed` warning. Corrupt JSON recovers the same way (#79).
+- `bridge sessions attach` / `bridge open` now fail loudly when the shell shim isn't loaded, instead of silently no-op'ing (#66, #67).
+- ESC in the picker no longer dumps a raw text list (#63).
 - `bridge init --alias=<name>` no longer skips an alias whose name is a prefix of an already-wired one (e.g. `br` vs an existing `brg`). Detection now matches the whole binding line instead of a bare substring (#81).
+- `bridge-hooks` idle markers are written to `~/.cache/bridge` (#34).
+
+### Documentation
+
+- `go-migrate.md` drops the obsolete manual `rm ~/.cache/bridge/slots.json` step now that migration is automatic (#80).
+- Post-cutover cross-shell parity rules and a PR template added; `CLAUDE.md` restructured with implementer-role framing.
+- Design specs and implementation plans for completion restore (#65) and claude-launch-naming (#84).
+
+### Internal
+
+- Cross-platform CI matrix (ubuntu/macos/windows) plus an e2e test harness (#68); `justfile` build/test recipes. Windows build job greened (test-only fixes for shim env, nil-slice JSON, and `.exe`/build-constraint handling).
 
 ## [2.1.0] - 2026-05-26
 
