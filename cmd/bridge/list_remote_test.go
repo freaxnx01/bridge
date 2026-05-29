@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -91,6 +92,41 @@ func TestListRemoteADOText(t *testing.T) {
 	}
 	if !strings.Contains(sout.String(), "ado") || !strings.Contains(sout.String(), "MyRepo") {
 		t.Errorf("expected ado/MyRepo in text output:\n%s", sout.String())
+	}
+}
+
+func TestDiscoverRemoteTargets(t *testing.T) {
+	root := t.TempDir()
+	mustWrite := func(rel string) {
+		t.Helper()
+		full := filepath.Join(root, rel)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	mustWrite("github/freaxnx01/.envrc")
+	mustWrite("github/orgB/.envrc")
+	mustWrite("github/noenvrc/.gitkeep") // owner dir without .envrc → skipped
+	mustWrite("gitlab/freaxnx01/.envrc")
+	mustWrite("git-forgejo/.envrc")
+	mustWrite("ado/.envrc")
+
+	targets := discoverRemoteTargets(root)
+	got := map[string]bool{}
+	for _, t := range targets {
+		got[t.Forge+"|"+t.Owner] = true
+	}
+	want := []string{"github|freaxnx01", "github|orgB", "gitlab|freaxnx01", "forgejo|freax", "ado|"}
+	for _, w := range want {
+		if !got[w] {
+			t.Errorf("missing target %q in %v", w, got)
+		}
+	}
+	if got["github|noenvrc"] {
+		t.Errorf("owner dir without .envrc should be skipped")
 	}
 }
 

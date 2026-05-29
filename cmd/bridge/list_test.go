@@ -42,6 +42,23 @@ func writeFakeRepos(t *testing.T) string {
 			t.Fatal(err)
 		}
 	}
+	// Mark each owner directory as a direnv scope so the .envrc-walking
+	// target discovery in loadOrFetchRemote picks them up. The content is
+	// intentionally empty — tokens are injected via cmd.Env in each test,
+	// and direnv exec on an unallowed empty .envrc just inherits parent env.
+	for _, p := range []string{
+		"github/freaxnx01/.envrc",
+		"gitlab/freaxnx01/.envrc",
+		"ado/.envrc",
+	} {
+		full := filepath.Join(root, p)
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
 	return root
 }
 
