@@ -3,6 +3,7 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 )
@@ -37,7 +38,14 @@ command -v bridge >/dev/null && source <(bridge completion bash)
 	if err := os.MkdirAll(pathDir, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	target := filepath.Join(pathDir, "bridge")
+	// doctor resolves the binary via exec.LookPath("bridge"), which on Windows
+	// only matches an executable extension (bridge.exe). Stage the file under
+	// the platform-correct name so the lookup succeeds.
+	staged := "bridge"
+	if runtime.GOOS == "windows" {
+		staged += ".exe"
+	}
+	target := filepath.Join(pathDir, staged)
 	if err := os.Symlink(bridgeBin, target); err != nil {
 		// Windows runners without developer mode can't symlink — copy instead.
 		data, rerr := os.ReadFile(bridgeBin)
@@ -59,9 +67,9 @@ func doctorEnv(home, pathDir, reposRoot string) []string {
 	env := []string{}
 	stripped := map[string]bool{
 		"HOME=": true, "PATH=": true,
-		"BRIDGE_SHIM_LOADED=":       true,
-		"BRIDGE_REPOS_ROOT=":        true,
-		"BRIDGE_DEFAULT_AGENT=":     true,
+		"BRIDGE_SHIM_LOADED=":        true,
+		"BRIDGE_REPOS_ROOT=":         true,
+		"BRIDGE_DEFAULT_AGENT=":      true,
 		"BRIDGE_DEFAULT_AGENT_ARGS=": true,
 	}
 	for _, kv := range os.Environ() {

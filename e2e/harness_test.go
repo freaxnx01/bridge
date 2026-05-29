@@ -85,6 +85,11 @@ func run(t *testing.T, reposRoot, cacheRoot string, args ...string) (stdout, std
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_REPOS_ROOT="+reposRoot,
 		"XDG_CACHE_HOME="+cacheRoot,
+		// The real shell shim exports this on every invocation; mirror it so
+		// shim-gated verbs (`open`, `sessions attach`) reach their actual logic
+		// instead of short-circuiting on the no-shim guard. Matches the
+		// cmd/bridge test harness (bridgeCmd) default.
+		"BRIDGE_SHIM_LOADED=1",
 	)
 	var so, se bytes.Buffer
 	cmd.Stdout = &so

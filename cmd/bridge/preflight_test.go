@@ -4,8 +4,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/freaxnx01/bridge/internal/agents"
+	"github.com/freaxnx01/bridge/internal/core"
 )
 
 func TestPreflightNoArgs(t *testing.T) {
@@ -378,5 +382,132 @@ func TestPreflightOpenUnknownRepoExits2(t *testing.T) {
 		if ee.ExitCode() != 2 && !strings.Contains(string(out), "exit status 2") {
 			t.Errorf("expected exit 2, got exit %d / output %s", ee.ExitCode(), out)
 		}
+	}
+}
+
+// --- claude launch-naming helpers (issue #84) ---
+
+func TestDisplayName(t *testing.T) {
+	repo := core.Repo{Name: "bridge"}
+	if got := displayName(repo, ""); got != "bridge" {
+		t.Errorf("no-worktree: got %q want %q", got, "bridge")
+	}
+	if got := displayName(repo, "feature-x"); got != "bridge [feature-x]" {
+		t.Errorf("worktree: got %q want %q", got, "bridge [feature-x]")
+	}
+}
+
+func TestWithClaudeNameClaudePrependsFlag(t *testing.T) {
+	spec := agents.AgentSpec{Name: "claude", Bin: "claude", Args: []string{"--remote-control"}}
+	repo := core.Repo{Name: "bridge"}
+	got := withClaudeName(spec, repo, "")
+	want := []string{"-n", "bridge", "--remote-control"}
+	if !reflect.DeepEqual(got.Args, want) {
+		t.Errorf("Args = %v, want %v", got.Args, want)
+	}
+}
+
+func TestWithClaudeNameClaudeWithWorktree(t *testing.T) {
+	spec := agents.AgentSpec{Name: "claude", Bin: "claude"}
+	repo := core.Repo{Name: "bridge"}
+	got := withClaudeName(spec, repo, "feature-x")
+	want := []string{"-n", "bridge [feature-x]"}
+	if !reflect.DeepEqual(got.Args, want) {
+		t.Errorf("Args = %v, want %v", got.Args, want)
+	}
+}
+
+func TestWithClaudeNameNonClaudePassthrough(t *testing.T) {
+	for _, name := range []string{"copilot", "opencode", "code"} {
+		spec := agents.AgentSpec{Name: name, Bin: name, Args: []string{"."}}
+		got := withClaudeName(spec, core.Repo{Name: "bridge"}, "wt")
+		if !reflect.DeepEqual(got.Args, []string{"."}) {
+			t.Errorf("%s: Args mutated to %v", name, got.Args)
+		}
+	}
+}
+
+func TestWithClaudeNameDoesNotMutateRegistry(t *testing.T) {
+	// Resolve twice through the real registry. If withClaudeName mutated the
+	// shared slice, the second call's Args would already contain "-n ...".
+	first, err := agents.Resolve("claude")
+	if err != nil {
+		t.Fatalf("Resolve: %v", err)
+	}
+	_ = withClaudeName(first, core.Repo{Name: "bridge"}, "")
+	second, _ := agents.Resolve("claude")
+	if len(second.Args) != 0 {
+		t.Errorf("registry spec.Args mutated: %v", second.Args)
+	}
+}
+
+// --- launch-naming integration (#84) ---
+
+func TestPreflightOpenClaudeNamesSession(t *testing.T) {
+	// `bridge open bridge --agent claude` must emit `claude -n bridge` in argv.
+	// The -n bridge token appears at the end of the exec: directive (no trailing
+	// space), so we check for the leading space + the suffix together.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	if !strings.Contains(s, " claude -n bridge") {
+		t.Errorf("expected ' claude -n bridge' in directive, got: %s", s)
+	}
+}
+
+func TestPreflightOpenClaudeWorktreeNamesSession(t *testing.T) {
+	// With -w feature-x the display name must be the sh-quoted 'bridge [feature-x]'.
+	// The token appears at the end of the exec: directive (no trailing space).
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "-w", "feature-x", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	if !strings.Contains(s, " claude -n 'bridge [feature-x]'") {
+		t.Errorf("expected sh-quoted worktree name in directive, got: %s", s)
+	}
+}
+
+func TestPreflightOpenDefaultAgentClaudeNamesSession(t *testing.T) {
+	// With BRIDGE_DEFAULT_AGENT=claude (no explicit --agent) the name must
+	// still be injected.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge")
+	cmd.Env = append(envWithout("TMUX", "BRIDGE_DEFAULT_AGENT_ARGS"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_DEFAULT_AGENT=claude",
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	if !strings.Contains(s, " claude -n bridge") {
+		t.Errorf("expected ' claude -n bridge' in directive, got: %s", s)
+	}
+}
+
+func TestPreflightOpenNonClaudeAgentUnchanged(t *testing.T) {
+	// A non-claude agent (code) must not get -n injected.
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "code")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+	)
+	out, _ := cmd.CombinedOutput()
+	s := strings.TrimSpace(string(out))
+	if strings.Contains(s, " -n ") {
+		t.Errorf("non-claude agent unexpectedly got -n: %s", s)
 	}
 }

@@ -121,6 +121,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
 	if spec, ok := resolveDefaultAgent(); ok {
+		spec = withClaudeName(spec, repo, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
 		if err == nil {
 			return shellbridge.EmitExec(out, argv)
@@ -143,6 +144,7 @@ func preflightPicker(out io.Writer) error {
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
 	if spec, ok := resolveDefaultAgent(); ok {
+		spec = withClaudeName(spec, r, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
 		if err == nil {
 			return shellbridge.EmitExec(out, argv)
@@ -239,6 +241,7 @@ func preflightOpen(out io.Writer, args []string) error {
 		}
 		agentName = spec.Name
 	}
+	spec = withClaudeName(spec, repo, worktree)
 	slot := slotIDFor(repo, worktree)
 	// Record the slot in the registry. Non-fatal on failure — emitting the
 	// exec directive is still the right thing to do.
@@ -292,4 +295,26 @@ func slotIDFor(repo core.Repo, worktree string) string {
 		id += "-wt-" + worktree
 	}
 	return id
+}
+
+// displayName returns the claude session display name for a repo launch:
+// "<repo>" normally, "<repo> [<worktree>]" when a worktree is given. Matches
+// the bash bridge's label.
+func displayName(repo core.Repo, worktree string) string {
+	if worktree != "" {
+		return repo.Name + " [" + worktree + "]"
+	}
+	return repo.Name
+}
+
+// withClaudeName prepends `-n <displayName>` to a claude spec's args so the
+// launched session is named in the picker/terminal title. No-op for non-claude
+// agents (only claude has --name). Builds a fresh Args slice so the shared
+// registry spec is never mutated.
+func withClaudeName(spec agents.AgentSpec, repo core.Repo, worktree string) agents.AgentSpec {
+	if spec.Name != "claude" {
+		return spec
+	}
+	spec.Args = append([]string{"-n", displayName(repo, worktree)}, spec.Args...)
+	return spec
 }

@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"runtime"
 	"testing"
 )
 
@@ -22,7 +23,13 @@ func TestMain(m *testing.M) {
 		fmt.Fprintln(os.Stderr, "tempdir:", err)
 		os.Exit(1)
 	}
-	bridgeBin = filepath.Join(dir, "bridge-go")
+	// On Windows `go build -o name` appends .exe; match it so exec(bridgeBin)
+	// resolves the file that was actually produced.
+	name := "bridge-go"
+	if runtime.GOOS == "windows" {
+		name += ".exe"
+	}
+	bridgeBin = filepath.Join(dir, name)
 	cmd := exec.Command("go", "build", "-o", bridgeBin, ".")
 	cmd.Stderr = os.Stderr
 	cmd.Stdout = os.Stderr

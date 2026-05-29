@@ -30,6 +30,12 @@ func runSessions(cmd *cobra.Command, args []string) error {
 		return err
 	}
 	if sessionsJSON {
+		// LiveSessions returns a nil slice on hosts with no tmux; marshal it as
+		// an empty array `[]` rather than `null` so programmatic consumers can
+		// always iterate the result.
+		if sessions == nil {
+			sessions = []core.Session{}
+		}
 		return emitJSON(cmd.OutOrStdout(), sessions)
 	}
 	fmt.Fprintf(cmd.OutOrStdout(), "%-20s %-10s %s\n", "slot", "state", "age")
