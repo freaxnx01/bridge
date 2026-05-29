@@ -17,6 +17,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/shellbridge"
 	"github.com/freaxnx01/bridge/internal/store"
+	"github.com/freaxnx01/bridge/internal/syncer"
 )
 
 var preflightCmd = &cobra.Command{
@@ -121,6 +122,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 	}
 
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
+	maybePreLaunchSync(repo.Path, slotIDFor(repo, ""), false)
 	if spec, ok := resolveDefaultAgent(); ok {
 		spec = withClaudeName(spec, repo, "")
 		ensureClaudeRelabel(spec, repo, "")
@@ -145,6 +147,7 @@ func preflightPicker(out io.Writer) error {
 		return shellbridge.EmitCancel(out)
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
+	maybePreLaunchSync(r.Path, slotIDFor(r, ""), false)
 	if spec, ok := resolveDefaultAgent(); ok {
 		spec = withClaudeName(spec, r, "")
 		ensureClaudeRelabel(spec, r, "")
@@ -179,6 +182,7 @@ func resolveDefaultAgent() (agents.AgentSpec, bool) {
 
 func preflightOpen(out io.Writer, args []string) error {
 	var name, agentName, worktree string
+	var noSync bool
 	for i := 0; i < len(args); i++ {
 		switch args[i] {
 		case "--agent":
@@ -191,6 +195,8 @@ func preflightOpen(out io.Writer, args []string) error {
 				worktree = args[i+1]
 				i++
 			}
+		case "--no-sync":
+			noSync = true
 		case "--rc", "--remote-control", "--json":
 			// ignore in preflight
 		default:
@@ -247,6 +253,7 @@ func preflightOpen(out io.Writer, args []string) error {
 	spec = withClaudeName(spec, repo, worktree)
 	ensureClaudeRelabel(spec, repo, worktree)
 	slot := slotIDFor(repo, worktree)
+	maybePreLaunchSync(workDir, slot, noSync)
 	// Record the slot in the registry. Non-fatal on failure — emitting the
 	// exec directive is still the right thing to do.
 	if err := core.UpsertSlot(filepath.Join(cacheRoot(), "slots.json"), core.Slot{
@@ -321,6 +328,44 @@ func withClaudeName(spec agents.AgentSpec, repo core.Repo, worktree string) agen
 	}
 	spec.Args = append([]string{"-n", displayName(repo, worktree)}, spec.Args...)
 	return spec
+}
+
+// maybePreLaunchSync does a best-effort `git fetch && git pull --ff-only`
+// on dir before launch (issue #90). Honors BRIDGE_NO_SYNC and the per-call
+// noSync gate; treats an already-live tmux session for slot as a reattach
+// and skips silently. Non-trivial skip reasons surface as a one-line
+// stderr banner; success is silent. Never fails the launch.
+func maybePreLaunchSync(dir, slot string, noSync bool) {
+	if noSync || os.Getenv("BRIDGE_NO_SYNC") != "" {
+		return
+	}
+	if dir == "" {
+		return
+	}
+	if slot != "" && sessionLive(slot) {
+		// Reattach: don't touch the working tree under a live session.
+		return
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	s := &syncer.Syncer{Runner: syncer.ExecRunner{}}
+	res := s.SafePull(ctx, dir)
+	if res.Skipped != "" && res.Skipped != syncer.SkipNoUpstream {
+		fmt.Fprintf(os.Stderr, "bridge: sync skipped (%s)\n", res.Skipped)
+	}
+}
+
+func sessionLive(slot string) bool {
+	sessions, err := loadSessions()
+	if err != nil {
+		return false
+	}
+	for _, s := range sessions {
+		if s.SlotID == slot {
+			return true
+		}
+	}
+	return false
 }
 
 // ensureClaudeRelabel installs the SessionStart[clear] hook for claude

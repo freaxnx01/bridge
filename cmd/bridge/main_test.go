@@ -21,6 +21,10 @@ func TestMain(m *testing.M) {
 	// Suppress the TTL-gated /releases/latest check so tests don't hit the
 	// real GitHub API. Inherited by every bridgeCmd subprocess via os.Environ.
 	os.Setenv("BRIDGE_NO_VERSION_CHECK", "1")
+	// Skip the pre-launch ff-pull (#90) globally for the same reason —
+	// fake fixtures in writeFakeRepos aren't real git repos. Tests that
+	// exercise sync explicitly override BRIDGE_NO_SYNC in cmd.Env.
+	os.Setenv("BRIDGE_NO_SYNC", "1")
 
 	dir, err := os.MkdirTemp("", "bridge-bin-")
 	if err != nil {

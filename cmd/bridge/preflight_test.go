@@ -496,6 +496,127 @@ func TestPreflightOpenDefaultAgentClaudeNamesSession(t *testing.T) {
 	}
 }
 
+// --- pre-launch ff-pull integration (#90) ---
+
+// writeFakeGit drops an executable `git` shim into bindir that:
+//   - logs argv to bindir/git.log
+//   - reports a clean main branch with upstream origin/main, 2 commits behind
+//   - succeeds on fetch and pull
+//
+// SafePull's queries are: symbolic-ref, rev-parse, status, rev-list, fetch,
+// pull. Any other invocation exits 0 silently.
+func writeFakeGit(t *testing.T, bindir string) {
+	t.Helper()
+	script := `#!/bin/sh
+echo "$@" >> "$0.log"
+case "$1 $2" in
+  "symbolic-ref -q") echo "refs/heads/main" ;;
+  "rev-parse --abbrev-ref") echo "origin/main" ;;
+  "status --porcelain") : ;;
+  "rev-list --count")
+    case "$3" in
+      "@{u}..HEAD") echo 0 ;;
+      "HEAD..@{u}") echo 2 ;;
+    esac ;;
+  "fetch --quiet") : ;;
+  "pull --ff-only") : ;;
+esac
+exit 0
+`
+	if err := os.WriteFile(filepath.Join(bindir, "git"), []byte(script), 0o755); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// writeEmptyTmuxFixture creates a BRIDGE_TMUX_FIXTURE file that reports
+// zero live sessions, so the reattach-skip in maybePreLaunchSync doesn't
+// false-positive against whatever real tmux sessions exist on the dev
+// host. (Without this, a developer running these tests inside a tmux
+// session named "bridge" would silently skip the pre-launch sync.)
+func writeEmptyTmuxFixture(t *testing.T) string {
+	t.Helper()
+	p := filepath.Join(t.TempDir(), "tmux-empty")
+	if err := os.WriteFile(p, []byte{}, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestPreflightOpenPreLaunchSyncFetchesAndPulls(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	bindir := t.TempDir()
+	writeFakeGit(t, bindir)
+
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX", "BRIDGE_NO_SYNC"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"PATH="+bindir+":"+os.Getenv("PATH"),
+		"BRIDGE_TMUX_FIXTURE="+writeEmptyTmuxFixture(t),
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+
+	log, err := os.ReadFile(filepath.Join(bindir, "git.log"))
+	if err != nil {
+		t.Fatalf("read git.log (bridge output: %s): %v", out, err)
+	}
+	s := string(log)
+	if !strings.Contains(s, "fetch --quiet") {
+		t.Errorf("expected fetch call, got log: %s", s)
+	}
+	if !strings.Contains(s, "pull --ff-only --quiet") {
+		t.Errorf("expected pull call, got log: %s", s)
+	}
+}
+
+func TestPreflightOpenNoSyncFlagSkipsSync(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	bindir := t.TempDir()
+	writeFakeGit(t, bindir)
+
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude", "--no-sync")
+	cmd.Env = append(envWithout("TMUX", "BRIDGE_NO_SYNC"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"PATH="+bindir+":"+os.Getenv("PATH"),
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(bindir, "git.log")); !os.IsNotExist(err) {
+		// Log exists means git ran. Read it and fail loudly.
+		log, _ := os.ReadFile(filepath.Join(bindir, "git.log"))
+		t.Errorf("--no-sync should skip git invocations, got log:\n%s", log)
+	}
+}
+
+func TestPreflightOpenBridgeNoSyncEnvSkipsSync(t *testing.T) {
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	bindir := t.TempDir()
+	writeFakeGit(t, bindir)
+
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(envWithout("TMUX"),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"PATH="+bindir+":"+os.Getenv("PATH"),
+		"BRIDGE_NO_SYNC=1",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	if _, err := os.Stat(filepath.Join(bindir, "git.log")); !os.IsNotExist(err) {
+		log, _ := os.ReadFile(filepath.Join(bindir, "git.log"))
+		t.Errorf("BRIDGE_NO_SYNC=1 should skip git invocations, got log:\n%s", log)
+	}
+}
+
 // --- relabel hook install integration (#85) ---
 
 func TestPreflightOpenClaudeInstallsRelabelHook(t *testing.T) {
