@@ -121,6 +121,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
 	if spec, ok := resolveDefaultAgent(); ok {
+		spec = withClaudeName(spec, repo, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
 		if err == nil {
 			return shellbridge.EmitExec(out, argv)
@@ -143,6 +144,7 @@ func preflightPicker(out io.Writer) error {
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), r.Path)
 	if spec, ok := resolveDefaultAgent(); ok {
+		spec = withClaudeName(spec, r, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
 		if err == nil {
 			return shellbridge.EmitExec(out, argv)
@@ -239,6 +241,7 @@ func preflightOpen(out io.Writer, args []string) error {
 		}
 		agentName = spec.Name
 	}
+	spec = withClaudeName(spec, repo, worktree)
 	slot := slotIDFor(repo, worktree)
 	// Record the slot in the registry. Non-fatal on failure — emitting the
 	// exec directive is still the right thing to do.
