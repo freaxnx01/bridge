@@ -18,6 +18,10 @@ var bridgeBin string
 // package, that was ~5 minutes per test cycle. A single up-front compile drops
 // it to seconds.
 func TestMain(m *testing.M) {
+	// Suppress the TTL-gated /releases/latest check so tests don't hit the
+	// real GitHub API. Inherited by every bridgeCmd subprocess via os.Environ.
+	os.Setenv("BRIDGE_NO_VERSION_CHECK", "1")
+
 	dir, err := os.MkdirTemp("", "bridge-bin-")
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "tempdir:", err)
