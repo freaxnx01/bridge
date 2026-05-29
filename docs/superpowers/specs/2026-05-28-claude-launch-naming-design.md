@@ -1,7 +1,7 @@
 # Name the claude session at launch (`-n`), worktree-aware
 
 **Date:** 2026-05-28
-**Status:** Draft — pending user approval
+**Status:** Approved
 **Related:** old bash `bridge.sh` (deleted in #35, commit `ef53cf4`); auto-launch (#77), default-agent init (#82)
 
 ## Problem
@@ -89,14 +89,15 @@ func withClaudeName(spec agents.AgentSpec, repo core.Repo, worktree string) agen
 }
 ```
 
-Wiring — call `withClaudeName(...)` at the three launch sites in
+Wiring — call `withClaudeName(...)` at the four launch sites in
 `preflight.go`, right after the spec is resolved and before building argv:
 
 | Site (current line) | Path | Worktree |
 |---|---|---|
-| ~124 | picker default-launch | `""` |
-| ~146 | positional single-match | `""` |
-| ~261 | `preflightOpen` (default **and** explicit `--agent claude`) | the real `worktree` |
+| ~124 | `preflightPickerWithRemote` (`-r`/`--refresh` picker, #54) | `""` |
+| ~146 | `preflightPicker` (plain picker) | `""` |
+| ~259 | `preflightOpen` inside-tmux (`LaunchArgvNested`) | the real `worktree` |
+| ~261 | `preflightOpen` top-level (`LaunchArgv`) | the real `worktree` |
 
 ### Resulting behavior
 
