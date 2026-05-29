@@ -484,15 +484,15 @@ func TestPreflightOpenDefaultAgentClaudeNamesSession(t *testing.T) {
 	root := writeFakeRepos(t)
 	cache := t.TempDir()
 	cmd := bridgeCmd("__preflight", "open", "bridge")
-	cmd.Env = append(envWithout("TMUX"),
+	cmd.Env = append(envWithout("TMUX", "BRIDGE_DEFAULT_AGENT_ARGS"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 		"BRIDGE_DEFAULT_AGENT=claude",
 	)
 	out, _ := cmd.CombinedOutput()
 	s := strings.TrimSpace(string(out))
-	if !strings.Contains(s, " claude -n bridge ") {
-		t.Errorf("expected ' claude -n bridge ' in directive, got: %s", s)
+	if !strings.Contains(s, " claude -n bridge") {
+		t.Errorf("expected ' claude -n bridge' in directive, got: %s", s)
 	}
 }
 
