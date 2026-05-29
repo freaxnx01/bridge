@@ -145,8 +145,34 @@ func loadOrFetchRemote(ctx context.Context, local []core.Repo, refresh bool) ([]
 			all = append(all, r...)
 		}
 	}
+	if orgURL := adoOrgURL(); orgURL != "" {
+		tok := os.Getenv("AZURE_DEVOPS_EXT_PAT")
+		if tok == "" {
+			tok = os.Getenv("ADO_PAT")
+		}
+		if tok != "" {
+			c := forge.NewADOClient(tok, orgURL)
+			r, err := c.ListRepos(ctx, "")
+			if err != nil {
+				if firstErr == nil {
+					firstErr = err
+				}
+			} else {
+				all = append(all, r...)
+			}
+		}
+	}
 	_ = forge.WriteRepoCache(cachePath, forge.RepoCache{UpdatedAt: time.Now(), Repos: all})
 	return all, firstErr
+}
+
+// adoOrgURL returns the ADO org URL from env, preferring BRIDGE_ADO_API (test
+// override) then AZURE_DEVOPS_ORG_URL (production setting).
+func adoOrgURL() string {
+	if v := os.Getenv("BRIDGE_ADO_API"); v != "" {
+		return v
+	}
+	return os.Getenv("AZURE_DEVOPS_ORG_URL")
 }
 
 func uniqueOwners(local []core.Repo) map[string][]string {

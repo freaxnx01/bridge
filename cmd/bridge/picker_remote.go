@@ -199,6 +199,10 @@ func remoteCloneDirs(reposRoot string, ref forge.RepoRef) (string, string, error
 	case "forgejo":
 		parent := filepath.Join(reposRoot, "git-forgejo")
 		return parent, filepath.Join(parent, ref.Name), nil
+	case "ado":
+		// Owner = ADO project name; clones under ado/<project>/<repo>
+		parent := filepath.Join(reposRoot, "ado", ref.Owner)
+		return parent, filepath.Join(parent, ref.Name), nil
 	}
 	return "", "", fmt.Errorf("unknown forge %q", ref.Forge)
 }
@@ -217,6 +221,11 @@ func cloneURLFor(ref forge.RepoRef) string {
 			return ref.SSHURL
 		}
 		return ref.HTMLURL
+	case "ado":
+		if ref.HTMLURL != "" {
+			return ref.HTMLURL
+		}
+		return ref.SSHURL
 	}
 	return ref.HTMLURL
 }
