@@ -23,6 +23,38 @@ type PickerChoice struct {
 	Remote *forge.RepoRef
 }
 
+// entryLabel returns the display label for a picker row:
+//
+//	github  → github/public/name  or  github/private/name
+//	ado     → ado/ProjectName/name
+//	gitlab  → gitlab/owner/name
+//	forgejo → forgejo/name
+func entryLabel(forge, owner, vis, name string) string {
+	switch forge {
+	case "github":
+		v := vis
+		if v == "" {
+			v = "-"
+		}
+		return forge + "/" + v + "/" + name
+	case "forgejo":
+		return forge + "/" + name
+	default:
+		if owner != "" {
+			return forge + "/" + owner + "/" + name
+		}
+		return forge + "/" + name
+	}
+}
+
+func localEntryLabel(r core.Repo) string {
+	return entryLabel(r.Forge, r.Owner, r.Visibility, r.Name)
+}
+
+func remoteEntryLabel(r forge.RepoRef) string {
+	return entryLabel(r.Forge, r.Owner, r.Visibility, r.Name)
+}
+
 // pickRepoOrRemote runs an fzf picker over local repos plus remote-only refs.
 // Remote rows are prefixed with "↓ " (bash bridge convention) so they're
 // visually distinct. Remote entries whose forge+owner+name matches a local
@@ -54,19 +86,35 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 		return PickerChoice{}, false, errors.New("fzf not found in PATH; install fzf to use the picker")
 	}
 
-	sort.Slice(local, func(i, j int) bool { return strings.ToLower(local[i].Name) < strings.ToLower(local[j].Name) })
-	sort.Slice(remote, func(i, j int) bool { return strings.ToLower(remote[i].Name) < strings.ToLower(remote[j].Name) })
-
+	// Build all rows, then sort by forge/vis/name so entries group naturally.
 	// Format: <display>\t<kind>\t<key>
 	// kind ∈ {local, remote}; key is Path (local) or forge|owner|name (remote).
-	var input bytes.Buffer
+	type row struct {
+		display string
+		sortKey string
+		kind    string
+		key     string
+	}
+	var rows []row
 	for _, r := range local {
-		fmt.Fprintf(&input, "%s\tlocal\t%s\n", r.Name, r.Path)
+		lbl := localEntryLabel(r)
+		rows = append(rows, row{lbl, strings.ToLower(lbl), "local", r.Path})
 	}
 	for _, r := range remote {
-		fmt.Fprintf(&input, "↓ %s\tremote\t%s|%s|%s\n", r.Name, r.Forge, r.Owner, r.Name)
+		lbl := remoteEntryLabel(r)
+		rows = append(rows, row{"↓ " + lbl, strings.ToLower(lbl), "remote", r.Forge + "|" + r.Owner + "|" + r.Name})
 	}
-	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--ansi")
+	sort.Slice(rows, func(i, j int) bool {
+		if rows[i].sortKey != rows[j].sortKey {
+			return rows[i].sortKey < rows[j].sortKey
+		}
+		return rows[i].kind == "local" // local before remote on ties
+	})
+	var input bytes.Buffer
+	for _, r := range rows {
+		fmt.Fprintf(&input, "%s\t%s\t%s\n", r.display, r.kind, r.key)
+	}
+	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--ansi", "--layout=reverse")
 	cmd.Stdin = &input
 	cmd.Stderr = os.Stderr
 	var out bytes.Buffer
