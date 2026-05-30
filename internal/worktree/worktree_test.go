@@ -153,6 +153,32 @@ func TestResolveCreateFallsBackToExistingBranch(t *testing.T) {
 	}
 }
 
+func TestResolveDoesNotMatchMainWorktree(t *testing.T) {
+	// `-w main` (or `-w <reponame>`) must not resolve to the primary working
+	// tree — that would defeat isolation. The main worktree is skipped, so a
+	// dedicated worktree is created instead.
+	pc := `worktree /repo/FlowHub-CAS-AISE
+HEAD 01aab51
+branch refs/heads/main
+`
+	for _, wt := range []string{"main", "FlowHub-CAS-AISE"} {
+		r := &fakeRunner{listOut: pc}
+		dir, created, err := Resolve(r, "/repo/FlowHub-CAS-AISE", wt)
+		if err != nil {
+			t.Fatalf("-w %s: unexpected err: %v", wt, err)
+		}
+		if dir == "/repo/FlowHub-CAS-AISE" {
+			t.Errorf("-w %s resolved to the main worktree (repo root); want a dedicated worktree", wt)
+		}
+		if !created {
+			t.Errorf("-w %s: created=false, want true", wt)
+		}
+		if want := filepath.Join("/repo/FlowHub-CAS-AISE", ".worktrees", wt); dir != want {
+			t.Errorf("-w %s: dir=%q want %q", wt, dir, want)
+		}
+	}
+}
+
 func TestResolveCreateDoesNotRetryOnUnrelatedError(t *testing.T) {
 	// The first `worktree add -b` fails for a reason unrelated to an existing
 	// branch (here: the target dir already exists). Resolve must NOT blindly

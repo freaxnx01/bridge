@@ -31,7 +31,14 @@ func Resolve(r Runner, repoPath, wt string) (dir string, created bool, err error
 	if lerr != nil {
 		return "", false, fmt.Errorf("git worktree list: %w", lerr)
 	}
+	mainPath := filepath.Clean(repoPath)
 	for _, e := range parsePorcelain(out) {
+		// Never resolve to the primary working tree — `-w` exists to isolate
+		// from it, so `-w main` / `-w <reponame>` must create a dedicated
+		// worktree rather than handing back the repo root.
+		if filepath.Clean(e.path) == mainPath {
+			continue
+		}
 		if matches(e, wt) {
 			return e.path, false, nil
 		}
