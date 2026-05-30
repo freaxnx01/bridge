@@ -297,6 +297,11 @@ tmux ls                        # shows the <repo> session
 - **`_get_comp_words_by_ref: command not found` on TAB** → `bash-completion`
   isn't loaded in this shell. Install it (prerequisites) and open a **new**
   terminal — a shell opened before the install won't have it.
+- **`bridge<TAB>` completes but `br<TAB>` / `brg<TAB>` doesn't** → alias and
+  function names don't inherit bridge's completion automatically; each needs its
+  own `complete` registration. Wire them with `bridge init --alias=br,brg`, then
+  open a **new** shell (`exec bash -l`). Confirm with `bridge doctor` →
+  `alias completions — br, brg`.
 - **`bridge` cd's but never launches the agent** → `BRIDGE_DEFAULT_AGENT` isn't
   set in the current shell. `echo $BRIDGE_DEFAULT_AGENT` should print `claude`;
   if empty, `exec bash -l`.
