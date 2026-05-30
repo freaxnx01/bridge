@@ -161,7 +161,9 @@ func TestPreflightOpenWithWorktreeCDOnly(t *testing.T) {
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 	)
-	out, _ := cmd.CombinedOutput()
+	// stdout only: the fake fixture isn't a git repo, so worktree resolution
+	// falls back to the .worktrees/<wt> convention and logs a banner to stderr.
+	out, _ := cmd.Output()
 	s := strings.TrimSpace(string(out))
 	wtPath := filepath.Join(root, "github", "freaxnx01", "public", "bridge", ".worktrees", "feature-x")
 	want := "cd:" + wtPath

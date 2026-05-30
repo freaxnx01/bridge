@@ -18,6 +18,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/shellbridge"
 	"github.com/freaxnx01/bridge/internal/store"
 	"github.com/freaxnx01/bridge/internal/syncer"
+	worktreepkg "github.com/freaxnx01/bridge/internal/worktree"
 )
 
 var preflightCmd = &cobra.Command{
@@ -232,12 +233,23 @@ func preflightOpen(out io.Writer, args []string) error {
 	}
 	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
 
-	// Resolve the working directory. With -w/--worktree, use the bash bridge
-	// convention `<repo.Path>/.worktrees/<wt>`. A future enhancement could
-	// consult `git worktree list --porcelain` for non-default layouts.
+	// Resolve the working directory. With -w/--worktree, consult
+	// `git worktree list --porcelain` so an existing worktree is found
+	// wherever it lives (`.claude/worktrees/`, `.worktrees/`, a custom path);
+	// when none matches, one is created under `<repo>/.worktrees/<wt>`. If the
+	// repo isn't a git checkout (or git fails), fall back to the bare
+	// `.worktrees/<wt>` convention path.
 	workDir := repo.Path
 	if worktree != "" {
-		workDir = filepath.Join(repo.Path, ".worktrees", worktree)
+		if dir, created, werr := worktreepkg.Resolve(worktreepkg.ExecRunner{}, repo.Path, worktree); werr == nil {
+			workDir = dir
+			if created {
+				fmt.Fprintf(os.Stderr, "bridge: created worktree %s\n", dir)
+			}
+		} else {
+			workDir = filepath.Join(repo.Path, ".worktrees", worktree)
+			fmt.Fprintf(os.Stderr, "bridge: worktree resolve failed (%v); using %s\n", werr, workDir)
+		}
 	}
 
 	// Explicit --agent wins. Otherwise fall back to BRIDGE_DEFAULT_AGENT so

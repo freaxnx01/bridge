@@ -10,7 +10,11 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        # macos-latest and windows-latest temporarily excluded by request —
+        # re-add them to this list to restore those CI jobs. The ubuntu job
+        # still cross-compiles the Windows binary (see the cross-compile step
+        # below).
+        os: [ubuntu-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v4

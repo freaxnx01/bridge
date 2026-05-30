@@ -113,6 +113,19 @@ Other shells: `bridge init` auto-detects bash; for zsh/fish source
 `bridge completion zsh|fish`; for PowerShell run `bridge init --shell powershell`
 (see [Windows](#windows-powershell)).
 
+**Case-insensitive completion (recommended).** Tab-completion suggests the
+canonical repo name (e.g. `FlowHub-CAS-AISE`). bash's `compgen` post-filters
+suggestions against your typed prefix **case-sensitively**, so typing a
+differently-cased prefix (`flow<tab>`) drops the suggestion unless you enable
+case-insensitive readline matching. Add to `~/.inputrc`:
+
+```
+set completion-ignore-case on
+```
+
+Then `flow<tab>` completes to `FlowHub-CAS-AISE`. (Repo *resolution* is always
+case-insensitive, so `bridge flowhub-cas-aise` opens the repo regardless.)
+
 Reload and smoke-test in a **fresh** shell:
 
 ```bash
@@ -205,7 +218,8 @@ Reattach / inspect:
 bridge <repo>            # `new-session -A` re-attaches if it exists
 bridge -a                # picker over live sessions
 bridge sessions          # list live sessions
-bridge <repo> -w feat-x  # isolated worktree session: <repo>/.worktrees/feat-x
+bridge <repo> -w feat-x  # isolated worktree session: opens the feat-x worktree
+                         # (resolved via `git worktree list`, created if absent)
 ```
 
 (On Windows the launcher uses a Windows Terminal tab instead of tmux — see
