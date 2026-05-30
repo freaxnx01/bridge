@@ -40,13 +40,27 @@ func Resolve(r Runner, repoPath, wt string) (dir string, created bool, err error
 	target := filepath.Join(repoPath, ".worktrees", wt)
 	branch := "worktree-" + wt
 	if _, aerr := r.Run(repoPath, "worktree", "add", "-b", branch, target); aerr != nil {
-		// Most likely the branch already exists; retry checking it out into
-		// the new worktree without -b.
+		// Only retry when the branch already exists (a dangling branch from a
+		// removed worktree): check it out into the new worktree without -b.
+		// Any other failure (target dir exists, no commits yet, bad name) is
+		// returned as-is so its real cause isn't masked.
+		if !branchExistsErr(aerr) {
+			return "", false, fmt.Errorf("git worktree add: %w", aerr)
+		}
 		if _, aerr2 := r.Run(repoPath, "worktree", "add", target, branch); aerr2 != nil {
 			return "", false, fmt.Errorf("git worktree add: %w", aerr2)
 		}
 	}
 	return target, true, nil
+}
+
+// branchExistsErr reports whether a `git worktree add -b <branch>` failure was
+// caused by the branch already existing — git says "a branch named '<x>'
+// already exists". The "branch" qualifier distinguishes it from a target-path
+// "'<path>' already exists" failure, which must not trigger the no-`-b` retry.
+func branchExistsErr(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "already exists") && strings.Contains(msg, "branch")
 }
 
 // matches reports whether worktree entry e is the one named wt. A worktree is

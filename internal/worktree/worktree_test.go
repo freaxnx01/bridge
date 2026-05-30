@@ -153,6 +153,30 @@ func TestResolveCreateFallsBackToExistingBranch(t *testing.T) {
 	}
 }
 
+func TestResolveCreateDoesNotRetryOnUnrelatedError(t *testing.T) {
+	// The first `worktree add -b` fails for a reason unrelated to an existing
+	// branch (here: the target dir already exists). Resolve must NOT blindly
+	// retry without -b (which would mask the real cause with a confusing
+	// "invalid reference" error); it returns the original error after one add.
+	r := &fakeRunner{listOut: porcelain, addErr: errors.New("fatal: '.worktrees/x' already exists")}
+	_, _, err := Resolve(r, "/repo/FlowHub-CAS-AISE", "x")
+	if err == nil {
+		t.Fatalf("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "already exists") {
+		t.Errorf("error should surface git's original message, got: %v", err)
+	}
+	var addCalls int
+	for _, c := range r.calls {
+		if strings.Contains(strings.Join(c, " "), "worktree add") {
+			addCalls++
+		}
+	}
+	if addCalls != 1 {
+		t.Errorf("want exactly 1 add attempt (no blind retry), got %d", addCalls)
+	}
+}
+
 func TestResolveNotGitRepoReturnsError(t *testing.T) {
 	r := &fakeRunner{listErr: errors.New("fatal: not a git repository")}
 	_, _, err := Resolve(r, "/tmp/plain-dir", "doc")
