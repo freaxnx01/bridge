@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/spf13/cobra"
-
 )
 
 // completeRepoName is a cobra ValidArgsFunction for subcommands that take a
@@ -32,13 +31,14 @@ func completeRepoName(cmd *cobra.Command, args []string, toComplete string) ([]s
 		if !strings.HasPrefix(lower, needle) {
 			continue
 		}
-		// Bash's compgen post-filters suggestions case-sensitively against
-		// the typed prefix. To get true case-insensitive completion without
-		// requiring `completion-ignore-case on` in ~/.inputrc, splice the
-		// user's typed casing onto the canonical repo name. The resolver
-		// (findRepoByName) is already case-insensitive, so accepting e.g.
-		// "BRIdge" still opens the "bridge" repo.
-		out = append(out, toComplete+r.Name[len(toComplete):])
+		// Suggest the canonical repo name (correct casing) rather than
+		// splicing the user's typed casing onto it. When the typed prefix
+		// differs in case from the canonical name (e.g. "flow" → "FlowHub"),
+		// bash's compgen post-filter drops the suggestion unless the user has
+		// `completion-ignore-case on` in their readline config — documented in
+		// docs/setup.md. The resolver (findRepoByName) is case-insensitive, so
+		// the completed canonical name always opens the right repo.
+		out = append(out, r.Name)
 	}
 	sort.Strings(out)
 	return out, cobra.ShellCompDirectiveNoFileComp

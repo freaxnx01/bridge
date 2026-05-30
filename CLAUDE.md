@@ -116,9 +116,10 @@ divergent state, duplicate work, and lost branches:
   `gh pr list`, `gh issue list`, and `CHANGELOG.md` so you don't redo work
   another session already shipped.
 - **Isolate concurrent work:** one git worktree per session — use
-  `bridge -w <name>` (lands in `<repo>/.worktrees/<name>`) so sessions don't
-  share a working tree. If you can't isolate, serialize: commit/stash before
-  another session touches the same files.
+  `bridge -w <name>`, which opens the `<name>` worktree (resolved via
+  `git worktree list`, created under `<repo>/.worktrees/<name>` if absent) so
+  sessions don't share a working tree. If you can't isolate, serialize:
+  commit/stash before another session touches the same files.
 - **Push the moment you commit:** `git push -u origin <branch>`. An unpushed
   branch is invisible to other sessions and easily lost.
 - **One branch per unit of work**, conventional-commit named (`feat/…`,

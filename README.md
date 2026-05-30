@@ -33,7 +33,7 @@ bridge -r                       # picker (no network) — local + cached remote 
 bridge --refresh                # picker + refresh remote cache (bounded by 5s)
 bridge -a / --attach            # session picker → tmux attach
 bridge -D <name>                # delete a local repo
-bridge <name> -w <wt>           # open repo at <repo>/.worktrees/<wt>
+bridge <name> -w <wt>           # open the <wt> worktree (resolves existing via git, else creates it)
 bridge <name> --agent <name>    # launch via tmux + named agent (claude|copilot|opencode|code)
 bridge <name> --rc              # pass --remote-control to claude
 bridge --version

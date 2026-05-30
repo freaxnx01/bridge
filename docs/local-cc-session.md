@@ -53,7 +53,7 @@ gh issue list
 One worktree per session:
 
 ```bash
-bridge -w <name>            # lands in <repo>/.worktrees/<name>
+bridge -w <name>            # opens the <name> worktree (resolves an existing one, else creates it)
 # or native git:
 git switch -c fix/<short-name>
 ```
