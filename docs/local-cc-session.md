@@ -6,7 +6,8 @@ section as work progresses.
 
 ## Current state (as of 2026-05-30)
 
-Open issues filed this session — both are TUI/terminal bugs, neither fixed yet:
+Two TUI/terminal bugs were filed this session: **#104** is now fixed and
+merged to `main`; **#103** is still open.
 
 - **#103** — TUI dashboard top clipped at larger terminal font sizes.
   Root cause: `model.View()` in `internal/tui/tui.go` (~lines 602-630) composes
@@ -14,13 +15,13 @@ Open issues filed this session — both are TUI/terminal bugs, neither fixed yet
   header/cmd/hint) and never reads `m.height`. Fewer rows → content overflows
   the alt-screen → top scrolls off. Fix: derive panel heights from `m.height`,
   add a min-height guard.
-- **#104** — tmux launch under **kitty** fails with
-  `missing or unsuitable terminal: xterm-kitty`. Root cause: this is *tmux's*
-  error, not bridge's — the host (Chromebook/Crostini) lacks the `xterm-kitty`
-  terminfo entry. bridge launches via `tmux new-session`/`switch-client`
-  (`internal/launcher/tmux.go:48`). Bridge-side fix options: detect an
-  unresolvable `$TERM` before launching tmux and print a hint, document it,
-  optionally sanitize `TERM` → `xterm-256color`.
+- **#104** — *fixed* (merged to `main`, PR #105). tmux launch under **kitty**
+  on a host lacking the `xterm-kitty` terminfo aborted with
+  `missing or unsuitable terminal`. bridge now detects an unresolvable `$TERM`
+  via `infocmp` before launching tmux and transparently falls back to
+  `TERM=xterm-256color` with a one-line notice (helper `maybeTermFallback` in
+  `cmd/bridge`, applied via `emitLaunch`). Disable with
+  `BRIDGE_NO_TERM_FALLBACK=1`.
 
 Known limitation (not yet an issue): the TUI dashboard only spans the
 **primary** base (`reposRoot()` in `cmd/bridge/bases.go:45`), even though
@@ -33,13 +34,9 @@ cd ~/projects/repos/github/freaxnx01/public/bridge
 claude
 ```
 
-On the **Chromebook + kitty** box (see #104), don't launch through
-`bridge`/tmux until that's fixed — run `claude` directly, or use a portable
-TERM:
-
-```bash
-TERM=xterm-256color claude
-```
+On the **Chromebook + kitty** box (see #104), bridge now auto-falls-back to
+`TERM=xterm-256color` when launching tmux, so `bridge` works directly. To opt
+out and see the raw tmux error, set `BRIDGE_NO_TERM_FALLBACK=1`.
 
 ## 2. Orient before touching anything
 
