@@ -41,6 +41,9 @@ func TestMaybeTermFallback(t *testing.T) {
 		if got := maybeTermFallback(&errBuf, argv); !reflect.DeepEqual(got, argv) {
 			t.Errorf("got %v, want unchanged", got)
 		}
+		if errBuf.Len() != 0 {
+			t.Errorf("unexpected notice: %q", errBuf.String())
+		}
 	})
 
 	t.Run("disable var set: passthrough", func(t *testing.T) {

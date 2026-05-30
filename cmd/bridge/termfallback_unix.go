@@ -3,10 +3,12 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
+	"time"
 )
 
 // fallbackTerm is the portable terminfo bridge falls back to when the
@@ -19,12 +21,16 @@ var termResolver = infocmpResolves
 
 // infocmpResolves runs `infocmp <name>` and reports success. If infocmp is not
 // on PATH we cannot tell, so we report true (resolved) to preserve current
-// behavior rather than risk a wrong fallback on a working setup.
+// behavior rather than risk a wrong fallback on a working setup. The subprocess
+// is bounded by a 500ms timeout so a hung infocmp cannot stall bridge on the
+// launch hot path.
 func infocmpResolves(name string) bool {
 	if _, err := exec.LookPath("infocmp"); err != nil {
 		return true
 	}
-	return exec.Command("infocmp", name).Run() == nil
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+	return exec.CommandContext(ctx, "infocmp", name).Run() == nil
 }
 
 // maybeTermFallback prepends `env TERM=xterm-256color` to a tmux launch argv
