@@ -168,6 +168,17 @@ Both apply to `bridge <repo>`, `bridge open <repo>`, and the interactive picker.
 
 Known agents: `claude`, `copilot`, `opencode`, `code`. See `internal/agents/agents.go`.
 
+### `exec` vs child launch (and the SSH "fall-through")
+
+To launch the session, the bash shim normally `exec`s tmux — the terminal *becomes* the session, which is what you want locally. Over SSH that backfires: the session is your SSH entry shell, so exiting or detaching tmux tears down the connection and drops you back where you `ssh`'d from. The shim therefore runs the launch as a **child** when it detects an SSH session (`SSH_CONNECTION` is set), returning you to the remote shell afterward. Overrides:
+
+| Env var | Effect |
+|---|---|
+| `BRIDGE_NO_EXEC=1` | Always run as a child (return to caller), even locally. |
+| `BRIDGE_FORCE_EXEC=1` | Always `exec` (replace the shell), even over SSH. |
+
+`BRIDGE_NO_EXEC` wins if both are set. PowerShell always runs the launch as a child (no `exec` exists), so these are bash-only.
+
 ## Windows
 
 Cross-compile via `GOOS=windows GOARCH=amd64 go build ./cmd/bridge`. Install the `.exe` on PATH as `bridge.exe`, dot-source `shims/bridge-shim.ps1` from `$PROFILE`. Launcher uses Windows Terminal (`wt.exe new-tab`). No Windows CI; the binary builds clean but the runtime path is exercised manually.

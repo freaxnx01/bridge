@@ -12,6 +12,11 @@ function bridge {
     switch -Regex ($directive) {
         '^cd:(.+)$'   { Set-Location $matches[1] }
         '^exec:(.+)$' {
+            # PowerShell has no process-replacing `exec`, so the launch always
+            # runs as a *child* (Start-Process -Wait) and control returns to this
+            # shell when the session ends. That means the bash shim's SSH
+            # "fall-through" can't occur here, and BRIDGE_NO_EXEC/BRIDGE_FORCE_EXEC
+            # (which gate exec-vs-child on bash) are no-ops on Windows by design.
             $parts = $matches[1] -split ' ', 2
             $cmd, $rest = $parts[0], $parts[1]
             Start-Process -FilePath $cmd -ArgumentList $rest -NoNewWindow -Wait

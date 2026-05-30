@@ -21,7 +21,22 @@ bridge() {
         # (single-quoted args with whitespace) is re-parsed by the shell.
         # Without eval, the unquoted parameter expansion would word-split
         # the directive as data, turning literal quotes into argv chars.
-        exec:*) eval "exec ${directive#exec:}" ;;
+        #
+        # `exec` replaces the calling shell so the terminal *becomes* the
+        # session — the right default locally. But when that shell is the entry
+        # point of an SSH session, exiting/detaching the session then tears down
+        # the SSH connection (you "fall through" to wherever you ssh'd from). So
+        # over SSH run the launch as a child instead, returning you to the remote
+        # shell afterward. Overrides: BRIDGE_NO_EXEC forces child anywhere;
+        # BRIDGE_FORCE_EXEC forces exec even over SSH (NO_EXEC wins if both set).
+        exec:*)
+            if [ -n "$BRIDGE_NO_EXEC" ] ||
+               { [ -z "$BRIDGE_FORCE_EXEC" ] && [ -n "$SSH_CONNECTION" ]; }; then
+                eval "${directive#exec:}"
+            else
+                eval "exec ${directive#exec:}"
+            fi
+            ;;
         noop)   command bridge "$@" ;;
         # `cancel` = interactive cancel (e.g. ESC in picker). Silent exit 0.
         # Distinct from noop so we don't re-run the original argv, which would

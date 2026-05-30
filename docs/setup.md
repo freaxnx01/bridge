@@ -312,6 +312,13 @@ tmux ls                        # shows the <repo> session
   scope dir and check `direnv status` / `echo $GH_TOKEN`.
 - **Completion/shim works in some shells but not others** → only shells started
   after `bridge init` (or a shim reinstall) pick it up. Open a new terminal.
+- **Over SSH, exiting/detaching the session drops you back to your local
+  machine** → the shim normally `exec`s tmux (terminal *becomes* the session),
+  which over SSH tears down the connection on exit. The shim auto-detects SSH
+  (`SSH_CONNECTION`) and runs the launch as a child so you return to the remote
+  shell. Force it either way with `BRIDGE_NO_EXEC=1` (always child) or
+  `BRIDGE_FORCE_EXEC=1` (always exec). Reinstall the shim (`just build`) and open
+  a new shell to pick up the behavior.
 
 ---
 

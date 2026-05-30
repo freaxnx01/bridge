@@ -49,12 +49,72 @@ else
 fi
 STUB
     chmod +x "$stubdir/bridge"
-    PATH="$stubdir:$PATH" bash -c "source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever" || true
+    # Pin the exec (replace) branch so this test is deterministic regardless of
+    # whether the suite itself runs over SSH (SSH_CONNECTION would otherwise
+    # flip the shim to the child branch). Quoting re-parse is what's under test.
+    PATH="$stubdir:$PATH" bash -c "unset SSH_CONNECTION BRIDGE_NO_EXEC; export BRIDGE_FORCE_EXEC=1; source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever" || true
     run cat "$out"
     [ "$status" -eq 0 ]
     [ "$output" = "hi there" ]
     rm -rf "$stubdir" "$out"
     unset TEST_OUT
+}
+
+# Emits an exec directive that prints TARGET_RAN, so a caller can tell whether
+# the target ran (it always should) and — via a marker after `bridge` — whether
+# the shim *replaced* the calling shell (exec, marker swallowed) or ran the
+# target as a *child* (marker still prints).
+_exec_probe_stub() {
+    local d=$1
+    cat > "$d/bridge" <<'STUB'
+#!/usr/bin/env bash
+if [ "$1" = "__preflight" ]; then
+    printf "exec:bash -c '%s'\n" 'echo TARGET_RAN'
+else
+    exit 0
+fi
+STUB
+    chmod +x "$d/bridge"
+}
+
+@test "exec runs as a child under SSH so the caller's shell survives (returns to prompt)" {
+    stubdir=$(mktemp -d)
+    _exec_probe_stub "$stubdir"
+    run bash -c "export PATH=\"$stubdir:\$PATH\"; export SSH_CONNECTION='1.2.3.4 5 6.7.8.9 22'; unset BRIDGE_NO_EXEC BRIDGE_FORCE_EXEC; source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever; echo AFTER_MARKER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TARGET_RAN"* ]]      # target launched
+    [[ "$output" == *"AFTER_MARKER"* ]]    # shell NOT replaced — control returned
+    rm -rf "$stubdir"
+}
+
+@test "exec replaces the calling shell locally (no SSH) — terminal becomes the session" {
+    stubdir=$(mktemp -d)
+    _exec_probe_stub "$stubdir"
+    run bash -c "export PATH=\"$stubdir:\$PATH\"; unset SSH_CONNECTION BRIDGE_NO_EXEC BRIDGE_FORCE_EXEC; source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever; echo AFTER_MARKER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TARGET_RAN"* ]]      # target launched
+    [[ "$output" != *"AFTER_MARKER"* ]]    # shell replaced via exec — marker swallowed
+    rm -rf "$stubdir"
+}
+
+@test "BRIDGE_NO_EXEC forces the child branch even with no SSH" {
+    stubdir=$(mktemp -d)
+    _exec_probe_stub "$stubdir"
+    run bash -c "export PATH=\"$stubdir:\$PATH\"; unset SSH_CONNECTION BRIDGE_FORCE_EXEC; export BRIDGE_NO_EXEC=1; source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever; echo AFTER_MARKER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TARGET_RAN"* ]]
+    [[ "$output" == *"AFTER_MARKER"* ]]
+    rm -rf "$stubdir"
+}
+
+@test "BRIDGE_FORCE_EXEC forces the exec branch even under SSH" {
+    stubdir=$(mktemp -d)
+    _exec_probe_stub "$stubdir"
+    run bash -c "export PATH=\"$stubdir:\$PATH\"; export SSH_CONNECTION='1.2.3.4 5 6.7.8.9 22' BRIDGE_FORCE_EXEC=1; unset BRIDGE_NO_EXEC; source $BATS_TEST_DIRNAME/bridge-shim.sh; bridge whatever; echo AFTER_MARKER"
+    [ "$status" -eq 0 ]
+    [[ "$output" == *"TARGET_RAN"* ]]
+    [[ "$output" != *"AFTER_MARKER"* ]]
+    rm -rf "$stubdir"
 }
 
 @test "completion meta-augmenter populates COMPREPLY when cobra returns empty (#65)" {
