@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.2.1] - 2026-05-30
+
 ### Fixed
 
 - `bridge list -r` now lists GitHub repos again — including private ones like `obsidian-it`. Two bugs stacked: remote target discovery looked for the token `.envrc` at `github/<owner>/.envrc`, but GitHub clones nest an extra visibility level (`github/<owner>/<public|private>/<repo>`), so the marker actually lives at `github/<owner>/<visibility>/.envrc` and no GitHub target was ever emitted; and the GitHub client queried `/users/{owner}/repos`, which only returns public repos even with a token. Discovery now accepts either the owner-level or visibility-nested `.envrc` (deduped to one target per owner), and `ListRepos` uses the authenticated-user endpoint `/user/repos?visibility=all&affiliation=owner` so private repos come through.

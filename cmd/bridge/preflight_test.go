@@ -743,7 +743,12 @@ func TestPreflightOpenTermFallback(t *testing.T) {
 	// "bridge" is one of the fake repos created by writeFakeRepos
 	// (github/freaxnx01/public/bridge).
 	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
-	cmd.Env = append(os.Environ(),
+	// Scrub TMUX so we exercise the non-nested launch path (direct `tmux
+	// new-session`) deterministically. Inheriting an ambient TMUX — e.g. when
+	// the suite runs inside a tmux session — would route through
+	// LaunchArgvNested (`sh -c '… tmux …'`) and break the assertion below,
+	// even though the fallback itself is applied identically either way.
+	cmd.Env = append(envWithout("TMUX"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 		"BRIDGE_NO_SYNC=1",
