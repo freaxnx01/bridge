@@ -746,7 +746,6 @@ func TestPreflightOpenTermFallback(t *testing.T) {
 		"XDG_CACHE_HOME="+cache,
 		"BRIDGE_NO_SYNC=1",
 		"TERM=definitely-not-a-real-terminfo-xyz",
-		"PATH="+os.Getenv("PATH"),
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
