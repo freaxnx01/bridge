@@ -117,6 +117,7 @@ func TestPreflightOpenWithAgentEmitsExec(t *testing.T) {
 	cmd.Env = append(envWithout("TMUX"),
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_NO_TERM_FALLBACK=1",
 	)
 	out, _ := cmd.CombinedOutput()
 	s := strings.TrimSpace(string(out))
@@ -177,6 +178,7 @@ func TestPreflightOpenWithAgentInsideTmuxEmitsSwitchClient(t *testing.T) {
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 		"TMUX=/tmp/fake-tmux,1,2", // emulate being inside a tmux client
+		"BRIDGE_NO_TERM_FALLBACK=1",
 	)
 	out, _ := cmd.CombinedOutput()
 	s := strings.TrimSpace(string(out))
@@ -266,6 +268,7 @@ func TestPreflightOpenAutoLaunchesWithDefaultAgentEnv(t *testing.T) {
 		"BRIDGE_REPOS_ROOT="+root,
 		"XDG_CACHE_HOME="+cache,
 		"BRIDGE_DEFAULT_AGENT=claude",
+		"BRIDGE_NO_TERM_FALLBACK=1",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
@@ -726,5 +729,30 @@ func TestPreflightOpenNonClaudeAgentUnchanged(t *testing.T) {
 	s := strings.TrimSpace(string(out))
 	if strings.Contains(s, " -n ") {
 		t.Errorf("non-claude agent unexpectedly got -n: %s", s)
+	}
+}
+
+func TestPreflightOpenTermFallback(t *testing.T) {
+	if _, err := exec.LookPath("infocmp"); err != nil {
+		t.Skip("infocmp not installed; fallback can't trigger")
+	}
+	root := writeFakeRepos(t)
+	cache := t.TempDir()
+	// "bridge" is one of the fake repos created by writeFakeRepos
+	// (github/freaxnx01/public/bridge).
+	cmd := bridgeCmd("__preflight", "open", "bridge", "--agent", "claude")
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_REPOS_ROOT="+root,
+		"XDG_CACHE_HOME="+cache,
+		"BRIDGE_NO_SYNC=1",
+		"TERM=definitely-not-a-real-terminfo-xyz",
+	)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	s := string(out)
+	if !strings.Contains(s, "exec:env TERM=xterm-256color tmux") {
+		t.Errorf("expected env-prefixed exec directive, got:\n%s", s)
 	}
 }

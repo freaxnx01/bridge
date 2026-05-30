@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - Launching a session over SSH no longer "falls through" to the local machine on exit/detach. The bash shim `exec`s tmux locally (terminal becomes the session) but now runs the launch as a child when an SSH session is detected (`SSH_CONNECTION`), so exiting or detaching returns you to the remote shell. New overrides: `BRIDGE_NO_EXEC=1` forces the child branch anywhere, `BRIDGE_FORCE_EXEC=1` forces `exec` even over SSH (`BRIDGE_NO_EXEC` wins if both set). PowerShell already runs launches as a child, so the knobs are bash-only.
+- Launching under a terminal whose `$TERM` has no terminfo entry on the host (e.g. **kitty** → `xterm-kitty` on a Chromebook/Crostini box without kitty's terminfo) no longer fails with tmux's `missing or unsuitable terminal`. bridge now detects the unresolvable `$TERM` (via `infocmp`) and transparently launches tmux with `TERM=xterm-256color`, printing a one-line notice. Set `BRIDGE_NO_TERM_FALLBACK=1` to disable and surface the raw error. Unix-only; the Windows `wt.exe` path is unaffected (#104).
 
 ## [2.2.0] - 2026-05-29
 

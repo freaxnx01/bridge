@@ -16,6 +16,7 @@ func TestPreflightSessionsAttachPickerFixture(t *testing.T) {
 	cmd.Env = append(os.Environ(),
 		"BRIDGE_TMUX_FIXTURE="+fixture,
 		"BRIDGE_PICKER_FIXTURE=beta",
+		"BRIDGE_NO_TERM_FALLBACK=1",
 	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
