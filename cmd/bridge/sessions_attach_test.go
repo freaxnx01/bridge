@@ -14,7 +14,10 @@ func TestPreflightSessionsAttachEmitsExec(t *testing.T) {
 	_ = os.WriteFile(fixture, []byte("bridge-main|0|1716000000\n"), 0o644)
 
 	cmd := bridgeCmd("__preflight", "sessions", "attach", "bridge-main")
-	cmd.Env = append(os.Environ(), "BRIDGE_TMUX_FIXTURE="+fixture)
+	cmd.Env = append(os.Environ(),
+		"BRIDGE_TMUX_FIXTURE="+fixture,
+		"BRIDGE_NO_TERM_FALLBACK=1",
+	)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)

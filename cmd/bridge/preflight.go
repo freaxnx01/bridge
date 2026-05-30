@@ -36,6 +36,13 @@ func runPreflight(cmd *cobra.Command, args []string) error {
 	return dispatchPreflight(cmd.OutOrStdout(), args)
 }
 
+// emitLaunch applies the TERM-fallback to a tmux launch argv (a no-op on
+// Windows / when not needed), then emits the exec directive. All tmux launch
+// paths go through here so the kitty/terminfo fallback (#104) is uniform.
+func emitLaunch(out io.Writer, argv []string) error {
+	return shellbridge.EmitExec(out, maybeTermFallback(os.Stderr, argv))
+}
+
 func dispatchPreflight(out io.Writer, args []string) error {
 	args = rewriteLegacyPreflight(args)
 	if len(args) == 0 {
@@ -129,7 +136,7 @@ func preflightPickerWithRemote(out io.Writer, refresh bool) error {
 		ensureClaudeRelabel(spec, repo, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(repo, ""), repo.Path, spec)
 		if err == nil {
-			return shellbridge.EmitExec(out, argv)
+			return emitLaunch(out, argv)
 		}
 	}
 	return shellbridge.EmitCD(out, repo.Path)
@@ -154,7 +161,7 @@ func preflightPicker(out io.Writer) error {
 		ensureClaudeRelabel(spec, r, "")
 		argv, err := launcher.New().LaunchArgv(slotIDFor(r, ""), r.Path, spec)
 		if err == nil {
-			return shellbridge.EmitExec(out, argv)
+			return emitLaunch(out, argv)
 		}
 	}
 	return shellbridge.EmitCD(out, r.Path)
@@ -278,7 +285,7 @@ func preflightOpen(out io.Writer, args []string) error {
 	if err != nil {
 		return err
 	}
-	return shellbridge.EmitExec(out, argv)
+	return emitLaunch(out, argv)
 }
 
 func preflightSessionsAttach(out io.Writer, slot string) error {
@@ -297,7 +304,7 @@ func preflightSessionsAttach(out io.Writer, slot string) error {
 		fmt.Fprintf(os.Stderr, "bridge: no session %q\n", slot)
 		os.Exit(2)
 	}
-	return shellbridge.EmitExec(out, launcher.New().AttachArgv(slot))
+	return emitLaunch(out, launcher.New().AttachArgv(slot))
 }
 
 // slotIDFor produces a deterministic tmux session name.
