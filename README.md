@@ -179,6 +179,17 @@ To launch the session, the bash shim normally `exec`s tmux — the terminal *bec
 
 `BRIDGE_NO_EXEC` wins if both are set. PowerShell always runs the launch as a child (no `exec` exists), so these are bash-only.
 
+### kitty / "missing or unsuitable terminal: xterm-kitty"
+
+If the host lacks kitty's terminfo entry (common on Chromebook/Crostini or
+fresh SSH targets), tmux would abort with `missing or unsuitable terminal:
+xterm-kitty`. bridge auto-detects an unresolvable `$TERM` (via `infocmp`) and
+launches tmux with `TERM=xterm-256color`, printing a one-line notice. To keep
+full kitty terminfo, install it on the host
+(`infocmp -x xterm-kitty | tic -x -`) or set `term xterm-256color` in
+`kitty.conf`. To disable the fallback and see the raw error, export
+`BRIDGE_NO_TERM_FALLBACK=1`.
+
 ## Windows
 
 Cross-compile via `GOOS=windows GOARCH=amd64 go build ./cmd/bridge`. Install the `.exe` on PATH as `bridge.exe`, dot-source `shims/bridge-shim.ps1` from `$PROFILE`. Launcher uses Windows Terminal (`wt.exe new-tab`). No Windows CI; the binary builds clean but the runtime path is exercised manually.
