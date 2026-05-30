@@ -150,6 +150,27 @@ func TestCompleteMetaBasenameSubstring(t *testing.T) {
 	}
 }
 
+func TestCompleteMetaCaseDifferingPrefix(t *testing.T) {
+	// `bridge flowhub<TAB>` where the canonical name is `FlowHub-CAS-AISE`:
+	// cobra's primary completion returns the canonical name, but bash's
+	// `compgen -W -- "$cur"` drops it because the typed prefix differs in
+	// case. The augmenter then calls __complete-meta, which must surface
+	// such case-differing prefix hits — only *case-matching* prefixes are
+	// cobra's job. Mirrored here with an uppercase prefix against the
+	// lowercase fixture: `BRI` must still yield canonical `bridge`.
+	root := writeFakeRepos(t)
+	cmd := bridgeCmd("__complete-meta", "BRI")
+	cmd.Env = append(os.Environ(), "BRIDGE_REPOS_ROOT="+root)
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("__complete-meta BRI: %v\n%s", err, out)
+	}
+	got := strings.TrimSpace(string(out))
+	if got != "bridge" {
+		t.Errorf("expected 'bridge' (case-differing prefix of 'BRI'), got %q", got)
+	}
+}
+
 func TestCompleteOpenNoSecondArg(t *testing.T) {
 	// Once a repo arg is present, completion should return nothing — open
 	// only takes a single positional. Asserts the `len(args) >= 1` guard.

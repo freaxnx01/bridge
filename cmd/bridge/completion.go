@@ -33,11 +33,12 @@ func completeRepoName(cmd *cobra.Command, args []string, toComplete string) ([]s
 		}
 		// Suggest the canonical repo name (correct casing) rather than
 		// splicing the user's typed casing onto it. When the typed prefix
-		// differs in case from the canonical name (e.g. "flow" → "FlowHub"),
-		// bash's compgen post-filter drops the suggestion unless the user has
-		// `completion-ignore-case on` in their readline config — documented in
-		// docs/setup.md. The resolver (findRepoByName) is case-insensitive, so
-		// the completed canonical name always opens the right repo.
+		// differs in case from the canonical name (e.g. "flowhub" → "FlowHub"),
+		// bash's compgen post-filter drops the suggestion here — but the meta
+		// augmenter shim recovers it via __complete-meta (see completeMetaCmd),
+		// so case-differing prefixes still complete without any readline tweak.
+		// The resolver (findRepoByName) is case-insensitive, so the completed
+		// canonical name always opens the right repo.
 		out = append(out, r.Name)
 	}
 	sort.Strings(out)
@@ -67,15 +68,18 @@ var completeMetaCmd = &cobra.Command{
 		if err != nil {
 			return nil
 		}
-		// Skip basename prefix hits — cobra's primary completion already
-		// handled those. We want basename substring hits (e.g. `nextgen`
-		// → `ArchiveRestApiNextGen`) plus Desc/Topics matches, all of
-		// which cobra's compgen filter would drop.
+		// Skip only *case-matching* basename prefix hits — those are exactly
+		// what cobra's primary completion kept (its `compgen -W -- "$cur"`
+		// post-filter is case-sensitive). Everything compgen drops belongs to
+		// this fallback: basename substring hits (e.g. `nextgen` →
+		// `ArchiveRestApiNextGen`), Desc/Topics matches, AND case-differing
+		// prefix hits (e.g. `flowhub` → `FlowHub-CAS-AISE`), which are prefix
+		// matches case-insensitively but get dropped by compgen's case check.
 		needle := strings.ToLower(prefix)
 		seen := map[string]bool{}
 		for _, r := range repos {
 			lname := strings.ToLower(r.Name)
-			if strings.HasPrefix(lname, needle) {
+			if strings.HasPrefix(r.Name, prefix) {
 				continue
 			}
 			match := strings.Contains(lname, needle) ||

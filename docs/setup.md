@@ -113,18 +113,20 @@ Other shells: `bridge init` auto-detects bash; for zsh/fish source
 `bridge completion zsh|fish`; for PowerShell run `bridge init --shell powershell`
 (see [Windows](#windows-powershell)).
 
-**Case-insensitive completion (recommended).** Tab-completion suggests the
-canonical repo name (e.g. `FlowHub-CAS-AISE`). bash's `compgen` post-filters
-suggestions against your typed prefix **case-sensitively**, so typing a
-differently-cased prefix (`flow<tab>`) drops the suggestion unless you enable
-case-insensitive readline matching. Add to `~/.inputrc`:
+**Case-insensitive completion.** Tab-completion suggests the canonical repo
+name (e.g. `FlowHub-CAS-AISE`). bash's `compgen` post-filters suggestions
+against your typed prefix **case-sensitively**, so a differently-cased prefix
+(`flowhub<tab>`) would normally be dropped. `bridge init` works around this by
+sourcing the meta augmenter (`bridge-completion-meta.sh`), which recovers
+case-differing prefix hits — plus substring and topic/description hits — by
+setting `COMPREPLY` directly, bypassing compgen's filter. So `flowhub<tab>`
+completes to `FlowHub-CAS-AISE` out of the box, no readline tweak required.
+(Repo *resolution* is likewise case-insensitive, so `bridge flowhub-cas-aise`
+opens the repo regardless.)
 
-```
-set completion-ignore-case on
-```
-
-Then `flow<tab>` completes to `FlowHub-CAS-AISE`. (Repo *resolution* is always
-case-insensitive, so `bridge flowhub-cas-aise` opens the repo regardless.)
+Optionally, `set completion-ignore-case on` in `~/.inputrc` also makes bash's
+own readline matching case-insensitive, which smooths the single-candidate
+inline-completion case; it is no longer required for the suggestions to appear.
 
 Reload and smoke-test in a **fresh** shell:
 
