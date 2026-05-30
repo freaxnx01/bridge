@@ -1,0 +1,75 @@
+# git-cliff configuration for bridge.
+#
+# Tailored to this repo's conventions: Conventional Commits in, Keep a Changelog
+# out (https://keepachangelog.com). Maps commit types to the canonical sections
+# (Added / Changed / Deprecated / Removed / Fixed / Security) and drops internal
+# types (docs/test/ci/chore/build/style) that don't belong in a user-facing log.
+#
+# SAFE USAGE — this repo's CHANGELOG.md is hand-curated with richer prose than
+# commit subjects. Do NOT regenerate the whole file:
+#   git cliff -o CHANGELOG.md           # ✗ overwrites curated history
+# Instead, only prepend the new unreleased entries, then hand-polish them:
+#   git cliff --unreleased --prepend CHANGELOG.md
+# For GitHub Releases notes in CI, use orhun/git-cliff-action with --latest.
+
+[changelog]
+# Matches the existing CHANGELOG.md header verbatim so regeneration is stable.
+header = """
+# Changelog
+
+All notable changes to bridge are documented here.
+
+The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+"""
+# Tera template. Group order is controlled by the `<!-- N -->` prefixes set in
+# commit_parsers; `striptags` removes the marker so the rendered heading is clean.
+body = """
+{% if version %}\
+## [{{ version | trim_start_matches(pat="v") }}] - {{ timestamp | date(format="%Y-%m-%d") }}
+{% else %}\
+## [Unreleased]
+{% endif %}\
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags | trim | upper_first }}
+{% for commit in commits %}
+- {% if commit.scope %}*({{ commit.scope }})* {% endif %}{% if commit.breaking %}[**breaking**] {% endif %}{{ commit.message | upper_first }}\
+{% endfor %}
+{% endfor %}\n
+"""
+footer = ""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = true
+# Strip trailing whitespace from subjects before rendering.
+commit_preprocessors = [
+  { pattern = '\s+$', replace = "" },
+]
+# First match wins. Internal types are skipped; the rest map to Keep a Changelog
+# sections. Breaking changes are flagged inline via `commit.breaking` in the body.
+commit_parsers = [
+  { message = "^[Mm]erge", skip = true },
+  { message = "^chore\\(release\\)", skip = true },
+  { message = "^chore\\(deps", skip = true },
+  { message = "^feat", group = "<!-- 0 -->Added" },
+  { message = "^perf", group = "<!-- 1 -->Changed" },
+  { message = "^refactor", group = "<!-- 1 -->Changed" },
+  { message = "^deprecat", group = "<!-- 2 -->Deprecated" },
+  { message = "(?i)^remove", group = "<!-- 3 -->Removed" },
+  { message = "^fix", group = "<!-- 4 -->Fixed" },
+  { message = "(?i)secur", group = "<!-- 5 -->Security" },
+  { message = "^docs", skip = true },
+  { message = "^test", skip = true },
+  { message = "^ci", skip = true },
+  { message = "^build", skip = true },
+  { message = "^style", skip = true },
+  { message = "^chore", skip = true },
+]
+protect_breaking_commits = false
+filter_commits = false
+# Match this repo's release tags (vX.Y.Z); the archive/* tag is ignored.
+tag_pattern = "v[0-9]*"
+topo_order = false
+sort_commits = "oldest"
