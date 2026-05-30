@@ -107,19 +107,24 @@ func TestDiscoverRemoteTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustWrite("github/freaxnx01/.envrc")
-	mustWrite("github/orgB/.envrc")
-	mustWrite("github/noenvrc/.gitkeep") // owner dir without .envrc → skipped
+	mustWrite("github/freaxnx01/.envrc")          // owner-level layout
+	mustWrite("github/orgB/.envrc")               // owner-level layout
+	mustWrite("github/nested/public/.envrc")      // visibility-nested layout
+	mustWrite("github/nested/private/.envrc")     // second visibility dir, same owner
+	mustWrite("github/noenvrc/.gitkeep")          // owner dir without .envrc → skipped
 	mustWrite("gitlab/freaxnx01/.envrc")
 	mustWrite("git-forgejo/.envrc")
 	mustWrite("ado/.envrc")
 
 	targets := discoverRemoteTargets(root)
 	got := map[string]bool{}
+	count := map[string]int{}
 	for _, t := range targets {
-		got[t.Forge+"|"+t.Owner] = true
+		key := t.Forge + "|" + t.Owner
+		got[key] = true
+		count[key]++
 	}
-	want := []string{"github|freaxnx01", "github|orgB", "gitlab|freaxnx01", "forgejo|freax", "ado|"}
+	want := []string{"github|freaxnx01", "github|orgB", "github|nested", "gitlab|freaxnx01", "forgejo|freax", "ado|"}
 	for _, w := range want {
 		if !got[w] {
 			t.Errorf("missing target %q in %v", w, got)
@@ -127,6 +132,10 @@ func TestDiscoverRemoteTargets(t *testing.T) {
 	}
 	if got["github|noenvrc"] {
 		t.Errorf("owner dir without .envrc should be skipped")
+	}
+	// public + private under the same owner must collapse to one target.
+	if count["github|nested"] != 1 {
+		t.Errorf("nested owner should yield exactly one target, got %d", count["github|nested"])
 	}
 }
 
