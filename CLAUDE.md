@@ -99,3 +99,27 @@ nice-to-have.
 - Tag releases as `vX.Y.Z` via `git tag` and add a `CHANGELOG.md` entry
   describing the user-visible changes per release. The `v2.0.0-go.N`
   suffix is retired alongside the bash code.
+
+## Working across sessions
+
+Multiple agent/dev sessions often run against this repo at once. To avoid
+divergent state, duplicate work, and lost branches:
+
+- **Orient before starting:** `git fetch --prune`, branch off a fresh
+  `main` (`git switch main && git pull`), then check `git branch -a`,
+  `gh pr list`, `gh issue list`, and `CHANGELOG.md` so you don't redo work
+  another session already shipped.
+- **Isolate concurrent work:** one git worktree per session — use
+  `bridge -w <name>` (lands in `<repo>/.worktrees/<name>`) so sessions don't
+  share a working tree. If you can't isolate, serialize: commit/stash before
+  another session touches the same files.
+- **Push the moment you commit:** `git push -u origin <branch>`. An unpushed
+  branch is invisible to other sessions and easily lost.
+- **One branch per unit of work**, conventional-commit named (`feat/…`,
+  `fix/…`, `docs/…`); small commits keep intent legible across sessions.
+- **Leave no residue on merge:** `gh pr merge <n> --squash --delete-branch`,
+  then `git pull` in other sessions. Rebase stale branches onto
+  `origin/main` before continuing them.
+- **Reconcile periodically:** after a release lands, close issues that
+  shipped and prune merged branches (`git fetch --prune`,
+  `git branch --merged`).
