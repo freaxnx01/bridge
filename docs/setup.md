@@ -44,6 +44,10 @@ grep -q '.local/bin' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >>
 
 ## 1. Go toolchain (for building bridge)
 
+> The `just install-go-toolchain` recipe runs **from the cloned repo**, so do
+> [step 3 (clone bridge)](#3-install-bridge-binary--shim) first if you're going
+> top-to-bottom, then come back here.
+
 Bridge needs the Go version pinned in `go.mod` (currently **1.25.0**). The repo
 fetches the exact version into `~/.local/go` for you (works on x86_64 and
 arm64, Linux and macOS):
