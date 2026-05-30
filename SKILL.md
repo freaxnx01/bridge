@@ -1,8 +1,8 @@
-[//]: # (Source of truth: .ai/base-instructions.md + .ai/stacks/go.md — update those, then regenerate this file by re-running /sync-ai-instructions)
+[//]: # (Source of truth: .ai/base-instructions.md + .ai/stacks/go.md — update those, then regenerate by re-running /sync-ai-instructions)
 
-# CLAUDE.md
+# SKILL.md — OpenClaw Agent Skill
 
-Agent context for Claude Code. Read this before taking any action in this repository.
+This skill configures OpenClaw for this project.
 
 # AI Agent Base Instructions
 
