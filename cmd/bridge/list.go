@@ -103,10 +103,16 @@ type remoteTarget struct {
 // discoverRemoteTargets walks the well-known reposRoot layout patterns and
 // emits one target per .envrc-marked directory:
 //
-//	github/<owner>/.envrc       → {github, owner}
-//	gitlab/<owner>/.envrc       → {gitlab, owner}
-//	git-forgejo/.envrc          → {forgejo, freax}
-//	ado/.envrc                  → {ado, ""}
+//	github/<owner>/[<public|private>/].envrc → {github, owner}
+//	gitlab/<owner>/.envrc                     → {gitlab, owner}
+//	git-forgejo/.envrc                        → {forgejo, freax}
+//	ado/.envrc                                → {ado, ""}
+//
+// GitHub is the only forge that nests an extra visibility level
+// (github/<owner>/<public|private>/<repo>), so its token .envrc lives at
+// github/<owner>/<visibility>/.envrc, not at owner level. We accept either
+// placement and emit a single deduped target per owner — both visibility
+// dirs carry the same token, so the first marker found is enough.
 //
 // Owner-less ADO is intentional: ADO clones live under ado/<project>/<repo>
 // where "project" is the API's project.name, not a forge-level owner.
@@ -119,8 +125,9 @@ func discoverRemoteTargets(root string) []remoteTarget {
 				continue
 			}
 			ownerDir := filepath.Join(d, o.Name())
-			if fileExists(filepath.Join(ownerDir, ".envrc")) {
-				out = append(out, remoteTarget{Dir: ownerDir, Forge: "github", Owner: o.Name()})
+			markerDir := ownerEnvrcDir(ownerDir)
+			if markerDir != "" {
+				out = append(out, remoteTarget{Dir: markerDir, Forge: "github", Owner: o.Name()})
 			}
 		}
 	}
@@ -267,6 +274,24 @@ func fetchTargetRepos(ctx context.Context, t remoteTarget) ([]forge.RepoRef, err
 		return c.ListRepos(ctx, "")
 	}
 	return nil, nil
+}
+
+// ownerEnvrcDir returns the directory holding the token .envrc for a GitHub
+// owner: ownerDir itself when github/<owner>/.envrc exists, else the first
+// immediate subdirectory carrying an .envrc (the github/<owner>/<visibility>/
+// layout). Returns "" when no marker is found. Subdir scan order follows
+// os.ReadDir's lexical sort, so the result is deterministic.
+func ownerEnvrcDir(ownerDir string) string {
+	if fileExists(filepath.Join(ownerDir, ".envrc")) {
+		return ownerDir
+	}
+	subs, _ := os.ReadDir(ownerDir)
+	for _, s := range subs {
+		if s.IsDir() && fileExists(filepath.Join(ownerDir, s.Name(), ".envrc")) {
+			return filepath.Join(ownerDir, s.Name())
+		}
+	}
+	return ""
 }
 
 func dirExists(p string) bool {

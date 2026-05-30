@@ -9,13 +9,18 @@ import (
 
 func TestGithubListRepos(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/users/freaxnx01/repos" {
+		// Must hit the authenticated-user endpoint with visibility=all so
+		// private repos come through — /users/{owner}/repos would hide them.
+		if r.URL.Path != "/user/repos" {
 			t.Errorf("path: %s", r.URL.Path)
+		}
+		if r.URL.Query().Get("visibility") != "all" {
+			t.Errorf("visibility: %q", r.URL.Query().Get("visibility"))
 		}
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`[
-          {"name":"bridge","default_branch":"main","description":"d","topics":["x"],"visibility":"public","html_url":"https://github.com/freaxnx01/bridge","ssh_url":"git@github.com:freaxnx01/bridge.git","updated_at":"2026-05-01T00:00:00Z"},
-          {"name":"other","default_branch":"main","visibility":"private","html_url":"https://github.com/freaxnx01/other","updated_at":"2026-05-02T00:00:00Z"}
+          {"name":"bridge","default_branch":"main","description":"d","topics":["x"],"visibility":"public","owner":{"login":"freaxnx01"},"html_url":"https://github.com/freaxnx01/bridge","ssh_url":"git@github.com:freaxnx01/bridge.git","updated_at":"2026-05-01T00:00:00Z"},
+          {"name":"obsidian-it","default_branch":"main","visibility":"private","owner":{"login":"freaxnx01"},"html_url":"https://github.com/freaxnx01/obsidian-it","updated_at":"2026-05-02T00:00:00Z"}
         ]`))
 	}))
 	defer srv.Close()
@@ -30,6 +35,10 @@ func TestGithubListRepos(t *testing.T) {
 	}
 	if repos[0].Forge != "github" || repos[0].Owner != "freaxnx01" || repos[0].Name != "bridge" {
 		t.Errorf("repo[0]: %+v", repos[0])
+	}
+	// The private repo must be present — this is the obsidian-it regression.
+	if repos[1].Name != "obsidian-it" || repos[1].Visibility != "private" {
+		t.Errorf("repo[1]: %+v", repos[1])
 	}
 }
 

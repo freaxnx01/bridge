@@ -58,18 +58,32 @@ type ghRepo struct {
 	HTMLURL       string    `json:"html_url"`
 	SSHURL        string    `json:"ssh_url"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
 }
 
+// ListRepos returns the repos owned by the authenticated user (the token's
+// own account), including private ones. It uses the authenticated-user
+// endpoint /user/repos rather than /users/{owner}/repos because the latter
+// only ever returns public repos, even with a valid token — so private repos
+// like obsidian-it would be invisible. Each forge owner is fetched with its
+// own token (direnv-scoped), so affiliation=owner yields exactly that owner's
+// public + private repos. The passed owner is a fallback label only.
 func (c *GithubClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
 	var raw []ghRepo
-	if err := c.get(ctx, "/users/"+owner+"/repos?per_page=100&type=owner", &raw); err != nil {
+	if err := c.get(ctx, "/user/repos?per_page=100&visibility=all&affiliation=owner", &raw); err != nil {
 		return nil, err
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
+		o := r.Owner.Login
+		if o == "" {
+			o = owner
+		}
 		out = append(out, RepoRef{
 			Forge:         "github",
-			Owner:         owner,
+			Owner:         o,
 			Name:          r.Name,
 			DefaultBranch: r.DefaultBranch,
 			Description:   r.Description,
