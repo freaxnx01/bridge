@@ -39,25 +39,31 @@ Routing thoughts in this repo follows the implementer-repo addendum:
 
 ## Essential Commands
 
+Use **`just`** as the entry point (run `just --list` to see all recipes):
+
 ```bash
-# Build + install locally (also: just build)
-make install-go
+# Build + install locally: pulls latest, rebuilds, installs binary + shim,
+# prints version. Run this to pick up a merged change in ~/.local/bin/bridge.
+just build
 
-# Build only (no install)
-make build-go
+# Full Go + shim test pass
+just test
 
-# Run all tests
-go test ./...
+# Go tests with per-test streaming output (no shim tests)
+just test-verbose
 
-# Run a single test
+# Run a single test (raw go; no just recipe for this)
 go test ./cmd/bridge -run TestXxx
 
-# Full Go + shim test pass (also: just test)
-make all
+# Install the Go toolchain pinned in go.mod (into ~/.local/go)
+just install-go-toolchain
 
-# Print version after install
+# Print installed version
 bridge --version
 ```
+
+The `just` recipes wrap the Makefile (`just build` → `make install`,
+`just test` → `make all`); invoke `just`, not `make`, directly.
 
 Cross-compile for Windows:
 
