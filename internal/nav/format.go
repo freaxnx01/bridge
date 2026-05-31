@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -113,4 +114,33 @@ func sortDashRows(rows []dashRow, liveBySlot map[string]core.Session) {
 		}
 		return rows[i].worktree < rows[j].worktree
 	})
+}
+
+// parseDirtyStatus parses `git status --porcelain=v1 --branch` output into a
+// dirtyInfo: modified counts the non-header change lines; ahead is read from the
+// "[ahead N]" token in the "## " branch header (0 when absent or no upstream).
+func parseDirtyStatus(out string) dirtyInfo {
+	info := dirtyInfo{}
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if l == "" {
+			continue
+		}
+		if strings.HasPrefix(l, "## ") {
+			if i := strings.Index(l, "[ahead "); i >= 0 {
+				rest := l[i+len("[ahead "):]
+				num := rest
+				for j, c := range rest {
+					if c < '0' || c > '9' {
+						num = rest[:j]
+						break
+					}
+				}
+				info.ahead, _ = strconv.Atoi(num)
+			}
+			continue
+		}
+		info.modified++
+	}
+	info.clean = info.modified == 0
+	return info
 }

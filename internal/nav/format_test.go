@@ -76,3 +76,26 @@ func TestBuildDashRows_MatchesSessionsAndSorts(t *testing.T) {
 		t.Errorf("row[2] = %+v, want spike with no session", got[2])
 	}
 }
+
+func TestParseDirtyStatus(t *testing.T) {
+	tests := []struct {
+		name, out       string
+		modified, ahead int
+		clean           bool
+	}{
+		{"clean tracked", "## main...origin/main\n", 0, 0, true},
+		{"dirty no ahead", "## main...origin/main\n M a.go\n?? b.go\n", 2, 0, false},
+		{"ahead only", "## main...origin/main [ahead 3]\n", 0, 3, true},
+		{"ahead+behind+dirty", "## wt...origin/wt [ahead 2, behind 1]\n M x\n", 1, 2, false},
+		{"no upstream", "## worktree-fix\n M x\n", 1, 0, false},
+		{"empty", "", 0, 0, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDirtyStatus(tt.out)
+			if got.modified != tt.modified || got.ahead != tt.ahead || got.clean != tt.clean {
+				t.Errorf("parseDirtyStatus(%q) = %+v, want modified=%d ahead=%d clean=%v", tt.out, got, tt.modified, tt.ahead, tt.clean)
+			}
+		})
+	}
+}

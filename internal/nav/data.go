@@ -2,8 +2,6 @@ package nav
 
 import (
 	"os/exec"
-	"strconv"
-	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -95,25 +93,15 @@ func loadDashRowsCmd(repo core.Repo, slotsPath string) tea.Cmd {
 	}
 }
 
-// gitDirtyCmd reports modified-file count and ahead count for one worktree.
+// gitDirtyCmd reports modified-file count and ahead count for one worktree from
+// a single `git status --porcelain=v1 --branch` call.
 func gitDirtyCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		st, err := exec.Command("git", "-C", path, "status", "--porcelain").Output()
+		out, err := exec.Command("git", "-C", path, "status", "--porcelain=v1", "--branch").Output()
 		if err != nil {
 			return dirtyMsg{path: path, err: err}
 		}
-		info := dirtyInfo{}
-		lines := strings.Split(strings.TrimRight(string(st), "\n"), "\n")
-		for _, l := range lines {
-			if strings.TrimSpace(l) != "" {
-				info.modified++
-			}
-		}
-		info.clean = info.modified == 0
-		if out, err := exec.Command("git", "-C", path, "rev-list", "--count", "@{u}..HEAD").Output(); err == nil {
-			info.ahead, _ = strconv.Atoi(strings.TrimSpace(string(out)))
-		}
-		return dirtyMsg{path: path, info: info}
+		return dirtyMsg{path: path, info: parseDirtyStatus(string(out))}
 	}
 }
 
