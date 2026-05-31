@@ -3,6 +3,9 @@ package nav
 import (
 	"testing"
 	"time"
+
+	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
 func TestHumanLastAccessed_TwoUnitsMax(t *testing.T) {
@@ -37,5 +40,39 @@ func TestFilterRepos_CaseInsensitiveSubstring(t *testing.T) {
 	}
 	if len(filterRepos(rows, "")) != 3 {
 		t.Errorf("empty filter should return all rows")
+	}
+}
+
+func TestBuildDashRows_MatchesSessionsAndSorts(t *testing.T) {
+	repo := core.Repo{Name: "bridge"}
+	wts := []worktree.Entry{
+		{Path: "/r/.worktrees/fix-x", Branch: "worktree-fix-x"},
+		{Path: "/r/.worktrees/docs", Branch: "worktree-docs"},
+		{Path: "/r/.worktrees/spike", Branch: "worktree-spike"},
+	}
+	slots := []core.Slot{
+		{ID: "s-fix", Repo: "bridge", Worktree: "fix-x", Agent: "claude"},
+		{ID: "s-docs", Repo: "freaxnx01/bridge", Worktree: "docs", Agent: "copilot"},
+	}
+	sessions := []core.Session{
+		{SlotID: "s-fix", State: "attached", LastActivity: time.Unix(1000, 0)},
+		{SlotID: "s-docs", State: "detached", LastActivity: time.Unix(2000, 0)},
+	}
+	now := time.Unix(3000, 0)
+	got := buildDashRows(repo, wts, slots, sessions, now)
+
+	if len(got) != 3 {
+		t.Fatalf("got %d rows, want 3", len(got))
+	}
+	// Sessioned rows first, sorted by last-accessed DESC (docs@2000 before fix@1000),
+	// then session-less worktrees (spike).
+	if got[0].worktree != "docs" || !got[0].hasSession || got[0].agent != "copilot" {
+		t.Errorf("row[0] = %+v, want docs/copilot/hasSession", got[0])
+	}
+	if got[1].worktree != "fix-x" || got[1].state != "attached" {
+		t.Errorf("row[1] = %+v, want fix-x/attached", got[1])
+	}
+	if got[2].worktree != "spike" || got[2].hasSession {
+		t.Errorf("row[2] = %+v, want spike with no session", got[2])
 	}
 }
