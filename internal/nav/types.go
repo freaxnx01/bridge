@@ -39,7 +39,6 @@ type repoRow struct {
 
 // sessionRow is one global active-session row on the picker.
 type sessionRow struct {
-	slotID       string
 	repoLabel    string
 	worktree     string
 	agent        string

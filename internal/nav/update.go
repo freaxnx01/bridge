@@ -98,10 +98,6 @@ func (m Model) dirtyCmds() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
-// --- Minimal helpers (completed in Tasks 9/10). Keep tight: only what compiles
-// + passes this task's tests. Task 9 REPLACES updatePicker/updateDash with full
-// versions and adds updateModal/visibleRepos; Task 10 replaces launchRow. ---
-
 // visibleRepos is the filtered local+remote row list shown in the picker.
 func (m Model) visibleRepos() []repoRow {
 	all := append(append([]repoRow{}, m.localRepos...), m.remoteRepos...)
