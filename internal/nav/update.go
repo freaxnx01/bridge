@@ -1,11 +1,15 @@
 package nav
 
 import (
+	"os"
+	"os/exec"
 	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/launcher"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -230,7 +234,66 @@ func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
 	return m, loadDashRowsCmd(repo, m.cfg.SlotsPath)
 }
 
-// launchRow (stub): completed in Task 10 (tea.ExecProcess wiring).
+// slotIDFor derives the tmux slot/session name for a worktree row: the repo
+// name + worktree, filtered to tmux-safe characters.
+func (m Model) slotIDFor(row dashRow) string {
+	base := m.repo.Name
+	if row.worktree != "" {
+		base = m.repo.Name + "-" + row.worktree
+	}
+	return tmuxSafe(base)
+}
+
+// launchArgvFor returns the argv to attach an existing session, or to create +
+// launch the default agent in a session-less worktree. Honours $TMUX (nested
+// switch-client) the same way the open path does.
+func (m Model) launchArgvFor(row dashRow) ([]string, error) {
+	l := launcher.New()
+	if row.hasSession && row.slotID != "" {
+		return l.AttachArgv(row.slotID), nil
+	}
+	name := m.cfg.DefaultAgent
+	if name == "" {
+		name = "claude"
+	}
+	spec, err := agents.Resolve(name)
+	if err != nil {
+		return nil, err
+	}
+	if len(m.cfg.AgentArgs) > 0 {
+		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
+	}
+	slot := m.slotIDFor(row)
+	if os.Getenv("TMUX") != "" {
+		return l.LaunchArgvNested(slot, row.path, spec)
+	}
+	return l.LaunchArgv(slot, row.path, spec)
+}
+
 func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
-	return m, nil
+	argv, err := m.launchArgvFor(row)
+	if err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	c := exec.Command(argv[0], argv[1:]...)
+	return m, tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
+}
+
+// tmuxSafe drops characters tmux session names disallow; empty -> "repo".
+func tmuxSafe(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		switch {
+		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
+			r == '-', r == '_', r == '.':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	if b.Len() == 0 {
+		return "repo"
+	}
+	return b.String()
 }
