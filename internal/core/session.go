@@ -42,7 +42,7 @@ func ParseTmuxList(raw string, nowUnix int64) ([]Session, error) {
 		}
 		activity, err := strconv.ParseInt(parts[3], 10, 64)
 		if err != nil {
-			return nil, fmt.Errorf("activity: %w", err)
+			activity = created // unknown/empty activity: fall back to creation time
 		}
 		state := "detached"
 		if attached > 0 {

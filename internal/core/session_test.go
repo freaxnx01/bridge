@@ -48,6 +48,19 @@ func TestParseTmuxList_FourFields_PopulatesLastActivity(t *testing.T) {
 	}
 }
 
+func TestParseTmuxList_EmptyActivity_FallsBackToCreated(t *testing.T) {
+	got, err := ParseTmuxList("x|1|1000|\n", 2000)
+	if err != nil {
+		t.Fatalf("ParseTmuxList should tolerate empty activity: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d sessions, want 1", len(got))
+	}
+	if want := time.Unix(1000, 0); !got[0].LastActivity.Equal(want) {
+		t.Errorf("LastActivity = %v, want fallback to created %v", got[0].LastActivity, want)
+	}
+}
+
 func TestParseTmuxListEmpty(t *testing.T) {
     sessions, err := ParseTmuxList("", 0)
     if err != nil {
