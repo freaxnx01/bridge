@@ -212,8 +212,8 @@ func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, createWorktreeCmd(m.repo, name)
 	case tea.KeyBackspace:
-		if n := len(m.modal.name); n > 0 {
-			m.modal.name = m.modal.name[:n-1]
+		if r := []rune(m.modal.name); len(r) > 0 {
+			m.modal.name = string(r[:len(r)-1])
 		}
 		return m, nil
 	case tea.KeyRunes:

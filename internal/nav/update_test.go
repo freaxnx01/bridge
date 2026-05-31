@@ -93,3 +93,14 @@ func TestUpdateDash_EscFromDash_ReturnsToPicker(t *testing.T) {
 		t.Errorf("esc on dash should return to picker, got screen %d", got.screen)
 	}
 }
+
+func TestUpdateModal_Backspace_IsRuneSafe(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.modal = &newWorktreeModal{name: "café"}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyBackspace})
+	got := out.(Model)
+	if got.modal.name != "caf" {
+		t.Errorf("name = %q, want %q (one rune removed, valid UTF-8)", got.modal.name, "caf")
+	}
+}
