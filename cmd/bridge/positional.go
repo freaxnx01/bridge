@@ -11,7 +11,7 @@ import (
 var knownVerbs = map[string]bool{
 	"list": true, "slots": true, "sessions": true, "presence": true,
 	"sync": true, "status": true, "issues": true, "open": true,
-	"rm": true, "watch": true, "tui": true, "__preflight": true,
+	"rm": true, "watch": true, "tui": true, "nav": true, "__preflight": true,
 	"version": true, "help": true, "completion": true,
 	"__complete": true, "__completeNoDesc": true, "__complete-meta": true,
 	"init": true, "doctor": true,
