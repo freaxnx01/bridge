@@ -1,6 +1,8 @@
 package nav
 
 import (
+	"strings"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/freaxnx01/bridge/internal/core"
@@ -93,24 +95,128 @@ func (m Model) dirtyCmds() tea.Cmd {
 // + passes this task's tests. Task 9 REPLACES updatePicker/updateDash with full
 // versions and adds updateModal/visibleRepos; Task 10 replaces launchRow. ---
 
-// updatePicker (minimal): only the filter -> list focus transition needed now.
+// visibleRepos is the filtered local+remote row list shown in the picker.
+func (m Model) visibleRepos() []repoRow {
+	all := append(append([]repoRow{}, m.localRepos...), m.remoteRepos...)
+	return filterRepos(all, m.filter.Value())
+}
+
 func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		if m.pickerFocus == focusList {
+			return m, tea.Quit
+		}
+		// fallthrough to filter editing for 'q' typed into the filter
+	case "esc":
+		return m, tea.Quit
+	}
+
 	if m.pickerFocus == focusFilter {
-		if msg.Type == tea.KeyDown {
+		switch msg.Type {
+		case tea.KeyDown:
 			m.pickerFocus = focusList
 			m.filter.Blur()
 			m.pickerSel = 0
+			return m, nil
+		case tea.KeyEnter:
+			m.pickerFocus = focusList
+			m.filter.Blur()
 			return m, nil
 		}
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
 		return m, cmd
 	}
+
+	// focusList
+	rows := m.visibleRepos()
+	switch msg.String() {
+	case "up", "k":
+		if len(rows) > 0 {
+			m.pickerSel = (m.pickerSel + len(rows) - 1) % len(rows)
+		}
+	case "down", "j":
+		if len(rows) > 0 {
+			m.pickerSel = (m.pickerSel + 1) % len(rows)
+		}
+	case "/":
+		m.pickerFocus = focusFilter
+		m.filter.Focus()
+	case "r":
+		m.remoteState = loadPending
+		return m, loadRemoteCmd(m.cfg.RemoteCache)
+	case "enter":
+		if len(rows) == 0 {
+			return m, nil
+		}
+		sel := rows[m.pickerSel]
+		if sel.remote != nil {
+			m.status = "cloning " + sel.label + "…"
+			return m, cloneCmd(m.cfg.Clone, *sel.remote)
+		}
+		return m.enterDash(sel.repo)
+	}
 	return m, nil
 }
 
-// updateDash (stub): completed in Task 9.
 func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Modal captures keys first.
+	if m.modal != nil {
+		return m.updateModal(msg)
+	}
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "esc":
+		m.screen = screenPicker
+		m.pickerFocus = focusList
+		return m, loadSessionsCmd(m.cfg.SlotsPath)
+	case "up", "k":
+		if n := len(m.dashRows) + 1; n > 0 { // +1 for the "+ create" row
+			m.dashSel = (m.dashSel + n - 1) % n
+		}
+	case "down", "j":
+		if n := len(m.dashRows) + 1; n > 0 {
+			m.dashSel = (m.dashSel + 1) % n
+		}
+	case "n":
+		m.modal = &newWorktreeModal{}
+		return m, nil
+	case "enter":
+		// The last selectable index is the "+ create" row.
+		if m.dashSel == len(m.dashRows) {
+			m.modal = &newWorktreeModal{}
+			return m, nil
+		}
+		if m.dashSel < len(m.dashRows) {
+			return m.launchRow(m.dashRows[m.dashSel])
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.modal = nil
+		return m, nil
+	case tea.KeyEnter:
+		name := strings.TrimSpace(m.modal.name)
+		if name == "" {
+			m.modal.err = "name required"
+			return m, nil
+		}
+		return m, createWorktreeCmd(m.repo, name)
+	case tea.KeyBackspace:
+		if n := len(m.modal.name); n > 0 {
+			m.modal.name = m.modal.name[:n-1]
+		}
+		return m, nil
+	case tea.KeyRunes:
+		m.modal.name += string(msg.Runes)
+		return m, nil
+	}
 	return m, nil
 }
 
