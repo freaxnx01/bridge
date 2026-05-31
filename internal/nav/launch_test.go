@@ -64,3 +64,34 @@ func TestRegisterSlotCmd_WritesSlot(t *testing.T) {
 		t.Fatalf("slot not registered: %+v", slots)
 	}
 }
+
+func TestLaunchArgvFor_InsideTmux_NestsNotSwitchClient(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-1000/default,123,0")
+	m := initialModel(Config{DefaultAgent: "claude"})
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	row := dashRow{worktree: "fix", path: "/r/.worktrees/fix"}
+	argv, err := m.launchArgvFor(row)
+	if err != nil {
+		t.Fatalf("launchArgvFor: %v", err)
+	}
+	// Issue #114: under tea.ExecProcess nav must nest via `tmux new-session`,
+	// NOT emit `sh -c ... switch-client` (which moves the outer client away).
+	if argv[0] != "tmux" || argv[1] != "new-session" {
+		t.Fatalf("inside tmux, want a tmux new-session launch, got %v", argv)
+	}
+	if strings.Contains(strings.Join(argv, " "), "switch-client") {
+		t.Errorf("argv must not switch-client under tea.ExecProcess: %v", argv)
+	}
+}
+
+func TestTmuxUnset_RemovesTmuxVars(t *testing.T) {
+	got := tmuxUnset([]string{"PATH=/bin", "TMUX=/tmp/x,1,0", "HOME=/h", "TMUX_PANE=%3"})
+	for _, e := range got {
+		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
+			t.Errorf("tmuxUnset left %q", e)
+		}
+	}
+	if len(got) != 2 {
+		t.Errorf("tmuxUnset = %v, want PATH+HOME only", got)
+	}
+}

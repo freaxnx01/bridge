@@ -252,11 +252,11 @@ func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err e
 		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
 	}
 	slot = core.SlotID(m.repo.Name, row.worktree)
-	if os.Getenv("TMUX") != "" {
-		argv, err = l.LaunchArgvNested(slot, row.path, spec)
-	} else {
-		argv, err = l.LaunchArgv(slot, row.path, spec)
-	}
+	// nav runs the launch through tea.ExecProcess (it owns the terminal), so it
+	// nests tmux directly via `new-session -A` rather than emitting a
+	// switch-client directive like the shell open path (issue #114). $TMUX is
+	// cleared in launchRow so the nested attach is permitted.
+	argv, err = l.LaunchArgv(slot, row.path, spec)
 	if err != nil {
 		return nil, "", "", err
 	}
@@ -264,8 +264,7 @@ func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err e
 }
 
 // launchArgvFor returns the argv to attach an existing session, or to create +
-// launch the default agent in a session-less worktree. Honours $TMUX (nested
-// switch-client) the same way the open path does.
+// launch the default agent in a session-less worktree.
 func (m Model) launchArgvFor(row dashRow) ([]string, error) {
 	argv, _, _, err := m.launchPlan(row)
 	return argv, err
@@ -278,6 +277,11 @@ func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	c := exec.Command(argv[0], argv[1:]...)
+	// nav already owns the terminal via tea.ExecProcess, so it nests tmux
+	// directly. Clearing $TMUX lets tmux attach/new-session nest instead of
+	// refusing ("sessions should be nested with care"); on detach the child
+	// exits and the dashboard resumes via execDoneMsg. Issue #114.
+	c.Env = tmuxUnset(os.Environ())
 	exe := tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
 	if slot == "" {
 		return m, exe // attaching an already-registered session
@@ -286,4 +290,17 @@ func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
 		ID: slot, Repo: m.repo.Name, Worktree: row.worktree, Agent: agent, Created: time.Now().UTC(),
 	})
 	return m, tea.Sequence(reg, exe)
+}
+
+// tmuxUnset returns env with TMUX and TMUX_PANE removed so a child tmux command
+// nests inside the current server instead of refusing to run.
+func tmuxUnset(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
 }
