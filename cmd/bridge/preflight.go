@@ -77,7 +77,7 @@ func dispatchPreflight(out io.Writer, args []string) error {
 	if head == "open" {
 		return preflightOpen(out, args[1:])
 	}
-	if !knownVerbs[head] && !strings.HasPrefix(head, "-") {
+	if !isKnownVerb(head) && !strings.HasPrefix(head, "-") {
 		return preflightOpen(out, args)
 	}
 	return shellbridge.EmitNoop(out)
