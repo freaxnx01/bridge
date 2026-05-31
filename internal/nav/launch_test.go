@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -41,5 +42,25 @@ func TestLaunchArgvFor_NoSession_LaunchesAgentInWorktree(t *testing.T) {
 	joined := strings.Join(argv, " ")
 	if !strings.Contains(joined, "/r/.worktrees/fix") || !strings.Contains(joined, "claude") {
 		t.Errorf("argv = %v, want dir + claude", argv)
+	}
+	if !strings.Contains(joined, "bridge-wt-fix") {
+		t.Errorf("argv = %v, want canonical session name bridge-wt-fix", argv)
+	}
+	if strings.Contains(joined, "bridge-fix") && !strings.Contains(joined, "bridge-wt-fix") {
+		t.Errorf("argv = %v, must not use legacy session name bridge-fix", argv)
+	}
+}
+
+func TestRegisterSlotCmd_WritesSlot(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "slots.json")
+	msg := registerSlotCmd(path, core.Slot{ID: "bridge-wt-fix", Repo: "bridge", Worktree: "fix", Agent: "claude"})()
+	_ = msg
+	slots, err := core.LoadSlots(path)
+	if err != nil {
+		t.Fatalf("LoadSlots: %v", err)
+	}
+	if len(slots) != 1 || slots[0].ID != "bridge-wt-fix" || slots[0].Worktree != "fix" {
+		t.Fatalf("slot not registered: %+v", slots)
 	}
 }

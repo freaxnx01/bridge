@@ -107,3 +107,4 @@ type wtCreatedMsg struct {
 	err error
 }
 type execDoneMsg struct{ err error }
+type slotRegisteredMsg struct{}

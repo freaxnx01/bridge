@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -73,6 +74,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, loadDashRowsCmd(m.repo, m.cfg.SlotsPath)
 		}
 		return m, loadSessionsCmd(m.cfg.SlotsPath)
+	case slotRegisteredMsg:
+		return m, nil
 
 	case tea.KeyMsg:
 		if m.screen == screenPicker {
@@ -234,66 +237,57 @@ func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
 	return m, loadDashRowsCmd(repo, m.cfg.SlotsPath)
 }
 
-// slotIDFor derives the tmux slot/session name for a worktree row: the repo
-// name + worktree, filtered to tmux-safe characters.
-func (m Model) slotIDFor(row dashRow) string {
-	base := m.repo.Name
-	if row.worktree != "" {
-		base = m.repo.Name + "-" + row.worktree
+// launchPlan decides attach-vs-launch for a row. For a new session it returns
+// the slot to register; for an attach it returns slot == "".
+func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err error) {
+	l := launcher.New()
+	if row.hasSession && row.slotID != "" {
+		return l.AttachArgv(row.slotID), "", "", nil
 	}
-	return tmuxSafe(base)
+	agent = m.cfg.DefaultAgent
+	if agent == "" {
+		agent = "claude"
+	}
+	spec, err := agents.Resolve(agent)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if len(m.cfg.AgentArgs) > 0 {
+		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
+	}
+	slot = core.SlotID(m.repo.Name, row.worktree)
+	if os.Getenv("TMUX") != "" {
+		argv, err = l.LaunchArgvNested(slot, row.path, spec)
+	} else {
+		argv, err = l.LaunchArgv(slot, row.path, spec)
+	}
+	if err != nil {
+		return nil, "", "", err
+	}
+	return argv, slot, agent, nil
 }
 
 // launchArgvFor returns the argv to attach an existing session, or to create +
 // launch the default agent in a session-less worktree. Honours $TMUX (nested
 // switch-client) the same way the open path does.
 func (m Model) launchArgvFor(row dashRow) ([]string, error) {
-	l := launcher.New()
-	if row.hasSession && row.slotID != "" {
-		return l.AttachArgv(row.slotID), nil
-	}
-	name := m.cfg.DefaultAgent
-	if name == "" {
-		name = "claude"
-	}
-	spec, err := agents.Resolve(name)
-	if err != nil {
-		return nil, err
-	}
-	if len(m.cfg.AgentArgs) > 0 {
-		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
-	}
-	slot := m.slotIDFor(row)
-	if os.Getenv("TMUX") != "" {
-		return l.LaunchArgvNested(slot, row.path, spec)
-	}
-	return l.LaunchArgv(slot, row.path, spec)
+	argv, _, _, err := m.launchPlan(row)
+	return argv, err
 }
 
 func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
-	argv, err := m.launchArgvFor(row)
+	argv, slot, agent, err := m.launchPlan(row)
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
 	c := exec.Command(argv[0], argv[1:]...)
-	return m, tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
-}
-
-// tmuxSafe drops characters tmux session names disallow; empty -> "repo".
-func tmuxSafe(s string) string {
-	var b strings.Builder
-	for _, r := range s {
-		switch {
-		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9',
-			r == '-', r == '_', r == '.':
-			b.WriteRune(r)
-		default:
-			b.WriteRune('-')
-		}
+	exe := tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
+	if slot == "" {
+		return m, exe // attaching an already-registered session
 	}
-	if b.Len() == 0 {
-		return "repo"
-	}
-	return b.String()
+	reg := registerSlotCmd(m.cfg.SlotsPath, core.Slot{
+		ID: slot, Repo: m.repo.Name, Worktree: row.worktree, Agent: agent, Created: time.Now().UTC(),
+	})
+	return m, tea.Sequence(reg, exe)
 }

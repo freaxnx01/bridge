@@ -76,6 +76,16 @@ func loadRemoteCmd(cachePath string) tea.Cmd {
 	}
 }
 
+// registerSlotCmd records a launched session in the slot registry so the
+// dashboard, `bridge sessions`, and `slots prune` can associate the worktree
+// with its tmux session. Best-effort, matching the open path (non-fatal).
+func registerSlotCmd(slotsPath string, slot core.Slot) tea.Cmd {
+	return func() tea.Msg {
+		_ = core.UpsertSlot(slotsPath, slot) // best-effort, matches the open path (non-fatal)
+		return slotRegisteredMsg{}
+	}
+}
+
 func loadDashRowsCmd(repo core.Repo, slotsPath string) tea.Cmd {
 	return func() tea.Msg {
 		wts, _ := worktree.List(worktree.ExecRunner{}, repo.Path)
