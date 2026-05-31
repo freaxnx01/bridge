@@ -57,6 +57,3 @@ func (m Model) Init() tea.Cmd {
 		loadRemoteCmd(m.cfg.RemoteCache),
 	)
 }
-
-// View is a stub so Model satisfies tea.Model; fleshed out in Tasks 11-13.
-func (m Model) View() string { return "" }
