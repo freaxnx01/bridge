@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bridge nav`: interactive two-screen navigator — repo picker (local + async remote, clone-on-select) and a per-repo dashboard of tmux sessions + worktrees with async git-dirty; attach/launch via tmux and return to the dashboard on detach. New `internal/nav` package; `internal/tui` and bare `bridge` unchanged.
+
 ## [2.2.1] - 2026-05-30
 
 ### Fixed
