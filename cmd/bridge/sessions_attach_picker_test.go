@@ -10,7 +10,7 @@ import (
 func TestPreflightSessionsAttachPickerFixture(t *testing.T) {
 	dir := t.TempDir()
 	fixture := filepath.Join(dir, "tmux.txt")
-	_ = os.WriteFile(fixture, []byte("alpha|0|1716000000\nbeta|1|1716000100\n"), 0o644)
+	_ = os.WriteFile(fixture, []byte("alpha|0|1716000000|1716000150\nbeta|1|1716000100|1716000180\n"), 0o644)
 
 	cmd := bridgeCmd("__preflight", "sessions", "attach")
 	cmd.Env = append(os.Environ(),

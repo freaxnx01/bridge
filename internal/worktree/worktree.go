@@ -22,6 +22,32 @@ type entry struct {
 	branch string // short branch name, "" when detached
 }
 
+// Entry is a worktree of a repo: its checkout path and short branch name
+// ("" when detached). The primary working tree is excluded by List.
+type Entry struct {
+	Path   string
+	Branch string
+}
+
+// List returns the non-primary worktrees of the repo at repoPath, parsed from
+// `git worktree list --porcelain`. The primary working tree (repoPath itself)
+// is excluded — nav lists isolated worktrees, not the main checkout.
+func List(r Runner, repoPath string) ([]Entry, error) {
+	out, err := r.Run(repoPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return nil, fmt.Errorf("git worktree list: %w", err)
+	}
+	main := filepath.Clean(repoPath)
+	var entries []Entry
+	for _, e := range parsePorcelain(out) {
+		if filepath.Clean(e.path) == main {
+			continue
+		}
+		entries = append(entries, Entry{Path: e.path, Branch: e.branch})
+	}
+	return entries, nil
+}
+
 // Resolve returns the directory to launch in for worktree wt of the repo at
 // repoPath. It returns created=true when it had to make the worktree. A
 // non-nil error means repoPath is not a usable git repo (caller may fall back

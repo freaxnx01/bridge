@@ -77,7 +77,7 @@ func dispatchPreflight(out io.Writer, args []string) error {
 	if head == "open" {
 		return preflightOpen(out, args[1:])
 	}
-	if !knownVerbs[head] && !strings.HasPrefix(head, "-") {
+	if !isKnownVerb(head) && !strings.HasPrefix(head, "-") {
 		return preflightOpen(out, args)
 	}
 	return shellbridge.EmitNoop(out)
@@ -321,11 +321,7 @@ func preflightSessionsAttach(out io.Writer, slot string) error {
 
 // slotIDFor produces a deterministic tmux session name.
 func slotIDFor(repo core.Repo, worktree string) string {
-	id := repo.Name
-	if worktree != "" {
-		id += "-wt-" + worktree
-	}
-	return id
+	return core.SlotID(repo.Name, worktree)
 }
 
 // displayName returns the claude session display name for a repo launch:

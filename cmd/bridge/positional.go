@@ -5,16 +5,31 @@ import (
 	"strings"
 )
 
-// knownVerbs lists subcommands cobra owns. Anything not in this set,
-// not starting with "-", and present as the first arg is rewritten to
-// `open <arg>` so muscle-memory `bridge bridge` opens the bridge repo.
-var knownVerbs = map[string]bool{
-	"list": true, "slots": true, "sessions": true, "presence": true,
-	"sync": true, "status": true, "issues": true, "open": true,
-	"rm": true, "watch": true, "tui": true, "__preflight": true,
-	"version": true, "help": true, "completion": true,
-	"__complete": true, "__completeNoDesc": true, "__complete-meta": true,
-	"init": true, "doctor": true,
+// isKnownVerb reports whether name is a real subcommand, so it must NOT be
+// rewritten to `open <name>`. Registered cobra commands (and their aliases) are
+// the source of truth, so new subcommands never need manual registration here.
+// cobra-internal entry points start with "__"; a small residual set covers
+// built-ins that aren't discoverable as registered commands (notably the
+// `--version` flag surfaced as `version`).
+func isKnownVerb(name string) bool {
+	if strings.HasPrefix(name, "__") {
+		return true
+	}
+	switch name {
+	case "version", "help", "completion":
+		return true
+	}
+	for _, c := range rootCmd.Commands() {
+		if c.Name() == name {
+			return true
+		}
+		for _, a := range c.Aliases {
+			if a == name {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // rewritePositional runs in main() before rootCmd.Execute().
@@ -25,7 +40,7 @@ func rewritePositional() {
 		return
 	}
 	first := os.Args[1]
-	if knownVerbs[first] {
+	if isKnownVerb(first) {
 		return
 	}
 	if strings.HasPrefix(first, "-") {

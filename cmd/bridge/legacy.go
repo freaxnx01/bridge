@@ -40,7 +40,7 @@ func rewriteLegacyArgs(args []string) []string {
 	if first == "__preflight" {
 		return args
 	}
-	if knownVerbs[first] {
+	if isKnownVerb(first) {
 		return args
 	}
 
@@ -101,7 +101,7 @@ func rewriteLegacyPreflight(args []string) []string {
 		return args
 	}
 	first := args[0]
-	if knownVerbs[first] {
+	if isKnownVerb(first) {
 		return args
 	}
 	switch first {

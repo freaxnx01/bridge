@@ -41,3 +41,21 @@ func TestPreflightPositionalEmitsCD(t *testing.T) {
 		t.Errorf("got %q", s)
 	}
 }
+
+func TestIsKnownVerb_RegisteredAndBuiltins(t *testing.T) {
+	for _, v := range []string{
+		"list", "slots", "sessions", "presence", "sync", "status", "issues",
+		"open", "rm", "watch", "tui", "nav", "init", "doctor",
+		"version", "help", "completion", "__complete", "__completeNoDesc",
+		"__complete-meta", "__preflight",
+	} {
+		if !isKnownVerb(v) {
+			t.Errorf("isKnownVerb(%q) = false, want true", v)
+		}
+	}
+	for _, v := range []string{"somerepo", "myproject", "bridge"} {
+		if isKnownVerb(v) {
+			t.Errorf("isKnownVerb(%q) = true, want false (should rewrite to open)", v)
+		}
+	}
+}

@@ -48,10 +48,13 @@ bridge list [-r] [--refresh]    # text dump (scripts); -r adds remote rows
 bridge issues                   # open issues across forges (TTL cache)
 bridge watch                    # long-running watcher of ~/projects/repos/
 bridge tui                      # Bubbletea dashboard (repos / cached issues / live sessions; Enter to act)
+bridge nav                      # interactive navigator: pick a repo → dashboard of its sessions & worktrees
 bridge --dashboard              # alias for `bridge tui` (legacy spelling)
 ```
 
 Legacy flag spellings (`-r`, `--refresh`, `-D`, `-a`/`--attach`, `--status`, `--dashboard`, `away`/`back`/`auto`) are silently rewritten to the modern subcommand form so bash-bridge muscle memory keeps working. See `cmd/bridge/legacy.go`.
+
+`bridge nav` is a two-screen interactive navigator: a repo picker (local repos plus async remote rows you can clone on select) and a per-repo dashboard of tmux sessions and worktrees with async git-dirty status. Attaching or launching a session goes through tmux and returns you to the dashboard on detach. It is Unix/tmux-only — on Windows or a non-TTY stream it prints a notice and exits.
 
 JSON output for every read command is documented in [`docs/cli-json-schema.md`](docs/cli-json-schema.md).
 

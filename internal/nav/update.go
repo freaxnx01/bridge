@@ -1,0 +1,306 @@
+package nav
+
+import (
+	"os"
+	"os/exec"
+	"strings"
+	"time"
+
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/freaxnx01/bridge/internal/agents"
+	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/launcher"
+)
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width, m.height = msg.Width, msg.Height
+		return m, nil
+
+	case reposMsg:
+		m.localRepos = msg.rows
+		return m, nil
+	case sessionsMsg:
+		m.sessions = msg.rows
+		return m, nil
+	case remoteMsg:
+		m.remoteRepos = msg.rows
+		m.remoteState = loadOK
+		return m, nil
+	case remoteErrMsg:
+		m.remoteState = loadErr
+		m.status = "remote unavailable (cached rows shown)"
+		return m, nil
+
+	case dashRowsMsg:
+		m.dashRows = msg.rows
+		if m.dashSel >= len(m.dashRows) {
+			m.dashSel = 0
+		}
+		return m, m.dirtyCmds()
+	case dirtyMsg:
+		for i := range m.dashRows {
+			if m.dashRows[i].path == msg.path {
+				if msg.err != nil {
+					m.dashRows[i].dirtyState = loadErr
+				} else {
+					m.dashRows[i].dirty = msg.info
+					m.dashRows[i].dirtyState = loadOK
+				}
+			}
+		}
+		return m, nil
+
+	case cloneDoneMsg:
+		if msg.err != nil {
+			m.status = "clone failed: " + msg.err.Error()
+			return m, nil
+		}
+		return m.enterDash(msg.repo)
+	case wtCreatedMsg:
+		if msg.err != nil {
+			if m.modal != nil {
+				m.modal.err = msg.err.Error()
+			}
+			return m, nil
+		}
+		m.modal = nil
+		return m.launchRow(msg.row)
+	case execDoneMsg:
+		// Returned from a detached tmux attach/launch: refresh the screen we're on.
+		if m.screen == screenDash {
+			return m, loadDashRowsCmd(m.repo, m.cfg.SlotsPath)
+		}
+		return m, loadSessionsCmd(m.cfg.SlotsPath)
+	case slotRegisteredMsg:
+		return m, nil
+
+	case tea.KeyMsg:
+		if m.screen == screenPicker {
+			return m.updatePicker(msg)
+		}
+		return m.updateDash(msg)
+	}
+	// spinner.TickMsg flows here; forward it.
+	var cmd tea.Cmd
+	m.spin, cmd = m.spin.Update(msg)
+	return m, cmd
+}
+
+// dirtyCmds fires a gitDirty Cmd per dashboard row.
+func (m Model) dirtyCmds() tea.Cmd {
+	cmds := make([]tea.Cmd, 0, len(m.dashRows))
+	for _, r := range m.dashRows {
+		cmds = append(cmds, gitDirtyCmd(r.path))
+	}
+	return tea.Batch(cmds...)
+}
+
+// visibleRepos is the filtered local+remote row list shown in the picker.
+func (m Model) visibleRepos() []repoRow {
+	all := append(append([]repoRow{}, m.localRepos...), m.remoteRepos...)
+	return filterRepos(all, m.filter.Value())
+}
+
+func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "ctrl+c", "q":
+		if m.pickerFocus == focusList {
+			return m, tea.Quit
+		}
+		// fallthrough to filter editing for 'q' typed into the filter
+	case "esc":
+		return m, tea.Quit
+	}
+
+	if m.pickerFocus == focusFilter {
+		switch msg.Type {
+		case tea.KeyDown:
+			m.pickerFocus = focusList
+			m.filter.Blur()
+			m.pickerSel = 0
+			return m, nil
+		case tea.KeyEnter:
+			m.pickerFocus = focusList
+			m.filter.Blur()
+			return m, nil
+		}
+		var cmd tea.Cmd
+		m.filter, cmd = m.filter.Update(msg)
+		return m, cmd
+	}
+
+	// focusList
+	rows := m.visibleRepos()
+	switch msg.String() {
+	case "up", "k":
+		if len(rows) > 0 {
+			m.pickerSel = (m.pickerSel + len(rows) - 1) % len(rows)
+		}
+	case "down", "j":
+		if len(rows) > 0 {
+			m.pickerSel = (m.pickerSel + 1) % len(rows)
+		}
+	case "/":
+		m.pickerFocus = focusFilter
+		m.filter.Focus()
+	case "r":
+		m.remoteState = loadPending
+		return m, loadRemoteCmd(m.cfg.RemoteCache)
+	case "enter":
+		if len(rows) == 0 {
+			return m, nil
+		}
+		sel := rows[m.pickerSel]
+		if sel.remote != nil {
+			m.status = "cloning " + sel.label + "…"
+			return m, cloneCmd(m.cfg.Clone, *sel.remote)
+		}
+		return m.enterDash(sel.repo)
+	}
+	return m, nil
+}
+
+func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	// Modal captures keys first.
+	if m.modal != nil {
+		return m.updateModal(msg)
+	}
+	switch msg.String() {
+	case "ctrl+c", "q":
+		return m, tea.Quit
+	case "esc":
+		m.screen = screenPicker
+		m.pickerFocus = focusList
+		return m, loadSessionsCmd(m.cfg.SlotsPath)
+	case "up", "k":
+		if n := len(m.dashRows) + 1; n > 0 { // +1 for the "+ create" row
+			m.dashSel = (m.dashSel + n - 1) % n
+		}
+	case "down", "j":
+		if n := len(m.dashRows) + 1; n > 0 {
+			m.dashSel = (m.dashSel + 1) % n
+		}
+	case "n":
+		m.modal = &newWorktreeModal{}
+		return m, nil
+	case "enter":
+		// The last selectable index is the "+ create" row.
+		if m.dashSel == len(m.dashRows) {
+			m.modal = &newWorktreeModal{}
+			return m, nil
+		}
+		if m.dashSel < len(m.dashRows) {
+			return m.launchRow(m.dashRows[m.dashSel])
+		}
+	}
+	return m, nil
+}
+
+func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEsc:
+		m.modal = nil
+		return m, nil
+	case tea.KeyEnter:
+		name := strings.TrimSpace(m.modal.name)
+		if name == "" {
+			m.modal.err = "name required"
+			return m, nil
+		}
+		return m, createWorktreeCmd(m.repo, name)
+	case tea.KeyBackspace:
+		if r := []rune(m.modal.name); len(r) > 0 {
+			m.modal.name = string(r[:len(r)-1])
+		}
+		return m, nil
+	case tea.KeyRunes:
+		m.modal.name += string(msg.Runes)
+		return m, nil
+	}
+	return m, nil
+}
+
+// enterDash switches to the dashboard for repo and loads its rows.
+func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
+	m.screen = screenDash
+	m.repo = repo
+	m.dashSel = 0
+	m.dashRows = nil
+	m.status = "ready"
+	return m, loadDashRowsCmd(repo, m.cfg.SlotsPath)
+}
+
+// launchPlan decides attach-vs-launch for a row. For a new session it returns
+// the slot to register; for an attach it returns slot == "".
+func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err error) {
+	l := launcher.New()
+	if row.hasSession && row.slotID != "" {
+		return l.AttachArgv(row.slotID), "", "", nil
+	}
+	agent = m.cfg.DefaultAgent
+	if agent == "" {
+		agent = "claude"
+	}
+	spec, err := agents.Resolve(agent)
+	if err != nil {
+		return nil, "", "", err
+	}
+	if len(m.cfg.AgentArgs) > 0 {
+		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
+	}
+	slot = core.SlotID(m.repo.Name, row.worktree)
+	// nav runs the launch through tea.ExecProcess (it owns the terminal), so it
+	// nests tmux directly via `new-session -A` rather than emitting a
+	// switch-client directive like the shell open path (issue #114). $TMUX is
+	// cleared in launchRow so the nested attach is permitted.
+	argv, err = l.LaunchArgv(slot, row.path, spec)
+	if err != nil {
+		return nil, "", "", err
+	}
+	return argv, slot, agent, nil
+}
+
+// launchArgvFor returns the argv to attach an existing session, or to create +
+// launch the default agent in a session-less worktree.
+func (m Model) launchArgvFor(row dashRow) ([]string, error) {
+	argv, _, _, err := m.launchPlan(row)
+	return argv, err
+}
+
+func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
+	argv, slot, agent, err := m.launchPlan(row)
+	if err != nil {
+		m.status = err.Error()
+		return m, nil
+	}
+	c := exec.Command(argv[0], argv[1:]...)
+	// nav already owns the terminal via tea.ExecProcess, so it nests tmux
+	// directly. Clearing $TMUX lets tmux attach/new-session nest instead of
+	// refusing ("sessions should be nested with care"); on detach the child
+	// exits and the dashboard resumes via execDoneMsg. Issue #114.
+	c.Env = tmuxUnset(os.Environ())
+	exe := tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
+	if slot == "" {
+		return m, exe // attaching an already-registered session
+	}
+	reg := registerSlotCmd(m.cfg.SlotsPath, core.Slot{
+		ID: slot, Repo: m.repo.Name, Worktree: row.worktree, Agent: agent, Created: time.Now().UTC(),
+	})
+	return m, tea.Sequence(reg, exe)
+}
+
+// tmuxUnset returns env with TMUX and TMUX_PANE removed so a child tmux command
+// nests inside the current server instead of refusing to run.
+func tmuxUnset(env []string) []string {
+	out := make([]string, 0, len(env))
+	for _, e := range env {
+		if strings.HasPrefix(e, "TMUX=") || strings.HasPrefix(e, "TMUX_PANE=") {
+			continue
+		}
+		out = append(out, e)
+	}
+	return out
+}

@@ -11,7 +11,7 @@ import (
 func TestPreflightSessionsAttachEmitsExec(t *testing.T) {
 	dir := t.TempDir()
 	fixture := filepath.Join(dir, "tmux.txt")
-	_ = os.WriteFile(fixture, []byte("bridge-main|0|1716000000\n"), 0o644)
+	_ = os.WriteFile(fixture, []byte("bridge-main|0|1716000000|1716000150\n"), 0o644)
 
 	cmd := bridgeCmd("__preflight", "sessions", "attach", "bridge-main")
 	cmd.Env = append(os.Environ(),
