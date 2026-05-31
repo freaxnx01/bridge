@@ -21,6 +21,17 @@ type slotFile struct {
 	Slots []Slot `json:"slots"`
 }
 
+// SlotID is the deterministic tmux session name / slot id for a repo and
+// optional worktree: "<repo>" or "<repo>-wt-<worktree>". It is the single source
+// of truth shared by the launch (cmd/bridge) and navigator (internal/nav) paths.
+func SlotID(repoName, worktree string) string {
+	id := repoName
+	if worktree != "" {
+		id += "-wt-" + worktree
+	}
+	return id
+}
+
 // LoadSlots reads the slot registry written by WriteSlots.
 // Empty / missing / null "slots" returns (nil, nil).
 //

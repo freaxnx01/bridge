@@ -9,6 +9,20 @@ import (
 	"time"
 )
 
+func TestSlotID_RepoAndWorktree(t *testing.T) {
+	tests := []struct{ name, repo, wt, want string }{
+		{"no worktree", "bridge", "", "bridge"},
+		{"with worktree", "bridge", "fix-x", "bridge-wt-fix-x"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := SlotID(tt.repo, tt.wt); got != tt.want {
+				t.Errorf("SlotID(%q,%q)=%q want %q", tt.repo, tt.wt, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestLoadSlots(t *testing.T) {
 	dir := t.TempDir()
 	p := filepath.Join(dir, "slots.json")

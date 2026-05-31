@@ -321,11 +321,7 @@ func preflightSessionsAttach(out io.Writer, slot string) error {
 
 // slotIDFor produces a deterministic tmux session name.
 func slotIDFor(repo core.Repo, worktree string) string {
-	id := repo.Name
-	if worktree != "" {
-		id += "-wt-" + worktree
-	}
-	return id
+	return core.SlotID(repo.Name, worktree)
 }
 
 // displayName returns the claude session display name for a repo launch:
