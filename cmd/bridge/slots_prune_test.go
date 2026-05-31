@@ -19,7 +19,7 @@ func TestSlotsPruneDropsDeadEntries(t *testing.T) {
 	]}`), 0o644)
 	// Tmux fixture lists only the alive session.
 	tmuxFix := filepath.Join(t.TempDir(), "tmux-ls")
-	_ = os.WriteFile(tmuxFix, []byte("alive|0|1764000000\n"), 0o644)
+	_ = os.WriteFile(tmuxFix, []byte("alive|0|1764000000|1764000000\n"), 0o644)
 
 	cmd := bridgeCmd("slots", "prune")
 	cmd.Env = append(os.Environ(),
@@ -52,7 +52,7 @@ func TestSlotsPruneNoStale(t *testing.T) {
 		{"id":"alive","repo":"x","agent":"claude","created":"2026-01-01T00:00:00Z"}
 	]}`), 0o644)
 	tmuxFix := filepath.Join(t.TempDir(), "tmux-ls")
-	_ = os.WriteFile(tmuxFix, []byte("alive|0|1764000000\n"), 0o644)
+	_ = os.WriteFile(tmuxFix, []byte("alive|0|1764000000|1764000000\n"), 0o644)
 
 	cmd := bridgeCmd("slots", "prune")
 	cmd.Env = append(os.Environ(),
@@ -114,7 +114,7 @@ func TestSlotsListMarksLive(t *testing.T) {
 		{"id":"dead","repo":"y","agent":"claude","created":"2026-01-01T00:00:00Z"}
 	]}`), 0o644)
 	tmuxFix := filepath.Join(t.TempDir(), "tmux-ls")
-	_ = os.WriteFile(tmuxFix, []byte("alive|0|1764000000\n"), 0o644)
+	_ = os.WriteFile(tmuxFix, []byte("alive|0|1764000000|1764000000\n"), 0o644)
 
 	cmd := bridgeCmd("slots")
 	cmd.Env = append(os.Environ(),
