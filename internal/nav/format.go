@@ -88,14 +88,14 @@ func buildDashRows(repo core.Repo, wts []worktree.Entry, slots []core.Slot, sess
 		}
 		rows = append(rows, row)
 	}
-	sortDashRows(rows, slotByWt, liveBySlot)
+	sortDashRows(rows, liveBySlot)
 	return rows
 }
 
 // sortDashRows orders sessioned rows first (last-accessed DESC), then
 // session-less rows by worktree name. Uses the live session's LastActivity for
 // the time comparison.
-func sortDashRows(rows []dashRow, slotByWt map[string]core.Slot, liveBySlot map[string]core.Session) {
+func sortDashRows(rows []dashRow, liveBySlot map[string]core.Session) {
 	activity := func(r dashRow) (time.Time, bool) {
 		if !r.hasSession {
 			return time.Time{}, false
