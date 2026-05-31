@@ -210,3 +210,19 @@ func TestResolveNotGitRepoReturnsError(t *testing.T) {
 		t.Fatalf("want error for non-git repo, got nil")
 	}
 }
+
+func TestList_ParsesPorcelain_ExcludesPrimary(t *testing.T) {
+	out := "worktree /repo\nbranch refs/heads/main\n\n" +
+		"worktree /repo/.worktrees/fix\nbranch refs/heads/worktree-fix\n\n"
+	r := &fakeRunner{listOut: out}
+	got, err := List(r, "/repo")
+	if err != nil {
+		t.Fatalf("List: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("got %d entries, want 1 (primary excluded)", len(got))
+	}
+	if got[0].Path != "/repo/.worktrees/fix" || got[0].Branch != "worktree-fix" {
+		t.Errorf("entry = %+v, want path=/repo/.worktrees/fix branch=worktree-fix", got[0])
+	}
+}
