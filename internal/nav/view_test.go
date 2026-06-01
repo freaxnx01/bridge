@@ -1,8 +1,11 @@
 package nav
 
 import (
+	"fmt"
 	"strings"
 	"testing"
+
+	"github.com/charmbracelet/lipgloss"
 
 	"github.com/freaxnx01/bridge/internal/core"
 )
@@ -29,5 +32,25 @@ func TestView_Dash_ShowsCreateRowAndRepoName(t *testing.T) {
 	out := m.View()
 	if !strings.Contains(out, "fix-x") || !strings.Contains(out, "Create new worktree") {
 		t.Errorf("dash view missing rows or create action:\n%s", out)
+	}
+}
+
+func TestView_Picker_FitsHeightWithLongList(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 80, 20
+	m.pickerFocus = focusList
+	for i := 0; i < 200; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: fmt.Sprintf("github/public/repo-%03d", i)})
+	}
+	m.pickerSel = 100
+	out := m.View()
+	if h := lipgloss.Height(out); h > m.height {
+		t.Errorf("picker render height %d exceeds terminal height %d", h, m.height)
+	}
+	if !strings.Contains(out, "more") {
+		t.Errorf("expected a scroll indicator (more) with a long list")
+	}
+	if !strings.Contains(out, "repo-100") {
+		t.Errorf("expected selected row repo-100 within the window")
 	}
 }

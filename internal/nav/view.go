@@ -76,17 +76,38 @@ func (m Model) viewPicker() string {
 	rows := m.visibleRepos()
 	if len(rows) == 0 {
 		rb.WriteString(stMuted.Render("no repos — remote rows appear once loaded"))
-	}
-	for i, r := range rows {
-		marker := "  "
-		line := "  " + r.label
-		if m.pickerFocus == focusList && i == m.pickerSel {
-			marker = stAccent.Render("▸ ")
-			line = stSel.Render(marker + r.label)
-		} else {
-			line = marker + stText.Render(r.label)
+	} else {
+		sel := m.pickerSel
+		if sel >= len(rows) {
+			sel = len(rows) - 1
 		}
-		rb.WriteString(line + "\n")
+		if sel < 0 {
+			sel = 0
+		}
+		used := 0
+		if len(sections) > 0 { // Active sessions panel already added above
+			used = lipgloss.Height(strings.Join(sections, "\n"))
+		}
+		// Budget: terminal height minus the sessions panel and this panel's
+		// chrome (borders + title + filter + blanks) + hint + scroll markers.
+		maxVisible := m.height - used - 9
+		if maxVisible < 3 {
+			maxVisible = 3
+		}
+		start, end := windowAround(len(rows), sel, maxVisible)
+		if start > 0 {
+			rb.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+		}
+		for i := start; i < end; i++ {
+			if m.pickerFocus == focusList && i == sel {
+				rb.WriteString(stSel.Render(stAccent.Render("▸ ")+rows[i].label) + "\n")
+			} else {
+				rb.WriteString("  " + stText.Render(rows[i].label) + "\n")
+			}
+		}
+		if end < len(rows) {
+			rb.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(rows)-end)) + "\n")
+		}
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 

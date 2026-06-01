@@ -28,6 +28,7 @@ func loadLocalReposCmd(roots []string) tea.Cmd {
 				rows = append(rows, repoRow{label: repoLabel(r), repo: r})
 			}
 		}
+		sortRepoRows(rows)
 		return reposMsg{rows: rows}
 	}
 }
@@ -69,6 +70,7 @@ func loadRemoteCmd(cachePath string) tea.Cmd {
 			ref := c.Repos[i]
 			rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
 		}
+		sortRepoRows(rows)
 		return remoteMsg{rows: rows}
 	}
 }

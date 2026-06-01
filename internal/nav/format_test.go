@@ -99,3 +99,35 @@ func TestParseDirtyStatus(t *testing.T) {
 		})
 	}
 }
+
+func TestSortRepoRows_AscCaseInsensitiveIgnoringRemotePrefix(t *testing.T) {
+	rows := []repoRow{
+		{label: "github/public/Zebra"},
+		{label: "↓ github/public/apple"},
+		{label: "github/public/Mango"},
+	}
+	sortRepoRows(rows)
+	got := []string{rows[0].label, rows[1].label, rows[2].label}
+	want := []string{"↓ github/public/apple", "github/public/Mango", "github/public/Zebra"}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("sortRepoRows = %v, want %v", got, want)
+		}
+	}
+}
+
+func TestWindowAround(t *testing.T) {
+	tests := []struct{ n, sel, size, ws, we int }{
+		{5, 0, 10, 0, 5},
+		{100, 0, 10, 0, 10},
+		{100, 50, 10, 45, 55},
+		{100, 99, 10, 90, 100},
+		{100, 2, 10, 0, 10},
+	}
+	for _, tt := range tests {
+		s, e := windowAround(tt.n, tt.sel, tt.size)
+		if s != tt.ws || e != tt.we {
+			t.Errorf("windowAround(%d,%d,%d)=%d,%d want %d,%d", tt.n, tt.sel, tt.size, s, e, tt.ws, tt.we)
+		}
+	}
+}

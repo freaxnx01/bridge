@@ -129,6 +129,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
+		m.pickerSel = 0
 		return m, cmd
 	}
 
