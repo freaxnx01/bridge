@@ -104,3 +104,62 @@ func TestUpdateModal_Backspace_IsRuneSafe(t *testing.T) {
 		t.Errorf("name = %q, want %q (one rune removed, valid UTF-8)", got.modal.name, "caf")
 	}
 }
+
+func TestUpdatePicker_UpAtFirst_ReturnsToFilter(t *testing.T) {
+	m := initialModel(Config{})
+	m.pickerFocus = focusList
+	m.localRepos = []repoRow{{label: "a"}, {label: "b"}}
+	m.pickerSel = 0
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if got := out.(Model); got.pickerFocus != focusFilter {
+		t.Errorf("up at first entry should return to filter, focus=%d", got.pickerFocus)
+	}
+}
+
+func TestUpdatePicker_HomeEnd(t *testing.T) {
+	m := initialModel(Config{})
+	m.pickerFocus = focusList
+	for i := 0; i < 10; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: "r"})
+	}
+	m.pickerSel = 3
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if got := out.(Model); got.pickerSel != 9 {
+		t.Errorf("End -> pickerSel=%d, want 9", got.pickerSel)
+	}
+	m.pickerSel = 5
+	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	if got := out.(Model); got.pickerSel != 0 {
+		t.Errorf("Home -> pickerSel=%d, want 0", got.pickerSel)
+	}
+}
+
+func TestUpdatePicker_PgDownClampsToLast(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 80, 20 // listPage() == 10
+	m.pickerFocus = focusList
+	for i := 0; i < 50; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: "r"})
+	}
+	m.pickerSel = 0
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	got := out.(Model)
+	if got.pickerSel != 10 {
+		t.Fatalf("PgDown from 0 -> %d, want 10", got.pickerSel)
+	}
+	got.pickerSel = 45
+	out, _ = got.Update(tea.KeyMsg{Type: tea.KeyPgDown})
+	if g2 := out.(Model); g2.pickerSel != 49 {
+		t.Errorf("PgDown near end -> %d, want 49 (clamped)", g2.pickerSel)
+	}
+}
+
+func TestUpdateDash_EndJumpsToCreateRow(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{{worktree: "a"}, {worktree: "b"}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	if got := out.(Model); got.dashSel != len(m.dashRows) {
+		t.Errorf("End -> dashSel=%d, want %d (create row)", got.dashSel, len(m.dashRows))
+	}
+}
