@@ -261,13 +261,13 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := len(m.dashRows) + 1; n > 0 {
 			m.dashSel = (m.dashSel + 1) % n
 		}
-	case "home":
+	case "home", "g":
 		m.dashSel = 0
-	case "end":
+	case "end", "G":
 		m.dashSel = len(m.dashRows)
-	case "pgup":
+	case "pgup", "ctrl+u":
 		m.dashSel = clampInt(m.dashSel-m.listPage(), 0, len(m.dashRows))
-	case "pgdown":
+	case "pgdown", "ctrl+d":
 		m.dashSel = clampInt(m.dashSel+m.listPage(), 0, len(m.dashRows))
 	case "n":
 		m.modal = &newWorktreeModal{}
