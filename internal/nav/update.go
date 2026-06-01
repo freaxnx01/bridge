@@ -137,13 +137,27 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	rows := m.visibleRepos()
 	switch msg.String() {
 	case "up", "k":
-		if len(rows) > 0 {
-			m.pickerSel = (m.pickerSel + len(rows) - 1) % len(rows)
+		if m.pickerSel <= 0 {
+			// at the top of the list: step back up into the filter
+			m.pickerFocus = focusFilter
+			m.filter.Focus()
+			return m, nil
 		}
+		m.pickerSel--
 	case "down", "j":
-		if len(rows) > 0 {
-			m.pickerSel = (m.pickerSel + 1) % len(rows)
+		if m.pickerSel < len(rows)-1 {
+			m.pickerSel++
 		}
+	case "home":
+		m.pickerSel = 0
+	case "end":
+		if len(rows) > 0 {
+			m.pickerSel = len(rows) - 1
+		}
+	case "pgup":
+		m.pickerSel = clampInt(m.pickerSel-m.listPage(), 0, len(rows)-1)
+	case "pgdown":
+		m.pickerSel = clampInt(m.pickerSel+m.listPage(), 0, len(rows)-1)
 	case "/":
 		m.pickerFocus = focusFilter
 		m.filter.Focus()
@@ -184,6 +198,14 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if n := len(m.dashRows) + 1; n > 0 {
 			m.dashSel = (m.dashSel + 1) % n
 		}
+	case "home":
+		m.dashSel = 0
+	case "end":
+		m.dashSel = len(m.dashRows)
+	case "pgup":
+		m.dashSel = clampInt(m.dashSel-m.listPage(), 0, len(m.dashRows))
+	case "pgdown":
+		m.dashSel = clampInt(m.dashSel+m.listPage(), 0, len(m.dashRows))
 	case "n":
 		m.modal = &newWorktreeModal{}
 		return m, nil
@@ -304,4 +326,27 @@ func tmuxUnset(env []string) []string {
 		out = append(out, e)
 	}
 	return out
+}
+
+// listPage is how many rows a PgUp/PgDown moves the selection — roughly one
+// screenful, derived from the terminal height.
+func (m Model) listPage() int {
+	if p := m.height - 10; p > 1 {
+		return p
+	}
+	return 1
+}
+
+// clampInt clamps v to [lo, hi]; an empty range (hi < lo) yields lo.
+func clampInt(v, lo, hi int) int {
+	switch {
+	case hi < lo:
+		return lo
+	case v < lo:
+		return lo
+	case v > hi:
+		return hi
+	default:
+		return v
+	}
 }
