@@ -1,6 +1,8 @@
 package nav
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -271,5 +273,56 @@ func TestUpdatePicker_SessionsEnter_ReturnsAttachCmd(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if cmd == nil {
 		t.Errorf("Enter on a session should return an attach command")
+	}
+}
+
+func TestUpdatePicker_EnterFilter_SingleMatchOpens(t *testing.T) {
+	m := initialModel(Config{}) // focused on filter
+	m.localRepos = []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Name: "bridge", Path: "/r"}},
+		{label: "github/public/dgraph", repo: core.Repo{Name: "dgraph", Path: "/d"}},
+	}
+	m.filter.SetValue("dgra")
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := out.(Model)
+	if got.screen != screenDash || got.repo.Name != "dgraph" {
+		t.Fatalf("Enter on a single-match filter should open it; screen=%d repo=%q", got.screen, got.repo.Name)
+	}
+}
+
+func TestUpdatePicker_EnterFilter_MultiMatchGoesToList(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{label: "alpha", repo: core.Repo{Name: "alpha"}}, {label: "alphabet", repo: core.Repo{Name: "alphabet"}}}
+	m.filter.SetValue("alph")
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := out.(Model)
+	if got.pickerFocus != focusList || got.screen != screenPicker {
+		t.Errorf("Enter on multi-match should focus the list; focus=%d screen=%d", got.pickerFocus, got.screen)
+	}
+}
+
+func TestUpdatePicker_ShiftTabCyclesBack(t *testing.T) {
+	m := initialModel(Config{})
+	m.sessions = []sessionRow{{slotID: "a"}}
+	steps := []focus{focusSessions, focusList, focusFilter} // filter -> sessions -> list -> filter
+	cur := m
+	for i, want := range steps {
+		out, _ := cur.Update(tea.KeyMsg{Type: tea.KeyShiftTab})
+		cur = out.(Model)
+		if cur.pickerFocus != want {
+			t.Fatalf("shift+tab #%d focus=%d want %d", i+1, cur.pickerFocus, want)
+		}
+	}
+}
+
+func TestLogKey_AppendsToFile(t *testing.T) {
+	p := filepath.Join(t.TempDir(), "k.log")
+	logKey(p, tea.KeyMsg{Type: tea.KeyHome})
+	b, err := os.ReadFile(p)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(b), "home") {
+		t.Errorf("log=%q, want it to contain the key string", b)
 	}
 }

@@ -25,6 +25,8 @@ var navCmd = &cobra.Command{
 			SlotsPath:    filepath.Join(cacheRoot(), "slots.json"),
 			DefaultAgent: os.Getenv("BRIDGE_DEFAULT_AGENT"),
 			AgentArgs:    strings.Fields(os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS")),
+			Version:      version,
+			DebugKeys:    navDebugPath(),
 			Once:         navOnce,
 			NameArgs: func(agent string, repo core.Repo, wt string) []string {
 				// Reuse the open path's claude labelling: prepend -n "<repo> [<wt>]"
@@ -48,4 +50,17 @@ var navCmd = &cobra.Command{
 func init() {
 	navCmd.Flags().BoolVar(&navOnce, "once", false, "render one frame to stdout and exit (smoke test, no TTY)")
 	rootCmd.AddCommand(navCmd)
+}
+
+// navDebugPath resolves BRIDGE_NAV_DEBUG into a key-log file path. "1"/"true"/
+// "yes" map to a default temp file; any other non-empty value is used verbatim.
+func navDebugPath() string {
+	switch v := os.Getenv("BRIDGE_NAV_DEBUG"); v {
+	case "":
+		return ""
+	case "1", "true", "yes":
+		return filepath.Join(os.TempDir(), "bridge-nav-keys.log")
+	default:
+		return v
+	}
 }

@@ -117,8 +117,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	hint := stMuted.Render("↑↓ move · tab panes · ⏎ open/attach · / filter · r refresh · q quit")
-	sections = append(sections, hint)
+	sections = append(sections, m.hintLine("↑↓ move · tab panes · ⏎ open/attach · / filter · r refresh · q quit"))
 	return strings.Join(sections, "\n")
 }
 
@@ -159,7 +158,7 @@ func (m Model) viewDash() string {
 
 	body := panel(w, "Sessions & Worktrees", strings.TrimRight(b.String(), "\n"))
 	hint := stMuted.Render("↑↓ move · ⏎ attach/launch · n new worktree · esc back · q quit")
-	footer := stMuted.Render("(later: Branches · Recent commits · Git status · Open issues · forge statusbar)")
+	footer := m.hintLine("(later: Branches · Recent commits · Git status · Open issues · forge statusbar)")
 
 	out := header + "\n" + body + "\n" + hint + "\n" + footer
 	if m.modal != nil {
@@ -203,4 +202,19 @@ func trunc(s string, n int) string {
 		return "…"
 	}
 	return s[:n-1] + "…"
+}
+
+// hintLine renders the muted hint left-aligned with the version pinned to the
+// bottom-right of the terminal width.
+func (m Model) hintLine(left string) string {
+	l := stMuted.Render(left)
+	if m.cfg.Version == "" || m.width <= 0 {
+		return l
+	}
+	r := stMuted.Render(m.cfg.Version)
+	gap := m.width - lipgloss.Width(l) - lipgloss.Width(r)
+	if gap < 1 {
+		gap = 1
+	}
+	return l + strings.Repeat(" ", gap) + r
 }

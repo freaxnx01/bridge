@@ -19,6 +19,9 @@ func Run(cfg Config) error {
 		fmt.Fprintln(os.Stderr, "bridge nav: needs an interactive terminal (tmux attach is unavailable here)")
 		return nil
 	}
+	if cfg.DebugKeys != "" {
+		fmt.Fprintf(os.Stderr, "bridge nav: logging keys to %s\n", cfg.DebugKeys)
+	}
 	p := tea.NewProgram(initialModel(cfg), tea.WithAltScreen())
 	_, err := p.Run()
 	return err
