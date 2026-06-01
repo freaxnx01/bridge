@@ -28,6 +28,7 @@ type Model struct {
 	dashRows []dashRow
 	dashSel  int
 	modal    *newWorktreeModal
+	details  map[string]*worktreeDetails // per-worktree panel cache, keyed by path
 
 	status string
 }
@@ -45,6 +46,7 @@ func initialModel(cfg Config) Model {
 		screen:      screenPicker,
 		pickerFocus: focusFilter,
 		filter:      ti,
+		details:     map[string]*worktreeDetails{},
 		remoteState: loadPending,
 		status:      "ready",
 	}

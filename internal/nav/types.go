@@ -69,6 +69,39 @@ type dirtyInfo struct {
 	clean    bool
 }
 
+// branchInfo is one row of the Branches panel. current marks the selected
+// worktree's HEAD ("*" in `git branch`); inWorktree marks a branch checked out
+// in some worktree ("+"), the across-worktrees overview signal.
+type branchInfo struct {
+	name       string
+	current    bool
+	inWorktree bool
+}
+
+// commitInfo is one Recent-commits row: short SHA + subject.
+type commitInfo struct {
+	sha     string
+	subject string
+}
+
+// statusFile is one Git-status row: the two-char porcelain XY code + path.
+type statusFile struct {
+	code string
+	path string
+}
+
+// worktreeDetails is the lazily-loaded, cached panel data for one worktree,
+// keyed by worktree path in Model.details. The zero value has every panel in
+// loadPending (loadState's zero value), which is what ensureDetails relies on.
+type worktreeDetails struct {
+	branches      []branchInfo
+	commits       []commitInfo
+	status        []statusFile
+	branchesState loadState
+	commitsState  loadState
+	statusState   loadState
+}
+
 // newWorktreeModal is the inline create-worktree input state.
 type newWorktreeModal struct {
 	name string
@@ -119,3 +152,18 @@ type wtCreatedMsg struct {
 }
 type execDoneMsg struct{ err error }
 type slotRegisteredMsg struct{}
+type branchesMsg struct {
+	path     string
+	branches []branchInfo
+	err      error
+}
+type commitsMsg struct {
+	path    string
+	commits []commitInfo
+	err     error
+}
+type statusMsg struct {
+	path  string
+	files []statusFile
+	err   error
+}
