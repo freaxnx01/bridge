@@ -158,6 +158,60 @@ func repoSortKey(label string) string {
 	return strings.ToLower(strings.TrimPrefix(label, "↓ "))
 }
 
+// parseBranches parses `git branch --sort=-committerdate` output. Each line's
+// first two columns are the marker: "* " current HEAD, "+ " checked out in
+// another worktree, "  " plain. Input order is preserved.
+func parseBranches(out string) []branchInfo {
+	var rows []branchInfo
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if l == "" {
+			continue
+		}
+		var b branchInfo
+		switch {
+		case strings.HasPrefix(l, "* "):
+			b.current = true
+		case strings.HasPrefix(l, "+ "):
+			b.inWorktree = true
+		}
+		b.name = strings.TrimSpace(l[min(2, len(l)):])
+		rows = append(rows, b)
+	}
+	return rows
+}
+
+// parseCommits parses `git log --format=%h%x00%s` output: one commit per line,
+// short SHA and subject separated by a NUL byte.
+func parseCommits(out string) []commitInfo {
+	var rows []commitInfo
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if l == "" {
+			continue
+		}
+		sha, subject, _ := strings.Cut(l, "\x00")
+		rows = append(rows, commitInfo{sha: sha, subject: subject})
+	}
+	return rows
+}
+
+// parseStatusFiles parses `git status --porcelain` output: a 2-char XY code, a
+// space, then the path. Rename lines carry "old -> new"; the new path is kept.
+func parseStatusFiles(out string) []statusFile {
+	var rows []statusFile
+	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
+		if len(l) < 3 {
+			continue
+		}
+		code := l[:2]
+		path := l[3:]
+		if _, after, ok := strings.Cut(path, " -> "); ok {
+			path = after
+		}
+		rows = append(rows, statusFile{code: code, path: path})
+	}
+	return rows
+}
+
 // windowAround returns the [start,end) sub-range of n items that keeps sel
 // visible within a window of at most size items (centred where possible).
 func windowAround(n, sel, size int) (start, end int) {
