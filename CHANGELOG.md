@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.1] - 2026-06-01
+
+### Changed
+
+- `bridge nav`: the picker and dashboard hints now show `g/G first/last`, and `g`/`G` + `ctrl+u`/`ctrl+d` work on the dashboard list too. These terminal-independent jumps are the reliable alternative to Home/End, which Windows Terminal sends as SS3 sequences that the TUI input layer mis-decodes.
+
 ## [2.6.0] - 2026-06-01
 
 ### Added
