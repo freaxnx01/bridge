@@ -7,6 +7,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/nav"
@@ -25,6 +26,13 @@ var navCmd = &cobra.Command{
 			DefaultAgent: os.Getenv("BRIDGE_DEFAULT_AGENT"),
 			AgentArgs:    strings.Fields(os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS")),
 			Once:         navOnce,
+			NameArgs: func(agent string, repo core.Repo, wt string) []string {
+				// Reuse the open path's claude labelling: prepend -n "<repo> [<wt>]"
+				// and install the relabel hook so /clear keeps the name.
+				spec := withClaudeName(agents.AgentSpec{Name: agent}, repo, wt)
+				ensureClaudeRelabel(agents.AgentSpec{Name: agent}, repo, wt)
+				return spec.Args
+			},
 			Clone: func(ref forge.RepoRef) (core.Repo, error) {
 				dir, err := cloneRemoteRepo(ref)
 				if err != nil {

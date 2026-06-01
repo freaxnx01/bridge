@@ -22,6 +22,7 @@ type Model struct {
 	remoteRepos []repoRow
 	remoteState loadState
 	pickerSel   int
+	sessionSel  int
 
 	repo     core.Repo
 	dashRows []dashRow

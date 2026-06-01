@@ -20,6 +20,7 @@ type focus int
 const (
 	focusFilter focus = iota
 	focusList
+	focusSessions
 )
 
 type loadState int
@@ -39,6 +40,7 @@ type repoRow struct {
 
 // sessionRow is one global active-session row on the picker.
 type sessionRow struct {
+	slotID       string
 	repoLabel    string
 	worktree     string
 	agent        string
@@ -82,7 +84,12 @@ type Config struct {
 	DefaultAgent string // BRIDGE_DEFAULT_AGENT ("" => no auto-launch agent; nav uses claude)
 	AgentArgs    []string
 	Clone        func(ref forge.RepoRef) (core.Repo, error)
-	Once         bool
+	// NameArgs returns extra leading args that label the launched agent session
+	// (e.g. claude's `-n "<repo> [<wt>]"`) and performs any pre-launch setup
+	// (the relabel hook). Injected by cmd/bridge so internal/nav stays free of
+	// agent-label/hook specifics. Nil => no naming.
+	NameArgs func(agent string, repo core.Repo, worktree string) []string
+	Once     bool
 }
 
 // --- messages ---
