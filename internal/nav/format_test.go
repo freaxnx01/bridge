@@ -131,3 +131,79 @@ func TestWindowAround(t *testing.T) {
 		}
 	}
 }
+
+func TestParseBranches_MarkersAndOrder(t *testing.T) {
+	// `git branch --sort=-committerdate` output: "* " current, "+ " in another
+	// worktree, "  " plain. Order is preserved.
+	out := "* worktree-fix-x\n+ worktree-docs\n  main\n"
+	got := parseBranches(out)
+	want := []branchInfo{
+		{name: "worktree-fix-x", current: true},
+		{name: "worktree-docs", inWorktree: true},
+		{name: "main"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseBranches len = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseBranches[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseBranches_Empty(t *testing.T) {
+	if got := parseBranches(""); len(got) != 0 {
+		t.Errorf("parseBranches(\"\") = %+v, want empty", got)
+	}
+}
+
+func TestParseCommits_ShaAndSubject(t *testing.T) {
+	// `git log --format=%h%x00%s`: short-sha NUL subject, one per line.
+	out := "a1b2c3d\x00fix login parsing\ne4f5g6h\x00wip nav panels\n"
+	got := parseCommits(out)
+	want := []commitInfo{
+		{sha: "a1b2c3d", subject: "fix login parsing"},
+		{sha: "e4f5g6h", subject: "wip nav panels"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseCommits len = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseCommits[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseCommits_Empty(t *testing.T) {
+	if got := parseCommits(""); len(got) != 0 {
+		t.Errorf("parseCommits(\"\") = %+v, want empty", got)
+	}
+}
+
+func TestParseStatusFiles_CodesAndRename(t *testing.T) {
+	// `git status --porcelain`: 2-char XY code, a space, then the path; a rename
+	// renders "old -> new" — keep the new path.
+	out := " M internal/nav/view.go\n?? scratch.txt\nR  old.go -> new.go\n"
+	got := parseStatusFiles(out)
+	want := []statusFile{
+		{code: " M", path: "internal/nav/view.go"},
+		{code: "??", path: "scratch.txt"},
+		{code: "R ", path: "new.go"},
+	}
+	if len(got) != len(want) {
+		t.Fatalf("parseStatusFiles len = %d, want %d (%+v)", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("parseStatusFiles[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestParseStatusFiles_Clean(t *testing.T) {
+	if got := parseStatusFiles(""); len(got) != 0 {
+		t.Errorf("parseStatusFiles(\"\") = %+v, want empty (clean)", got)
+	}
+}
