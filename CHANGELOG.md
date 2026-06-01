@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bridge nav` dashboard: read-only **Branches**, **Recent commits**, and **Git status** panels for the highlighted worktree, in a master-detail layout beside the worktree list. Loaded lazily and cached per worktree; refreshed on detach-return. Terminals narrower than 90 columns keep the list-only view.
+
 ## [2.6.1] - 2026-06-01
 
 ### Changed
