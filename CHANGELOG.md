@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.0] - 2026-06-01
+
+### Added
+
+- `bridge nav` list navigation: pressing **↑** at the first entry returns focus to the filter, and **Home/End/PgUp/PgDown** are supported in both the repo picker and the per-repo dashboard (End on the dashboard lands on the *create new worktree* row; PgUp/PgDown move ~one screenful). The list no longer wraps at the top/bottom.
+
 ## [2.3.1] - 2026-06-01
 
 ### Fixed
