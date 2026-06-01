@@ -144,3 +144,37 @@ func parseDirtyStatus(out string) dirtyInfo {
 	info.clean = info.modified == 0
 	return info
 }
+
+// sortRepoRows orders repo rows ascending by label, case-insensitively and
+// ignoring the remote "↓ " prefix so local and remote rows compare on the same
+// key. Stable, so equal keys keep their input order.
+func sortRepoRows(rows []repoRow) {
+	sort.SliceStable(rows, func(i, j int) bool {
+		return repoSortKey(rows[i].label) < repoSortKey(rows[j].label)
+	})
+}
+
+func repoSortKey(label string) string {
+	return strings.ToLower(strings.TrimPrefix(label, "↓ "))
+}
+
+// windowAround returns the [start,end) sub-range of n items that keeps sel
+// visible within a window of at most size items (centred where possible).
+func windowAround(n, sel, size int) (start, end int) {
+	if size <= 0 || n <= size {
+		return 0, n
+	}
+	if sel < 0 {
+		sel = 0
+	}
+	start = sel - size/2
+	if start < 0 {
+		start = 0
+	}
+	end = start + size
+	if end > n {
+		end = n
+		start = end - size
+	}
+	return start, end
+}
