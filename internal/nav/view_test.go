@@ -54,3 +54,12 @@ func TestView_Picker_FitsHeightWithLongList(t *testing.T) {
 		t.Errorf("expected selected row repo-100 within the window")
 	}
 }
+
+func TestView_Picker_ShowsVersionBottomRight(t *testing.T) {
+	m := initialModel(Config{Version: "v9.9.9"})
+	m.width, m.height = 100, 30
+	m.localRepos = []repoRow{{label: "x"}}
+	if out := m.View(); !strings.Contains(out, "v9.9.9") {
+		t.Errorf("expected version v9.9.9 in picker view")
+	}
+}

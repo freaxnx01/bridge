@@ -89,7 +89,12 @@ type Config struct {
 	// (the relabel hook). Injected by cmd/bridge so internal/nav stays free of
 	// agent-label/hook specifics. Nil => no naming.
 	NameArgs func(agent string, repo core.Repo, worktree string) []string
-	Once     bool
+	// Version is the vX.Y.Z string shown bottom-right (injected by cmd/bridge).
+	Version string
+	// DebugKeys, when non-empty, is a file path each key press is appended to
+	// (set via BRIDGE_NAV_DEBUG) for diagnosing key handling.
+	DebugKeys string
+	Once      bool
 }
 
 // --- messages ---

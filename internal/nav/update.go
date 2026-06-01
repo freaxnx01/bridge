@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"strings"
@@ -78,6 +79,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 
 	case tea.KeyMsg:
+		if m.cfg.DebugKeys != "" {
+			logKey(m.cfg.DebugKeys, msg)
+		}
 		if m.screen == screenPicker {
 			return m.updatePicker(msg)
 		}
@@ -115,6 +119,8 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	case "tab":
 		return m.cyclePickerFocus(), nil
+	case "shift+tab":
+		return m.cyclePickerFocusBack(), nil
 	}
 
 	if m.pickerFocus == focusSessions {
@@ -164,6 +170,9 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickerSel = 0
 			return m, nil
 		case tea.KeyEnter:
+			if rows := m.visibleRepos(); len(rows) == 1 {
+				return m.openRepoRow(rows[0])
+			}
 			m.pickerFocus = focusList
 			m.filter.Blur()
 			return m, nil
@@ -227,12 +236,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if len(rows) == 0 {
 			return m, nil
 		}
-		sel := rows[m.pickerSel]
-		if sel.remote != nil {
-			m.status = "cloning " + sel.label + "…"
-			return m, cloneCmd(m.cfg.Clone, *sel.remote)
-		}
-		return m.enterDash(sel.repo)
+		return m.openRepoRow(rows[m.pickerSel])
 	}
 	return m, nil
 }
@@ -440,4 +444,44 @@ func execArgvCmd(argv []string) tea.Cmd {
 	c := exec.Command(argv[0], argv[1:]...)
 	c.Env = tmuxUnset(os.Environ())
 	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
+}
+
+// openRepoRow opens a picker row: clone a remote row, else enter its dashboard.
+func (m Model) openRepoRow(row repoRow) (tea.Model, tea.Cmd) {
+	if row.remote != nil {
+		m.status = "cloning " + row.label + "…"
+		return m, cloneCmd(m.cfg.Clone, *row.remote)
+	}
+	return m.enterDash(row.repo)
+}
+
+// cyclePickerFocusBack reverses cyclePickerFocus (Shift+Tab):
+// filter -> sessions (when any) -> list -> filter.
+func (m Model) cyclePickerFocusBack() Model {
+	switch m.pickerFocus {
+	case focusFilter:
+		m.filter.Blur()
+		if len(m.sessions) > 0 {
+			m.pickerFocus = focusSessions
+			m.sessionSel = clampInt(m.sessionSel, 0, len(m.sessions)-1)
+		} else {
+			m.pickerFocus = focusList
+		}
+	case focusSessions:
+		m.pickerFocus = focusList
+	default: // focusList
+		m.pickerFocus = focusFilter
+		m.filter.Focus()
+	}
+	return m
+}
+
+// logKey appends a key diagnostic line to path (BRIDGE_NAV_DEBUG).
+func logKey(path string, k tea.KeyMsg) {
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o644)
+	if err != nil {
+		return
+	}
+	defer f.Close()
+	fmt.Fprintf(f, "string=%q type=%d runes=%q alt=%v\n", k.String(), int(k.Type), string(k.Runes), k.Alt)
 }
