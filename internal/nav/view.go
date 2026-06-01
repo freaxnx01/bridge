@@ -117,7 +117,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	sections = append(sections, m.hintLine("↑↓ move · tab panes · ⏎ open/attach · / filter · r refresh · q quit"))
+	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · tab panes · q quit"))
 	return strings.Join(sections, "\n")
 }
 
@@ -157,7 +157,7 @@ func (m Model) viewDash() string {
 	b.WriteString(createLine)
 
 	body := panel(w, "Sessions & Worktrees", strings.TrimRight(b.String(), "\n"))
-	hint := stMuted.Render("↑↓ move · ⏎ attach/launch · n new worktree · esc back · q quit")
+	hint := m.hintLine("↑↓ move · g/G first/last · ⏎ attach/launch · n new worktree · esc back · q quit")
 	footer := m.hintLine("(later: Branches · Recent commits · Git status · Open issues · forge statusbar)")
 
 	out := header + "\n" + body + "\n" + hint + "\n" + footer

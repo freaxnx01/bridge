@@ -326,3 +326,18 @@ func TestLogKey_AppendsToFile(t *testing.T) {
 		t.Errorf("log=%q, want it to contain the key string", b)
 	}
 }
+
+func TestUpdateDash_gG_Aliases(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{{worktree: "a"}, {worktree: "b"}, {worktree: "c"}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if got := out.(Model); got.dashSel != len(m.dashRows) { // create row
+		t.Errorf("G -> dashSel=%d, want %d", got.dashSel, len(m.dashRows))
+	}
+	m.dashSel = 2
+	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if got := out.(Model); got.dashSel != 0 {
+		t.Errorf("g -> dashSel=%d, want 0", got.dashSel)
+	}
+}
