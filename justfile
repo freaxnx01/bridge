@@ -7,6 +7,11 @@ build:
     make install
     bridge --version
 
+# Sync current branch with its remote: rebase onto upstream, then push local commits.
+sync:
+    git pull --rebase --autostash
+    git push
+
 # Run Go + shim tests.
 test:
     make all
