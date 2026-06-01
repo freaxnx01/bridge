@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-06-01
+
+### Added
+
+- `bridge nav`: the **Active sessions** panel is now selectable — press **↑** from the filter (or **Tab**) to move into it and **Enter** to attach to the highlighted session. Claude sessions launched from nav are now **named** `<repo> [<worktree>]` (matching `bridge open`). Added terminal-independent list navigation: **`g`/`G`** (first/last) and **`ctrl+u`/`ctrl+d`** (page) alongside Home/End/PgUp/PgDown.
+
 ## [2.4.1] - 2026-06-01
 
 ### Fixed
