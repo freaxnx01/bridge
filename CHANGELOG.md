@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.6.0] - 2026-06-01
+
+### Added
+
+- `bridge nav`: the bridge **version** (`vX.Y.Z`) is shown in the bottom-right corner; **Shift+Tab** cycles panes backwards (reverse of Tab); pressing **Enter** in the filter when exactly one repo matches opens it directly. New **`BRIDGE_NAV_DEBUG`** env var: set it to a file path (or `1` for a temp file) to append every key press (string/type/runes) for diagnosing key handling.
+
 ## [2.5.0] - 2026-06-01
 
 ### Added
