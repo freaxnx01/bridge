@@ -63,3 +63,54 @@ func TestView_Picker_ShowsVersionBottomRight(t *testing.T) {
 		t.Errorf("expected version v9.9.9 in picker view")
 	}
 }
+
+func TestViewDash_Wide_ShowsDetailPanels(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 130, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", branch: "worktree-fix-x", path: "/r/fix-x"}}
+	m.dashSel = 0
+	m.details["/r/fix-x"] = &worktreeDetails{
+		branches:      []branchInfo{{name: "worktree-fix-x", current: true}, {name: "main"}},
+		commits:       []commitInfo{{sha: "a1b2c3d", subject: "fix login"}},
+		status:        []statusFile{{code: " M", path: "internal/nav/view.go"}},
+		branchesState: loadOK, commitsState: loadOK, statusState: loadOK,
+	}
+	out := m.View()
+	for _, want := range []string{"Branches", "Recent commits", "Git status", "fix login", "a1b2c3d"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("wide dash view missing %q\n%s", want, out)
+		}
+	}
+}
+
+func TestViewDash_Narrow_FallsBackToListOnly(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 80, 30 // below dashTwoColMin
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", branch: "worktree-fix-x", path: "/r/fix-x"}}
+	out := m.View()
+	if !strings.Contains(out, "Sessions & Worktrees") {
+		t.Errorf("narrow dash should still show the worktree list")
+	}
+	for _, absent := range []string{"Recent commits", "Git status"} {
+		if strings.Contains(out, absent) {
+			t.Errorf("narrow dash should not render the %q panel", absent)
+		}
+	}
+}
+
+func TestViewDash_CreateRowSelected_ShowsHint(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 130, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	m.dashSel = 1 // the "+ create" row
+	out := m.View()
+	if !strings.Contains(out, "select a worktree") {
+		t.Errorf("create-row selection should show the select-a-worktree hint\n%s", out)
+	}
+}

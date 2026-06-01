@@ -27,6 +27,10 @@ var (
 	stBad    = lipgloss.NewStyle().Foreground(colBad)
 )
 
+// dashTwoColMin is the minimum terminal width for the master-detail dashboard;
+// below it the dashboard renders list-only (today's layout), unchanged.
+const dashTwoColMin = 90
+
 func panel(w int, title, body string) string {
 	head := stTitle.Render(" " + title + " ")
 	return lipgloss.NewStyle().
@@ -125,6 +129,31 @@ func (m Model) viewDash() string {
 	w := m.width
 	header := panel(w, "bridge nav · "+m.repo.Name, stMuted.Render(m.repo.Path))
 
+	var body string
+	if w < dashTwoColMin {
+		body = panel(w, "Sessions & Worktrees", m.dashListBody(false))
+	} else {
+		leftW := clampInt(w*5/12, 40, 64)
+		rightW := w - leftW
+		left := panel(leftW, "Sessions & Worktrees", m.dashListBody(true))
+		right := m.detailColumn(rightW)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+	}
+
+	hint := m.hintLine("↑↓ move · g/G first/last · ⏎ attach/launch · n new worktree · esc back · q quit")
+	footer := m.hintLine("(later: Open issues · forge statusbar)")
+
+	out := header + "\n" + body + "\n" + hint + "\n" + footer
+	if m.modal != nil {
+		out += "\n" + m.viewModal()
+	}
+	return out
+}
+
+// dashListBody renders the worktree rows + the "+ create" row. compact drops the
+// branch/agent/last-accessed columns so the list fits the narrower left column
+// of the two-column layout; the full form is today's single-column layout.
+func (m Model) dashListBody(compact bool) string {
 	var b strings.Builder
 	for i, r := range m.dashRows {
 		dot := stMuted.Render("·")
@@ -138,12 +167,17 @@ func (m Model) viewDash() string {
 		if agent == "" {
 			agent = "—"
 		}
-		la := r.lastAccessed
-		if !r.hasSession {
-			la = "(no session)"
+		var line string
+		if compact {
+			line = fmt.Sprintf("%s %-18s %-7s %s", dot, trunc(r.worktree, 18), trunc(agent, 7), m.dirtyView(r))
+		} else {
+			la := r.lastAccessed
+			if !r.hasSession {
+				la = "(no session)"
+			}
+			line = fmt.Sprintf("%s %-18s %-14s %-8s %-12s %s",
+				dot, trunc(r.worktree, 18), trunc(r.branch, 14), agent, la, m.dirtyView(r))
 		}
-		line := fmt.Sprintf("%s %-18s %-14s %-8s %-12s %s",
-			dot, trunc(r.worktree, 18), trunc(r.branch, 14), agent, la, m.dirtyView(r))
 		if i == m.dashSel {
 			line = stSel.Render(line)
 		}
@@ -155,16 +189,7 @@ func (m Model) viewDash() string {
 		createLine = stSel.Render(stAccent.Render("▸ ") + "+ Create new worktree…")
 	}
 	b.WriteString(createLine)
-
-	body := panel(w, "Sessions & Worktrees", strings.TrimRight(b.String(), "\n"))
-	hint := m.hintLine("↑↓ move · g/G first/last · ⏎ attach/launch · n new worktree · esc back · q quit")
-	footer := m.hintLine("(later: Branches · Recent commits · Git status · Open issues · forge statusbar)")
-
-	out := header + "\n" + body + "\n" + hint + "\n" + footer
-	if m.modal != nil {
-		out += "\n" + m.viewModal()
-	}
-	return out
+	return strings.TrimRight(b.String(), "\n")
 }
 
 func (m Model) dirtyView(r dashRow) string {
@@ -202,6 +227,127 @@ func trunc(s string, n int) string {
 		return "…"
 	}
 	return s[:n-1] + "…"
+}
+
+// detailColumn renders the three stacked detail panels for the highlighted
+// worktree, or a hint when the "+ create" row is selected.
+func (m Model) detailColumn(w int) string {
+	path := m.selectedWorktreePath()
+	if path == "" {
+		return panel(w, "Details", stMuted.Render("select a worktree to see its branches, commits & status"))
+	}
+	per := (m.height - 14) / 3
+	if per < 3 {
+		per = 3
+	}
+	d := m.details[path]
+	branches := panel(w, "Branches", m.branchesBody(d, per))
+	commits := panel(w, "Recent commits", m.commitsBody(d, per))
+	status := panel(w, "Git status", m.statusBody(d, per))
+	return lipgloss.JoinVertical(lipgloss.Left, branches, commits, status)
+}
+
+// panelState renders the spinner/unavailable text shared by the three panels
+// while their data is loading or after an error; ok == true means render rows.
+func (m Model) panelState(state loadState) (text string, ok bool) {
+	switch state {
+	case loadPending:
+		return m.spin.View() + " loading…", false
+	case loadErr:
+		return stMuted.Render("unavailable"), false
+	default:
+		return "", true
+	}
+}
+
+func (m Model) branchesBody(d *worktreeDetails, max int) string {
+	if d == nil {
+		return m.spin.View() + " loading…"
+	}
+	if text, ok := m.panelState(d.branchesState); !ok {
+		return text
+	}
+	if len(d.branches) == 0 {
+		return stMuted.Render("(only this worktree)")
+	}
+	var b strings.Builder
+	shown, more := windowList(len(d.branches), max)
+	for i := 0; i < shown; i++ {
+		br := d.branches[i]
+		switch {
+		case br.current:
+			b.WriteString(stAccent.Render("* " + br.name))
+		case br.inWorktree:
+			b.WriteString(stOk.Render("+ " + br.name))
+		default:
+			b.WriteString(stText.Render("  " + br.name))
+		}
+		b.WriteString("\n")
+	}
+	if more > 0 {
+		b.WriteString(stMuted.Render(fmt.Sprintf("  … +%d more", more)))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m Model) commitsBody(d *worktreeDetails, max int) string {
+	if d == nil {
+		return m.spin.View() + " loading…"
+	}
+	if text, ok := m.panelState(d.commitsState); !ok {
+		return text
+	}
+	if len(d.commits) == 0 {
+		return stMuted.Render("(no commits)")
+	}
+	var b strings.Builder
+	shown, more := windowList(len(d.commits), max)
+	for i := 0; i < shown; i++ {
+		c := d.commits[i]
+		b.WriteString(stWarn.Render(c.sha) + " " + stText.Render(c.subject) + "\n")
+	}
+	if more > 0 {
+		b.WriteString(stMuted.Render(fmt.Sprintf("… +%d more", more)))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+func (m Model) statusBody(d *worktreeDetails, max int) string {
+	if d == nil {
+		return m.spin.View() + " loading…"
+	}
+	if text, ok := m.panelState(d.statusState); !ok {
+		return text
+	}
+	if len(d.status) == 0 {
+		return stOk.Render("✓ clean")
+	}
+	var b strings.Builder
+	shown, more := windowList(len(d.status), max)
+	for i := 0; i < shown; i++ {
+		f := d.status[i]
+		b.WriteString(stBad.Render(f.code) + " " + stText.Render(f.path) + "\n")
+	}
+	if more > 0 {
+		b.WriteString(stMuted.Render(fmt.Sprintf("… +%d more", more)))
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// windowList returns how many of n items to show given max rows, reserving one
+// row for a "… +N more" line when there is overflow. more is the hidden count.
+func windowList(n, max int) (shown, more int) {
+	if max < 1 {
+		max = 1
+	}
+	if n <= max {
+		return n, 0
+	}
+	shown = max - 1
+	if shown < 1 {
+		shown = 1
+	}
+	return shown, n - shown
 }
 
 // hintLine renders the muted hint left-aligned with the version pinned to the
