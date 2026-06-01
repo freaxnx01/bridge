@@ -163,3 +163,30 @@ func TestUpdateDash_EndJumpsToCreateRow(t *testing.T) {
 		t.Errorf("End -> dashSel=%d, want %d (create row)", got.dashSel, len(m.dashRows))
 	}
 }
+
+func TestUpdatePicker_EndFromFilter_EntersListAtLast(t *testing.T) {
+	m := initialModel(Config{}) // starts focused on the filter
+	for i := 0; i < 10; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: "r"})
+	}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	got := out.(Model)
+	if got.pickerFocus != focusList {
+		t.Fatalf("End from filter should enter the list, focus=%d", got.pickerFocus)
+	}
+	if got.pickerSel != 9 {
+		t.Errorf("End from filter -> pickerSel=%d, want 9", got.pickerSel)
+	}
+}
+
+func TestUpdatePicker_HomeFromFilter_EntersListAtFirst(t *testing.T) {
+	m := initialModel(Config{})
+	for i := 0; i < 5; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: "r"})
+	}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyHome})
+	got := out.(Model)
+	if got.pickerFocus != focusList || got.pickerSel != 0 {
+		t.Errorf("Home from filter -> focus=%d sel=%d, want focusList,0", got.pickerFocus, got.pickerSel)
+	}
+}

@@ -126,6 +126,24 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.pickerFocus = focusList
 			m.filter.Blur()
 			return m, nil
+		case tea.KeyHome, tea.KeyPgUp:
+			// Home/PgUp from the filter jump into the list at the top.
+			m.pickerFocus = focusList
+			m.filter.Blur()
+			m.pickerSel = 0
+			return m, nil
+		case tea.KeyEnd:
+			m.pickerFocus = focusList
+			m.filter.Blur()
+			if n := len(m.visibleRepos()); n > 0 {
+				m.pickerSel = n - 1
+			}
+			return m, nil
+		case tea.KeyPgDown:
+			m.pickerFocus = focusList
+			m.filter.Blur()
+			m.pickerSel = clampInt(m.listPage(), 0, len(m.visibleRepos())-1)
+			return m, nil
 		}
 		var cmd tea.Cmd
 		m.filter, cmd = m.filter.Update(msg)
