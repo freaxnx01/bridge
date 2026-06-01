@@ -12,6 +12,9 @@ sync:
     git pull --rebase --autostash
     git push
 
+# Sync current branch with remote, then rebuild + reinstall bridge.
+sync-build: sync build
+
 # Run Go + shim tests.
 test:
     make all
