@@ -40,7 +40,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.dashSel >= len(m.dashRows) {
 			m.dashSel = 0
 		}
-		return m, m.dirtyCmds()
+		m.details = map[string]*worktreeDetails{} // fresh rows -> reload panels
+		m, detailCmd := m.ensureDetails()
+		return m, tea.Batch(m.dirtyCmds(), detailCmd)
 	case dirtyMsg:
 		for i := range m.dashRows {
 			if m.dashRows[i].path == msg.path {
@@ -50,6 +52,36 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					m.dashRows[i].dirty = msg.info
 					m.dashRows[i].dirtyState = loadOK
 				}
+			}
+		}
+		return m, nil
+	case branchesMsg:
+		if d := m.details[msg.path]; d != nil {
+			if msg.err != nil {
+				d.branchesState = loadErr
+			} else {
+				d.branches = msg.branches
+				d.branchesState = loadOK
+			}
+		}
+		return m, nil
+	case commitsMsg:
+		if d := m.details[msg.path]; d != nil {
+			if msg.err != nil {
+				d.commitsState = loadErr
+			} else {
+				d.commits = msg.commits
+				d.commitsState = loadOK
+			}
+		}
+		return m, nil
+	case statusMsg:
+		if d := m.details[msg.path]; d != nil {
+			if msg.err != nil {
+				d.statusState = loadErr
+			} else {
+				d.status = msg.files
+				d.statusState = loadOK
 			}
 		}
 		return m, nil
@@ -282,7 +314,7 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return m.launchRow(m.dashRows[m.dashSel])
 		}
 	}
-	return m, nil
+	return m.ensureDetails()
 }
 
 func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -474,6 +506,38 @@ func (m Model) cyclePickerFocusBack() Model {
 		m.filter.Focus()
 	}
 	return m
+}
+
+// selectedWorktreePath is the path of the highlighted worktree row, or "" when
+// the trailing "+ Create new worktree…" row is selected (no worktree).
+func (m Model) selectedWorktreePath() string {
+	if m.dashSel < 0 || m.dashSel >= len(m.dashRows) {
+		return ""
+	}
+	return m.dashRows[m.dashSel].path
+}
+
+// ensureDetails kicks an async load of the highlighted worktree's three detail
+// panels when its data isn't cached yet. A cache hit (entry already present, any
+// state) or the "+ create" row returns no Cmd. The new entry's zero-value
+// loadStates are loadPending, so the view shows spinners until the msgs land.
+func (m Model) ensureDetails() (Model, tea.Cmd) {
+	path := m.selectedWorktreePath()
+	if path == "" {
+		return m, nil
+	}
+	if m.details == nil {
+		m.details = map[string]*worktreeDetails{}
+	}
+	if _, ok := m.details[path]; ok {
+		return m, nil
+	}
+	m.details[path] = &worktreeDetails{}
+	return m, tea.Batch(
+		gitBranchesCmd(path),
+		gitCommitsCmd(path),
+		gitStatusCmd(path),
+	)
 }
 
 // logKey appends a key diagnostic line to path (BRIDGE_NAV_DEBUG).

@@ -341,3 +341,107 @@ func TestUpdateDash_gG_Aliases(t *testing.T) {
 		t.Errorf("g -> dashSel=%d, want 0", got.dashSel)
 	}
 }
+
+func TestUpdateDash_MoveSelection_FiresDetailLoadAndSeedsPending(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{
+		{worktree: "fix-x", path: "/r/.worktrees/fix-x"},
+		{worktree: "docs", path: "/r/.worktrees/docs"},
+	}
+	m.dashSel = 0
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if got.dashSel != 1 {
+		t.Fatalf("dashSel = %d, want 1", got.dashSel)
+	}
+	d, ok := got.details["/r/.worktrees/docs"]
+	if !ok {
+		t.Fatalf("expected a pending cache entry for the newly selected worktree")
+	}
+	if d.branchesState != loadPending || d.commitsState != loadPending || d.statusState != loadPending {
+		t.Errorf("new cache entry should be all loadPending, got %+v", d)
+	}
+	if cmd == nil {
+		t.Errorf("moving to an uncached worktree should return a load Cmd")
+	}
+}
+
+func TestUpdateDash_MoveToCachedWorktree_NoRefire(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{
+		{worktree: "fix-x", path: "/r/.worktrees/fix-x"},
+		{worktree: "docs", path: "/r/.worktrees/docs"},
+	}
+	m.dashSel = 0
+	m.details["/r/.worktrees/docs"] = &worktreeDetails{branchesState: loadOK}
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if cmd != nil {
+		t.Errorf("moving to a cached worktree should not refire a load Cmd")
+	}
+}
+
+func TestUpdateDash_CreateRowSelected_NoLoad(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/.worktrees/fix-x"}}
+	m.dashSel = 0
+	// Down wraps from the single worktree row onto the "+ create" row (index 1).
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if got.dashSel != 1 {
+		t.Fatalf("dashSel = %d, want 1 (the create row)", got.dashSel)
+	}
+	if cmd != nil {
+		t.Errorf("the create row has no worktree, so no load Cmd should fire")
+	}
+}
+
+func TestUpdate_BranchesMsg_FillsCache(t *testing.T) {
+	m := initialModel(Config{})
+	m.details["/r/x"] = &worktreeDetails{}
+	out, _ := m.Update(branchesMsg{path: "/r/x", branches: []branchInfo{{name: "main"}}})
+	got := out.(Model)
+	d := got.details["/r/x"]
+	if d.branchesState != loadOK || len(d.branches) != 1 {
+		t.Errorf("branchesMsg not applied: %+v", d)
+	}
+}
+
+func TestUpdate_StatusMsgErr_SetsErrState(t *testing.T) {
+	m := initialModel(Config{})
+	m.details["/r/x"] = &worktreeDetails{}
+	out, _ := m.Update(statusMsg{path: "/r/x", err: errFake})
+	got := out.(Model)
+	if got.details["/r/x"].statusState != loadErr {
+		t.Errorf("statusMsg error should set loadErr, got %+v", got.details["/r/x"])
+	}
+}
+
+func TestUpdate_CommitsMsg_EvictedPath_Ignored(t *testing.T) {
+	m := initialModel(Config{})
+	// No entry for "/gone" — a late msg for an evicted worktree must be a no-op.
+	out, _ := m.Update(commitsMsg{path: "/gone", commits: []commitInfo{{sha: "a"}}})
+	got := out.(Model)
+	if _, ok := got.details["/gone"]; ok {
+		t.Errorf("a msg for an evicted path must not create a cache entry")
+	}
+}
+
+func TestUpdate_DashRowsMsg_ClearsCacheAndLoadsSelection(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.details["/stale"] = &worktreeDetails{branchesState: loadOK}
+	out, cmd := m.Update(dashRowsMsg{rows: []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}})
+	got := out.(Model)
+	if _, ok := got.details["/stale"]; ok {
+		t.Errorf("dashRowsMsg should clear the stale cache")
+	}
+	if _, ok := got.details["/r/fix-x"]; !ok {
+		t.Errorf("dashRowsMsg should seed a load for the current selection")
+	}
+	if cmd == nil {
+		t.Errorf("dashRowsMsg should return Cmds (dirty + detail load)")
+	}
+}
