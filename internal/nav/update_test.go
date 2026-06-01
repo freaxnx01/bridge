@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -188,5 +189,87 @@ func TestUpdatePicker_HomeFromFilter_EntersListAtFirst(t *testing.T) {
 	got := out.(Model)
 	if got.pickerFocus != focusList || got.pickerSel != 0 {
 		t.Errorf("Home from filter -> focus=%d sel=%d, want focusList,0", got.pickerFocus, got.pickerSel)
+	}
+}
+
+func TestLaunchArgvFor_NameArgsInjected(t *testing.T) {
+	m := initialModel(Config{
+		DefaultAgent: "claude",
+		NameArgs: func(agent string, repo core.Repo, wt string) []string {
+			return []string{"-n", repo.Name + " [" + wt + "]"}
+		},
+	})
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	row := dashRow{worktree: "wt1", path: "/r/.worktrees/wt1"}
+	argv, err := m.launchArgvFor(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(strings.Join(argv, " "), "-n bridge [wt1]") {
+		t.Errorf("expected injected claude name args, got %v", argv)
+	}
+}
+
+func TestUpdatePicker_UpFromFilter_EntersSessions(t *testing.T) {
+	m := initialModel(Config{}) // focusFilter
+	m.sessions = []sessionRow{{slotID: "a"}, {slotID: "b"}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	got := out.(Model)
+	if got.pickerFocus != focusSessions {
+		t.Fatalf("Up from filter should enter sessions, focus=%d", got.pickerFocus)
+	}
+	if got.sessionSel != 1 {
+		t.Errorf("sessionSel=%d, want 1 (last)", got.sessionSel)
+	}
+}
+
+func TestUpdatePicker_UpFromFilter_NoSessions_StaysInFilter(t *testing.T) {
+	m := initialModel(Config{})
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if got := out.(Model); got.pickerFocus != focusFilter {
+		t.Errorf("Up with no sessions should stay in filter, focus=%d", got.pickerFocus)
+	}
+}
+
+func TestUpdatePicker_TabCyclesFocus(t *testing.T) {
+	m := initialModel(Config{})
+	m.sessions = []sessionRow{{slotID: "a"}}
+	m.localRepos = []repoRow{{label: "x"}}
+	steps := []focus{focusList, focusSessions, focusFilter}
+	cur := m
+	for i, want := range steps {
+		out, _ := cur.Update(tea.KeyMsg{Type: tea.KeyTab})
+		cur = out.(Model)
+		if cur.pickerFocus != want {
+			t.Fatalf("tab #%d focus=%d, want %d", i+1, cur.pickerFocus, want)
+		}
+	}
+}
+
+func TestUpdatePicker_gG_Aliases(t *testing.T) {
+	m := initialModel(Config{})
+	m.pickerFocus = focusList
+	for i := 0; i < 8; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: "r"})
+	}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if got := out.(Model); got.pickerSel != 7 {
+		t.Errorf("G -> pickerSel=%d, want 7", got.pickerSel)
+	}
+	m.pickerSel = 5
+	out, _ = m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("g")})
+	if got := out.(Model); got.pickerSel != 0 {
+		t.Errorf("g -> pickerSel=%d, want 0", got.pickerSel)
+	}
+}
+
+func TestUpdatePicker_SessionsEnter_ReturnsAttachCmd(t *testing.T) {
+	m := initialModel(Config{})
+	m.pickerFocus = focusSessions
+	m.sessions = []sessionRow{{slotID: "bridge-wt-fix"}}
+	m.sessionSel = 0
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Errorf("Enter on a session should return an attach command")
 	}
 }

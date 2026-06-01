@@ -107,16 +107,57 @@ func (m Model) visibleRepos() []repoRow {
 func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "ctrl+c", "q":
-		if m.pickerFocus == focusList {
+		if m.pickerFocus != focusFilter {
 			return m, tea.Quit
 		}
 		// fallthrough to filter editing for 'q' typed into the filter
 	case "esc":
 		return m, tea.Quit
+	case "tab":
+		return m.cyclePickerFocus(), nil
+	}
+
+	if m.pickerFocus == focusSessions {
+		switch msg.String() {
+		case "up", "k":
+			if m.sessionSel > 0 {
+				m.sessionSel--
+			}
+		case "down", "j":
+			if m.sessionSel < len(m.sessions)-1 {
+				m.sessionSel++
+			} else {
+				m.pickerFocus = focusFilter
+				m.filter.Focus()
+			}
+		case "g", "home":
+			m.sessionSel = 0
+		case "G", "end":
+			if len(m.sessions) > 0 {
+				m.sessionSel = len(m.sessions) - 1
+			}
+		case "/":
+			m.pickerFocus = focusFilter
+			m.filter.Focus()
+		case "enter":
+			if m.sessionSel >= 0 && m.sessionSel < len(m.sessions) {
+				if sl := m.sessions[m.sessionSel].slotID; sl != "" {
+					return m, execArgvCmd(launcher.New().AttachArgv(sl))
+				}
+			}
+		}
+		return m, nil
 	}
 
 	if m.pickerFocus == focusFilter {
 		switch msg.Type {
+		case tea.KeyUp:
+			if len(m.sessions) > 0 {
+				m.pickerFocus = focusSessions
+				m.filter.Blur()
+				m.sessionSel = len(m.sessions) - 1
+				return m, nil
+			}
 		case tea.KeyDown:
 			m.pickerFocus = focusList
 			m.filter.Blur()
@@ -166,15 +207,15 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if m.pickerSel < len(rows)-1 {
 			m.pickerSel++
 		}
-	case "home":
+	case "home", "g":
 		m.pickerSel = 0
-	case "end":
+	case "end", "G":
 		if len(rows) > 0 {
 			m.pickerSel = len(rows) - 1
 		}
-	case "pgup":
+	case "pgup", "ctrl+u":
 		m.pickerSel = clampInt(m.pickerSel-m.listPage(), 0, len(rows)-1)
-	case "pgdown":
+	case "pgdown", "ctrl+d":
 		m.pickerSel = clampInt(m.pickerSel+m.listPage(), 0, len(rows)-1)
 	case "/":
 		m.pickerFocus = focusFilter
@@ -289,6 +330,11 @@ func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err e
 	if err != nil {
 		return nil, "", "", err
 	}
+	if m.cfg.NameArgs != nil {
+		if na := m.cfg.NameArgs(agent, m.repo, row.worktree); len(na) > 0 {
+			spec.Args = append(append([]string{}, na...), spec.Args...)
+		}
+	}
 	if len(m.cfg.AgentArgs) > 0 {
 		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
 	}
@@ -317,13 +363,7 @@ func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
 		m.status = err.Error()
 		return m, nil
 	}
-	c := exec.Command(argv[0], argv[1:]...)
-	// nav already owns the terminal via tea.ExecProcess, so it nests tmux
-	// directly. Clearing $TMUX lets tmux attach/new-session nest instead of
-	// refusing ("sessions should be nested with care"); on detach the child
-	// exits and the dashboard resumes via execDoneMsg. Issue #114.
-	c.Env = tmuxUnset(os.Environ())
-	exe := tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
+	exe := execArgvCmd(argv)
 	if slot == "" {
 		return m, exe // attaching an already-registered session
 	}
@@ -367,4 +407,37 @@ func clampInt(v, lo, hi int) int {
 	default:
 		return v
 	}
+}
+
+// cyclePickerFocus advances Tab focus: filter -> list -> sessions (when any) ->
+// filter, keeping the filter's text-input focus state in sync.
+func (m Model) cyclePickerFocus() Model {
+	switch m.pickerFocus {
+	case focusFilter:
+		m.pickerFocus = focusList
+		m.filter.Blur()
+	case focusList:
+		if len(m.sessions) > 0 {
+			m.pickerFocus = focusSessions
+			m.sessionSel = clampInt(m.sessionSel, 0, len(m.sessions)-1)
+		} else {
+			m.pickerFocus = focusFilter
+			m.filter.Focus()
+		}
+	default: // focusSessions
+		m.pickerFocus = focusFilter
+		m.filter.Focus()
+	}
+	return m
+}
+
+// execArgvCmd runs argv via tea.ExecProcess with $TMUX cleared so a tmux
+// attach/new-session nests under the current server (see launchRow / issue #114).
+func execArgvCmd(argv []string) tea.Cmd {
+	if len(argv) == 0 {
+		return nil
+	}
+	c := exec.Command(argv[0], argv[1:]...)
+	c.Env = tmuxUnset(os.Environ())
+	return tea.ExecProcess(c, func(err error) tea.Msg { return execDoneMsg{err: err} })
 }

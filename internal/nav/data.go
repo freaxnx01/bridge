@@ -45,6 +45,7 @@ func loadSessionsCmd(slotsPath string) tea.Cmd {
 		rows := make([]sessionRow, 0, len(live))
 		for _, s := range live {
 			row := sessionRow{
+				slotID:       s.SlotID,
 				state:        s.State,
 				lastAccessed: humanLastAccessed(now.Sub(s.LastActivity)),
 			}

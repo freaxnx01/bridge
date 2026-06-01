@@ -53,15 +53,21 @@ func (m Model) viewPicker() string {
 
 	if len(m.sessions) > 0 {
 		var b strings.Builder
-		for _, s := range m.sessions {
+		for i, s := range m.sessions {
 			dot := stMuted.Render("○")
 			if s.state == "attached" {
 				dot = stOk.Render("●")
 			}
-			b.WriteString(fmt.Sprintf("%s %-24s %-16s %-8s %s\n",
-				dot, trunc(s.repoLabel, 24), trunc(s.worktree, 16), s.agent, s.lastAccessed))
+			line := fmt.Sprintf("%s %-24s %-16s %-8s %s",
+				dot, trunc(s.repoLabel, 24), trunc(s.worktree, 16), s.agent, s.lastAccessed)
+			if m.pickerFocus == focusSessions && i == m.sessionSel {
+				line = stSel.Render(stAccent.Render("▸ ") + line)
+			} else {
+				line = "  " + line
+			}
+			b.WriteString(line + "\n")
 		}
-		sections = append(sections, panel(w, "Active sessions", strings.TrimRight(b.String(), "\n")))
+		sections = append(sections, panel(w, "Active sessions  "+stMuted.Render("(↑ / tab · ⏎ attach)"), strings.TrimRight(b.String(), "\n")))
 	}
 
 	title := "Repos"
@@ -111,7 +117,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	hint := stMuted.Render("↑↓ move · ⏎ open/attach · / filter · r refresh remote · q quit")
+	hint := stMuted.Render("↑↓ move · tab panes · ⏎ open/attach · / filter · r refresh · q quit")
 	sections = append(sections, hint)
 	return strings.Join(sections, "\n")
 }
