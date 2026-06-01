@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.3.1] - 2026-06-01
+
+### Fixed
+
+- `bridge nav`: the repo picker now lists local and remote repos **alphabetically** (case-insensitive, ignoring the `↓ ` remote prefix) instead of in discovery/cache order. The picker list is also **windowed to the terminal height** around the selection (with `↑/↓ N more` indicators), so a large remote cache no longer overflows the screen and pushes the sessions/`Repos`/`filter:` header off the top. Selection resets to the top on filter change.
+
 ## [2.3.0] - 2026-06-01
 
 ### Added
