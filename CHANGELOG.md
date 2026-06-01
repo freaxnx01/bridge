@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-06-01
+
+### Fixed
+
+- `bridge nav`: **Home/End/PgUp/PgDown** now jump the repo list even when focus is on the filter (the picker starts there). Previously the text input consumed them, so they appeared to do nothing until you stepped into the list with the down arrow. Home/PgUp jump to the first entry, End to the last, PgDown one page in.
+
 ## [2.4.0] - 2026-06-01
 
 ### Added
