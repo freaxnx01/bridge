@@ -163,6 +163,17 @@ func gitStatusCmd(path string) tea.Cmd {
 	}
 }
 
+// gitFetchCmd freshens the repo's remote-tracking refs so ahead/behind are
+// accurate. Runs once per dashboard — worktrees of a repo share the object
+// store, so one fetch updates remote refs for all of them. Non-fatal: a failed
+// fetch (offline) reports the error; the reducer keeps last-known state.
+func gitFetchCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		err := exec.Command("git", "-C", path, "fetch", "--quiet").Run()
+		return fetchDoneMsg{err: err}
+	}
+}
+
 func repoLabel(r core.Repo) string {
 	switch r.Forge {
 	case "github":
