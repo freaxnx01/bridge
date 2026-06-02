@@ -42,6 +42,19 @@ func TestFilterRemoteOnlyCaseInsensitiveOnName(t *testing.T) {
 	}
 }
 
+func TestFilterRemoteOnlyCaseInsensitiveOnOwner(t *testing.T) {
+	// GitHub logins are case-insensitive: an on-disk owner dir cased
+	// differently from the forge-API login is the same repo. The remote
+	// row renders identically to the local one (the GitHub label omits
+	// owner), so it must be deduped away. Regression for #124.
+	local := []core.Repo{{Forge: "github", Owner: "Freaxnx01", Name: "bridge", Visibility: "public"}}
+	remote := []forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "bridge", Visibility: "public"}}
+	got := filterRemoteOnly(local, remote)
+	if len(got) != 0 {
+		t.Errorf("case-insensitive owner match failed: %+v", got)
+	}
+}
+
 func TestRemoteCloneDirsGithubPublic(t *testing.T) {
 	parent, target, err := remoteCloneDirs("/r", forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"})
 	if err != nil {

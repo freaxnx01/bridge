@@ -181,17 +181,22 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 }
 
 // filterRemoteOnly drops remote refs whose forge+owner+name matches a local
-// repo. Comparison is case-sensitive on forge/owner (path components) and
-// case-insensitive on name (filesystems aren't reliably case-sensitive).
+// repo. All three components are compared case-insensitively: forge names are
+// canonical lowercase, GitHub owners (logins) are case-insensitive, and
+// filesystems aren't reliably case-sensitive — so an on-disk owner dir cased
+// differently from the forge-API login is the same repo and must dedupe away.
+func dedupKey(forge, owner, name string) string {
+	return strings.ToLower(forge) + "/" + strings.ToLower(owner) + "/" + strings.ToLower(name)
+}
+
 func filterRemoteOnly(local []core.Repo, remote []forge.RepoRef) []forge.RepoRef {
 	have := map[string]bool{}
 	for _, r := range local {
-		have[r.Forge+"/"+r.Owner+"/"+strings.ToLower(r.Name)] = true
+		have[dedupKey(r.Forge, r.Owner, r.Name)] = true
 	}
 	out := make([]forge.RepoRef, 0, len(remote))
 	for _, r := range remote {
-		k := r.Forge + "/" + r.Owner + "/" + strings.ToLower(r.Name)
-		if have[k] {
+		if have[dedupKey(r.Forge, r.Owner, r.Name)] {
 			continue
 		}
 		out = append(out, r)
