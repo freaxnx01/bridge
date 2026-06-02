@@ -445,3 +445,23 @@ func TestUpdate_DashRowsMsg_ClearsCacheAndLoadsSelection(t *testing.T) {
 		t.Errorf("dashRowsMsg should return Cmds (dirty + detail load)")
 	}
 }
+
+func TestUpdate_FetchDoneMsg_Success_ReloadsDirty(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	_, cmd := m.Update(fetchDoneMsg{})
+	if cmd == nil {
+		t.Errorf("a successful fetch should trigger a dirty reload Cmd")
+	}
+}
+
+func TestUpdate_FetchDoneMsg_Error_KeepsLastKnown(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	_, cmd := m.Update(fetchDoneMsg{err: errFake})
+	if cmd != nil {
+		t.Errorf("a failed fetch should be a no-op (keep last-known), got a Cmd")
+	}
+}

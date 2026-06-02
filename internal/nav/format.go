@@ -117,8 +117,10 @@ func sortDashRows(rows []dashRow, liveBySlot map[string]core.Session) {
 }
 
 // parseDirtyStatus parses `git status --porcelain=v1 --branch` output into a
-// dirtyInfo: modified counts the non-header change lines; ahead is read from the
-// "[ahead N]" token in the "## " branch header (0 when absent or no upstream).
+// dirtyInfo. The "## " header carries upstream state: a branch with no "..."
+// upstream token has no remote tracking (noUpstream); the "[ahead N, behind M]"
+// bracket gives the divergence counts (0 when absent). Non-header lines are
+// changed files. behind is only accurate after a fetch freshens remote refs.
 func parseDirtyStatus(out string) dirtyInfo {
 	info := dirtyInfo{}
 	for _, l := range strings.Split(strings.TrimRight(out, "\n"), "\n") {
@@ -126,16 +128,14 @@ func parseDirtyStatus(out string) dirtyInfo {
 			continue
 		}
 		if strings.HasPrefix(l, "## ") {
-			if i := strings.Index(l, "[ahead "); i >= 0 {
-				rest := l[i+len("[ahead "):]
-				num := rest
-				for j, c := range rest {
-					if c < '0' || c > '9' {
-						num = rest[:j]
-						break
-					}
+			header := l[len("## "):]
+			info.noUpstream = !strings.Contains(header, "...")
+			if i := strings.IndexByte(header, '['); i >= 0 {
+				if j := strings.IndexByte(header[i:], ']'); j >= 0 {
+					bracket := header[i+1 : i+j]
+					info.ahead = trackToken(bracket, "ahead ")
+					info.behind = trackToken(bracket, "behind ")
 				}
-				info.ahead, _ = strconv.Atoi(num)
 			}
 			continue
 		}
@@ -143,6 +143,25 @@ func parseDirtyStatus(out string) dirtyInfo {
 	}
 	info.clean = info.modified == 0
 	return info
+}
+
+// trackToken reads the integer following key (e.g. "ahead ") inside a git status
+// branch-header bracket such as "ahead 2, behind 3"; returns 0 when key absent.
+func trackToken(bracket, key string) int {
+	i := strings.Index(bracket, key)
+	if i < 0 {
+		return 0
+	}
+	rest := bracket[i+len(key):]
+	end := len(rest)
+	for k, c := range rest {
+		if c < '0' || c > '9' {
+			end = k
+			break
+		}
+	}
+	n, _ := strconv.Atoi(rest[:end])
+	return n
 }
 
 // sortRepoRows orders repo rows ascending by label, case-insensitively and

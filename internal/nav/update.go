@@ -42,7 +42,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.details = map[string]*worktreeDetails{} // fresh rows -> reload panels
 		m, detailCmd := m.ensureDetails()
-		return m, tea.Batch(m.dirtyCmds(), detailCmd)
+		return m, tea.Batch(m.dirtyCmds(), detailCmd, gitFetchCmd(m.repo.Path))
+	case fetchDoneMsg:
+		if msg.err != nil {
+			return m, nil // offline / fetch failed: keep last-known status
+		}
+		return m, m.dirtyCmds() // re-read status against the now-fresh remote refs
 	case dirtyMsg:
 		for i := range m.dashRows {
 			if m.dashRows[i].path == msg.path {

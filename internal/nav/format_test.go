@@ -207,3 +207,61 @@ func TestParseStatusFiles_Clean(t *testing.T) {
 		t.Errorf("parseStatusFiles(\"\") = %+v, want empty (clean)", got)
 	}
 }
+
+func TestParseDirtyStatus_UpstreamGrammar(t *testing.T) {
+	tests := []struct {
+		name       string
+		out        string
+		modified   int
+		ahead      int
+		behind     int
+		noUpstream bool
+		clean      bool
+	}{
+		{
+			name:  "in sync clean",
+			out:   "## main...origin/main\n",
+			clean: true,
+		},
+		{
+			name:  "ahead only",
+			out:   "## main...origin/main [ahead 2]\n",
+			ahead: 2, clean: true,
+		},
+		{
+			name:   "behind only",
+			out:    "## main...origin/main [behind 3]\n",
+			behind: 3, clean: true,
+		},
+		{
+			name:  "ahead and behind",
+			out:   "## main...origin/main [ahead 2, behind 3]\n",
+			ahead: 2, behind: 3, clean: true,
+		},
+		{
+			name:       "no upstream",
+			out:        "## feature-x\n",
+			noUpstream: true, clean: true,
+		},
+		{
+			name:       "detached head",
+			out:        "## HEAD (no branch)\n",
+			noUpstream: true, clean: true,
+		},
+		{
+			name:     "dirty ahead behind",
+			out:      "## main...origin/main [ahead 1, behind 4]\n M internal/nav/view.go\n?? scratch.txt\n",
+			modified: 2, ahead: 1, behind: 4, clean: false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parseDirtyStatus(tt.out)
+			if got.modified != tt.modified || got.ahead != tt.ahead || got.behind != tt.behind ||
+				got.noUpstream != tt.noUpstream || got.clean != tt.clean {
+				t.Errorf("parseDirtyStatus(%q) = %+v, want modified=%d ahead=%d behind=%d noUpstream=%v clean=%v",
+					tt.out, got, tt.modified, tt.ahead, tt.behind, tt.noUpstream, tt.clean)
+			}
+		})
+	}
+}

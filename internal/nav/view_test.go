@@ -162,3 +162,36 @@ func TestViewDash_Wide_ColumnsBottomAligned(t *testing.T) {
 		t.Errorf("expected both columns to close on the bottom body line (2 corners), got %d\nbottom line: %q\nfull:\n%s", c, bottom, out)
 	}
 }
+
+func TestDirtyView_States(t *testing.T) {
+	m := initialModel(Config{})
+	tests := []struct {
+		name   string
+		d      dirtyInfo
+		want   []string
+		absent []string
+	}{
+		{"clean in sync", dirtyInfo{clean: true}, []string{"✓ clean"}, []string{"●", "↑", "↓", "upstream"}},
+		{"no upstream", dirtyInfo{noUpstream: true, clean: true}, []string{"no upstream"}, []string{"✓ clean", "↑", "↓"}},
+		{"modified no upstream", dirtyInfo{modified: 1, noUpstream: true}, []string{"●1", "no upstream"}, []string{"✓ clean", "↑", "↓"}},
+		{"modified only", dirtyInfo{modified: 2}, []string{"●2"}, []string{"↑", "↓", "clean"}},
+		{"ahead only clean", dirtyInfo{ahead: 1, clean: true}, []string{"↑1"}, []string{"●", "↓", "✓ clean"}},
+		{"behind only clean", dirtyInfo{behind: 3, clean: true}, []string{"↓3"}, []string{"●", "↑", "✓ clean"}},
+		{"modified ahead behind", dirtyInfo{modified: 2, ahead: 1, behind: 3}, []string{"●2", "↑1", "↓3"}, []string{"clean", "upstream"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := m.dirtyView(dashRow{dirty: tt.d, dirtyState: loadOK})
+			for _, w := range tt.want {
+				if !strings.Contains(got, w) {
+					t.Errorf("dirtyView = %q, missing %q", got, w)
+				}
+			}
+			for _, a := range tt.absent {
+				if strings.Contains(got, a) {
+					t.Errorf("dirtyView = %q, should not contain %q", got, a)
+				}
+			}
+		})
+	}
+}
