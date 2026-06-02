@@ -219,18 +219,20 @@ func (m Model) dirtyView(r dashRow) string {
 	case loadErr:
 		return stMuted.Render("?")
 	}
-	if r.dirty.noUpstream {
-		return stMuted.Render("⤳ no upstream")
-	}
 	var tokens []string
 	if r.dirty.modified > 0 {
 		tokens = append(tokens, stBad.Render(fmt.Sprintf("●%d", r.dirty.modified)))
 	}
-	if r.dirty.ahead > 0 {
-		tokens = append(tokens, stWarn.Render(fmt.Sprintf("↑%d", r.dirty.ahead)))
-	}
-	if r.dirty.behind > 0 {
-		tokens = append(tokens, stAccent.Render(fmt.Sprintf("↓%d", r.dirty.behind)))
+	if r.dirty.noUpstream {
+		// No upstream means ahead/behind are undefined; show the marker instead.
+		tokens = append(tokens, stMuted.Render("⤳ no upstream"))
+	} else {
+		if r.dirty.ahead > 0 {
+			tokens = append(tokens, stWarn.Render(fmt.Sprintf("↑%d", r.dirty.ahead)))
+		}
+		if r.dirty.behind > 0 {
+			tokens = append(tokens, stAccent.Render(fmt.Sprintf("↓%d", r.dirty.behind)))
+		}
 	}
 	if len(tokens) == 0 {
 		return stOk.Render("✓ clean")
