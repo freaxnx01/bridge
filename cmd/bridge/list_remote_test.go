@@ -107,11 +107,11 @@ func TestDiscoverRemoteTargets(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	mustWrite("github/freaxnx01/.envrc")          // owner-level layout
-	mustWrite("github/orgB/.envrc")               // owner-level layout
-	mustWrite("github/nested/public/.envrc")      // visibility-nested layout
-	mustWrite("github/nested/private/.envrc")     // second visibility dir, same owner
-	mustWrite("github/noenvrc/.gitkeep")          // owner dir without .envrc → skipped
+	mustWrite("github/freaxnx01/.envrc")      // owner-level layout
+	mustWrite("github/orgB/.envrc")           // owner-level layout
+	mustWrite("github/nested/public/.envrc")  // visibility-nested layout
+	mustWrite("github/nested/private/.envrc") // second visibility dir, same owner
+	mustWrite("github/noenvrc/.gitkeep")      // owner dir without .envrc → skipped
 	mustWrite("gitlab/freaxnx01/.envrc")
 	mustWrite("git-forgejo/.envrc")
 	mustWrite("ado/.envrc")

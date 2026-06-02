@@ -73,12 +73,14 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 }
 
 type fjIssue struct {
-	Number      int                    `json:"number"`
-	Title       string                 `json:"title"`
-	HTMLURL     string                 `json:"html_url"`
-	Labels      []struct{ Name string `json:"name"` } `json:"labels"`
-	UpdatedAt   time.Time              `json:"updated_at"`
-	PullRequest any                    `json:"pull_request"`
+	Number  int    `json:"number"`
+	Title   string `json:"title"`
+	HTMLURL string `json:"html_url"`
+	Labels  []struct {
+		Name string `json:"name"`
+	} `json:"labels"`
+	UpdatedAt   time.Time `json:"updated_at"`
+	PullRequest any       `json:"pull_request"`
 }
 
 func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {

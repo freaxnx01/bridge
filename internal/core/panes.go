@@ -16,13 +16,13 @@ import (
 // (basename of the foreground process). Add to this list when integrating
 // a new agent; the launcher's agents.AgentSpec.Bin should match.
 var KnownAgentCommands = map[string]bool{
-	"claude":         true,
-	"copilot":        true,
-	"copilot-cli":    true,
-	"opencode":       true,
-	"code":           true,
-	"code-insiders":  true,
-	"node":           true, // claude/copilot wrappers commonly show as node
+	"claude":        true,
+	"copilot":       true,
+	"copilot-cli":   true,
+	"opencode":      true,
+	"code":          true,
+	"code-insiders": true,
+	"node":          true, // claude/copilot wrappers commonly show as node
 }
 
 // LivePaneCommands enumerates tmux sessions and returns a map of

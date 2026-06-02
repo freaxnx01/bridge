@@ -341,4 +341,3 @@ func repoFromClonedRef(reposRoot string, ref forge.RepoRef, targetDir string) co
 		Visibility: vis,
 	}
 }
-

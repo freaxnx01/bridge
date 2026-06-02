@@ -15,9 +15,9 @@ import (
 // orgURL is the full org URL, e.g. https://dev.azure.com/bossinfo.
 // Auth uses HTTP Basic with empty username + PAT.
 type ADOClient struct {
-	token   string
-	orgURL  string
-	http    *http.Client
+	token  string
+	orgURL string
+	http   *http.Client
 }
 
 func NewADOClient(token, orgURL string) *ADOClient {
