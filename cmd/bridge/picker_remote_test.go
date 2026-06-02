@@ -42,6 +42,17 @@ func TestFilterRemoteOnlyCaseInsensitiveOnName(t *testing.T) {
 	}
 }
 
+func TestFilterRemoteOnlyCaseInsensitiveOnOwner(t *testing.T) {
+	// The local owner is derived from the on-disk path while the remote owner
+	// comes from the forge API, so their casing can differ for the same repo.
+	local := []core.Repo{{Forge: "github", Owner: "freaxnx01", Name: "bridge"}}
+	remote := []forge.RepoRef{{Forge: "github", Owner: "FreaxNx01", Name: "bridge"}}
+	got := filterRemoteOnly(local, remote)
+	if len(got) != 0 {
+		t.Errorf("case-insensitive owner match failed: remote should be deduped, got %+v", got)
+	}
+}
+
 func TestRemoteCloneDirsGithubPublic(t *testing.T) {
 	parent, target, err := remoteCloneDirs("/r", forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"})
 	if err != nil {

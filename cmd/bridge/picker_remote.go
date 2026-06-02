@@ -181,22 +181,29 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 }
 
 // filterRemoteOnly drops remote refs whose forge+owner+name matches a local
-// repo. Comparison is case-sensitive on forge/owner (path components) and
-// case-insensitive on name (filesystems aren't reliably case-sensitive).
+// repo. Comparison is case-insensitive on all three components: the local
+// owner is derived from the on-disk path while the remote owner comes from the
+// forge API, so their casing can differ for the same repo.
 func filterRemoteOnly(local []core.Repo, remote []forge.RepoRef) []forge.RepoRef {
 	have := map[string]bool{}
 	for _, r := range local {
-		have[r.Forge+"/"+r.Owner+"/"+strings.ToLower(r.Name)] = true
+		have[repoIdentity(r.Forge, r.Owner, r.Name)] = true
 	}
 	out := make([]forge.RepoRef, 0, len(remote))
 	for _, r := range remote {
-		k := r.Forge + "/" + r.Owner + "/" + strings.ToLower(r.Name)
-		if have[k] {
+		if have[repoIdentity(r.Forge, r.Owner, r.Name)] {
 			continue
 		}
 		out = append(out, r)
 	}
 	return out
+}
+
+// repoIdentity is the case-insensitive forge+owner+name key used to match a
+// remote ref against a local clone. Both sides build the key here so they
+// cannot drift out of sync.
+func repoIdentity(forgeName, owner, name string) string {
+	return strings.ToLower(forgeName + "/" + owner + "/" + name)
 }
 
 // readRemoteCache returns whatever is currently in remote.list regardless of
