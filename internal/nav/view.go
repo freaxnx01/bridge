@@ -209,6 +209,9 @@ func (m Model) dashListBody(compact bool) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
+// dirtyView renders the per-worktree git indicator. Precedence: loading/error
+// first, then no-upstream, then the modified/ahead/behind tokens (zeros
+// omitted), then "✓ clean" when nothing diverges.
 func (m Model) dirtyView(r dashRow) string {
 	switch r.dirtyState {
 	case loadPending:
@@ -216,14 +219,23 @@ func (m Model) dirtyView(r dashRow) string {
 	case loadErr:
 		return stMuted.Render("?")
 	}
-	if r.dirty.clean {
+	if r.dirty.noUpstream {
+		return stMuted.Render("⤳ no upstream")
+	}
+	var tokens []string
+	if r.dirty.modified > 0 {
+		tokens = append(tokens, stBad.Render(fmt.Sprintf("●%d", r.dirty.modified)))
+	}
+	if r.dirty.ahead > 0 {
+		tokens = append(tokens, stWarn.Render(fmt.Sprintf("↑%d", r.dirty.ahead)))
+	}
+	if r.dirty.behind > 0 {
+		tokens = append(tokens, stAccent.Render(fmt.Sprintf("↓%d", r.dirty.behind)))
+	}
+	if len(tokens) == 0 {
 		return stOk.Render("✓ clean")
 	}
-	s := stBad.Render(fmt.Sprintf("●%d", r.dirty.modified))
-	if r.dirty.ahead > 0 {
-		s += " " + stWarn.Render(fmt.Sprintf("↑%d", r.dirty.ahead))
-	}
-	return s
+	return strings.Join(tokens, " ")
 }
 
 func (m Model) viewModal() string {
