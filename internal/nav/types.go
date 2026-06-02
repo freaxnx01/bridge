@@ -62,11 +62,15 @@ type dashRow struct {
 	dirtyState   loadState
 }
 
-// dirtyInfo is the async git status for a worktree.
+// dirtyInfo is the async git status for a worktree. ahead/behind come from the
+// `git status -sb` upstream header; behind is only accurate after a fetch.
+// noUpstream marks a branch with no remote tracking (ahead/behind meaningless).
 type dirtyInfo struct {
-	modified int
-	ahead    int
-	clean    bool
+	modified   int
+	ahead      int
+	behind     int
+	noUpstream bool
+	clean      bool
 }
 
 // branchInfo is one row of the Branches panel. current marks the selected
@@ -152,6 +156,7 @@ type wtCreatedMsg struct {
 }
 type execDoneMsg struct{ err error }
 type slotRegisteredMsg struct{}
+type fetchDoneMsg struct{ err error }
 type branchesMsg struct {
 	path     string
 	branches []branchInfo
