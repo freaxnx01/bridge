@@ -11,7 +11,7 @@ func TestCacheRoundtrip(t *testing.T) {
 	p := filepath.Join(t.TempDir(), "issues.json")
 	in := IssueCache{
 		UpdatedAt: time.Now().UTC().Truncate(time.Second),
-		Issues: []Issue{{Forge: "github", Repo: "f/x", Number: 1, Title: "t"}},
+		Issues:    []Issue{{Forge: "github", Repo: "f/x", Number: 1, Title: "t"}},
 	}
 	if err := WriteIssueCache(p, in); err != nil {
 		t.Fatal(err)

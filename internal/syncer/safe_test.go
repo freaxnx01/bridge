@@ -15,11 +15,11 @@ func TestSafePullCleanFastForward(t *testing.T) {
 	dir := "/r/x"
 	r := &fakeRunner{
 		outputs: map[string]string{
-			key(dir, "symbolic-ref", "-q", "HEAD"):                              "refs/heads/main\n",
+			key(dir, "symbolic-ref", "-q", "HEAD"):                                "refs/heads/main\n",
 			key(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): "origin/main\n",
-			key(dir, "status", "--porcelain"):                                   "",
-			key(dir, "rev-list", "--count", "@{u}..HEAD"):                       "0\n",
-			key(dir, "rev-list", "--count", "HEAD..@{u}"):                       "3\n",
+			key(dir, "status", "--porcelain"):                                     "",
+			key(dir, "rev-list", "--count", "@{u}..HEAD"):                         "0\n",
+			key(dir, "rev-list", "--count", "HEAD..@{u}"):                         "3\n",
 		},
 	}
 	s := &Syncer{Runner: r}
@@ -46,11 +46,11 @@ func TestSafePullAlreadyUpToDateSkipsPull(t *testing.T) {
 	dir := "/r/x"
 	r := &fakeRunner{
 		outputs: map[string]string{
-			key(dir, "symbolic-ref", "-q", "HEAD"):                              "refs/heads/main\n",
+			key(dir, "symbolic-ref", "-q", "HEAD"):                                "refs/heads/main\n",
 			key(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): "origin/main\n",
-			key(dir, "status", "--porcelain"):                                   "",
-			key(dir, "rev-list", "--count", "@{u}..HEAD"):                       "0\n",
-			key(dir, "rev-list", "--count", "HEAD..@{u}"):                       "0\n",
+			key(dir, "status", "--porcelain"):                                     "",
+			key(dir, "rev-list", "--count", "@{u}..HEAD"):                         "0\n",
+			key(dir, "rev-list", "--count", "HEAD..@{u}"):                         "0\n",
 		},
 	}
 	s := &Syncer{Runner: r}
@@ -98,9 +98,9 @@ func TestSafePullDirty(t *testing.T) {
 	dir := "/r/x"
 	r := &fakeRunner{
 		outputs: map[string]string{
-			key(dir, "symbolic-ref", "-q", "HEAD"):                              "refs/heads/main\n",
+			key(dir, "symbolic-ref", "-q", "HEAD"):                                "refs/heads/main\n",
 			key(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): "origin/main\n",
-			key(dir, "status", "--porcelain"):                                   " M file.go\n",
+			key(dir, "status", "--porcelain"):                                     " M file.go\n",
 		},
 	}
 	s := &Syncer{Runner: r}
@@ -113,11 +113,11 @@ func TestSafePullDiverged(t *testing.T) {
 	dir := "/r/x"
 	r := &fakeRunner{
 		outputs: map[string]string{
-			key(dir, "symbolic-ref", "-q", "HEAD"):                              "refs/heads/main\n",
+			key(dir, "symbolic-ref", "-q", "HEAD"):                                "refs/heads/main\n",
 			key(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): "origin/main\n",
-			key(dir, "status", "--porcelain"):                                   "",
-			key(dir, "rev-list", "--count", "@{u}..HEAD"):                       "2\n",
-			key(dir, "rev-list", "--count", "HEAD..@{u}"):                       "3\n",
+			key(dir, "status", "--porcelain"):                                     "",
+			key(dir, "rev-list", "--count", "@{u}..HEAD"):                         "2\n",
+			key(dir, "rev-list", "--count", "HEAD..@{u}"):                         "3\n",
 		},
 	}
 	s := &Syncer{Runner: r}
@@ -135,9 +135,9 @@ func TestSafePullFetchFailure(t *testing.T) {
 	dir := "/r/x"
 	r := &fakeRunner{
 		outputs: map[string]string{
-			key(dir, "symbolic-ref", "-q", "HEAD"):                              "refs/heads/main\n",
+			key(dir, "symbolic-ref", "-q", "HEAD"):                                "refs/heads/main\n",
 			key(dir, "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{u}"): "origin/main\n",
-			key(dir, "status", "--porcelain"):                                   "",
+			key(dir, "status", "--porcelain"):                                     "",
 		},
 		fail: map[string]error{
 			key(dir, "fetch", "--quiet"): errors.New("network down"),

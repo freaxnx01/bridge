@@ -89,12 +89,12 @@ func (c *GitlabClient) ListOpenIssues(ctx context.Context, owner, repo string) (
 	out := make([]Issue, 0, len(raw))
 	for _, i := range raw {
 		out = append(out, Issue{
-			Forge:  "gitlab",
-			Repo:   owner + "/" + repo,
-			Number: i.IID,
-			Title:  i.Title,
-			URL:    i.WebURL,
-			Labels: i.Labels,
+			Forge:   "gitlab",
+			Repo:    owner + "/" + repo,
+			Number:  i.IID,
+			Title:   i.Title,
+			URL:     i.WebURL,
+			Labels:  i.Labels,
 			Updated: i.UpdatedAt,
 		})
 	}
