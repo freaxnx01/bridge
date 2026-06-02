@@ -10,7 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `bridge nav` dashboard: read-only **Branches**, **Recent commits**, and **Git status** panels for the highlighted worktree, in a master-detail layout beside the worktree list. Loaded lazily and cached per worktree; refreshed on detach-return. Terminals narrower than 90 columns keep the list-only view.
-- `bridge nav` dashboard: per-worktree remote sync status — **ahead**, **behind**, and a distinct **no-upstream** marker — kept accurate by a non-blocking background `git fetch` on dashboard entry (last-known shown immediately; offline is a no-op).
+- `bridge nav` dashboard: per-worktree remote sync status — **ahead**, **behind**, and a distinct **no-upstream** marker — kept accurate by a non-blocking background `git fetch` on dashboard entry (last-known shown immediately; offline is a no-op). A worktree's modified-file count (`●N`) is shown alongside the no-upstream marker.
 
 ## [2.6.1] - 2026-06-01
 
