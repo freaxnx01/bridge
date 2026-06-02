@@ -31,6 +31,35 @@ func humanLastAccessed(d time.Duration) string {
 	}
 }
 
+// dedupRemoteRows drops remote ("↓") rows whose repository is already cloned
+// locally, so a cloned repo isn't listed twice in the picker. Identity is
+// forge+owner+name compared case-insensitively, because the local owner is
+// derived from the on-disk path while the remote owner comes from the forge
+// API and their casing can differ. See #124.
+func dedupRemoteRows(local, remote []repoRow) []repoRow {
+	have := make(map[string]bool, len(local))
+	for _, r := range local {
+		have[repoRowKey(r)] = true
+	}
+	out := make([]repoRow, 0, len(remote))
+	for _, r := range remote {
+		if have[repoRowKey(r)] {
+			continue
+		}
+		out = append(out, r)
+	}
+	return out
+}
+
+// repoRowKey is the case-insensitive forge+owner+name identity of a repo row,
+// taken from its remote ref when present, otherwise its local repo.
+func repoRowKey(r repoRow) string {
+	if r.remote != nil {
+		return strings.ToLower(r.remote.Forge + "\x00" + r.remote.Owner + "\x00" + r.remote.Name)
+	}
+	return strings.ToLower(r.repo.Forge + "\x00" + r.repo.Owner + "\x00" + r.repo.Name)
+}
+
 // filterRepos keeps rows whose label contains q (case-insensitive). Empty q
 // returns all rows. Result is a new slice; input is not mutated.
 func filterRepos(rows []repoRow, q string) []repoRow {
