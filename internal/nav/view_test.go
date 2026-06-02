@@ -114,3 +114,51 @@ func TestViewDash_CreateRowSelected_ShowsHint(t *testing.T) {
 		t.Errorf("create-row selection should show the select-a-worktree hint\n%s", out)
 	}
 }
+
+func TestViewDash_Wide_VersionShownOnce(t *testing.T) {
+	m := initialModel(Config{Version: "v9.9.9"})
+	m.width, m.height = 130, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	m.dashSel = 0
+	m.details["/r/fix-x"] = &worktreeDetails{branchesState: loadOK, commitsState: loadOK, statusState: loadOK}
+	out := m.View()
+	if n := strings.Count(out, "v9.9.9"); n != 1 {
+		t.Errorf("version should appear exactly once on the dashboard, got %d\n%s", n, out)
+	}
+}
+
+func TestViewDash_Wide_ColumnsBottomAligned(t *testing.T) {
+	// The right detail column is much taller than the single-worktree left list;
+	// the left box must stretch so both columns close their bottom border on the
+	// same line (a clean two-column frame).
+	m := initialModel(Config{})
+	m.width, m.height = 130, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	m.dashSel = 0
+	m.details["/r/fix-x"] = &worktreeDetails{
+		branches:      []branchInfo{{name: "a"}, {name: "b"}},
+		commits:       []commitInfo{{sha: "1", subject: "x"}, {sha: "2", subject: "y"}},
+		status:        []statusFile{{code: " M", path: "f"}},
+		branchesState: loadOK, commitsState: loadOK, statusState: loadOK,
+	}
+	out := m.View()
+	lines := strings.Split(out, "\n")
+	hintIdx := -1
+	for i, ln := range lines {
+		if strings.Contains(ln, "move") {
+			hintIdx = i
+			break
+		}
+	}
+	if hintIdx < 1 {
+		t.Fatalf("hint line not found in:\n%s", out)
+	}
+	bottom := lines[hintIdx-1] // bottom-most body line
+	if c := strings.Count(bottom, "╰"); c < 2 {
+		t.Errorf("expected both columns to close on the bottom body line (2 corners), got %d\nbottom line: %q\nfull:\n%s", c, bottom, out)
+	}
+}

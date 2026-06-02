@@ -41,6 +41,19 @@ func panel(w int, title, body string) string {
 		Render(head + "\n\n" + body)
 }
 
+// panelH is panel with an explicit total height (borders included) so a column
+// can be stretched to match the other column for a clean two-column frame.
+func panelH(w, h int, title, body string) string {
+	head := stTitle.Render(" " + title + " ")
+	return lipgloss.NewStyle().
+		Border(lipgloss.RoundedBorder()).
+		BorderForeground(colBorder).
+		Padding(0, 1).
+		Width(w - 2).
+		Height(h - 2).
+		Render(head + "\n\n" + body)
+}
+
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "initialising…"
@@ -135,13 +148,17 @@ func (m Model) viewDash() string {
 	} else {
 		leftW := clampInt(w*5/12, 40, 64)
 		rightW := w - leftW
-		left := panel(leftW, "Sessions & Worktrees", m.dashListBody(true))
-		right := m.detailColumn(rightW)
+		listBody := m.dashListBody(true)
+		// Stretch the shorter column so both close their bottom border on the
+		// same line: render each at natural height, take the taller, re-render.
+		h := max(lipgloss.Height(panel(leftW, "Sessions & Worktrees", listBody)), lipgloss.Height(m.detailColumn(rightW, 0)))
+		left := panelH(leftW, h, "Sessions & Worktrees", listBody)
+		right := m.detailColumn(rightW, h)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
 	}
 
 	hint := m.hintLine("↑↓ move · g/G first/last · ⏎ attach/launch · n new worktree · esc back · q quit")
-	footer := m.hintLine("(later: Open issues · forge statusbar)")
+	footer := stMuted.Render("(later: Open issues · forge statusbar)")
 
 	out := header + "\n" + body + "\n" + hint + "\n" + footer
 	if m.modal != nil {
@@ -230,11 +247,14 @@ func trunc(s string, n int) string {
 }
 
 // detailColumn renders the three stacked detail panels for the highlighted
-// worktree, or a hint when the "+ create" row is selected.
-func (m Model) detailColumn(w int) string {
+// worktree, or a hint when the "+ create" row is selected. minH stretches the
+// column to at least that total height (the last panel absorbs the slack) so it
+// bottom-aligns with the worktree list; minH <= 0 renders at natural height.
+func (m Model) detailColumn(w, minH int) string {
 	path := m.selectedWorktreePath()
 	if path == "" {
-		return panel(w, "Details", stMuted.Render("select a worktree to see its branches, commits & status"))
+		hint := stMuted.Render("select a worktree to see its branches, commits & status")
+		return stretchPanel(w, minH, "Details", hint)
 	}
 	per := (m.height - 14) / 3
 	if per < 3 {
@@ -243,8 +263,20 @@ func (m Model) detailColumn(w int) string {
 	d := m.details[path]
 	branches := panel(w, "Branches", m.branchesBody(d, per))
 	commits := panel(w, "Recent commits", m.commitsBody(d, per))
-	status := panel(w, "Git status", m.statusBody(d, per))
+	statusBody := m.statusBody(d, per)
+	statusH := minH - lipgloss.Height(branches) - lipgloss.Height(commits)
+	status := stretchPanel(w, statusH, "Git status", statusBody)
 	return lipgloss.JoinVertical(lipgloss.Left, branches, commits, status)
+}
+
+// stretchPanel renders a panel at least minH tall, falling back to its natural
+// height when minH is smaller (or non-positive).
+func stretchPanel(w, minH int, title, body string) string {
+	nat := panel(w, title, body)
+	if minH <= lipgloss.Height(nat) {
+		return nat
+	}
+	return panelH(w, minH, title, body)
 }
 
 // panelState renders the spinner/unavailable text shared by the three panels
