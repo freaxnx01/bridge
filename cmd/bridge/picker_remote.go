@@ -237,6 +237,16 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	// Refuse to clone over an existing non-empty checkout: git would fail
+	// anyway, and the failure-cleanup below would then delete the user's
+	// already-cloned repo. Treat a populated target as "already there".
+	populated, err := dirHasContents(targetDir)
+	if err != nil {
+		return "", fmt.Errorf("clone: inspect target: %w", err)
+	}
+	if populated {
+		return "", fmt.Errorf("clone: %s already exists and is not empty; not re-cloning", targetDir)
+	}
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return "", fmt.Errorf("clone: mkdir parent: %w", err)
 	}
@@ -263,6 +273,20 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 		return "", fmt.Errorf("clone: %w", err)
 	}
 	return targetDir, nil
+}
+
+// dirHasContents reports whether path is a directory holding at least one
+// entry. A missing path reports false (nothing there yet); any other stat/read
+// error is returned so the caller doesn't clone blindly.
+func dirHasContents(path string) (bool, error) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, err
+	}
+	return len(entries) > 0, nil
 }
 
 // remoteCloneDirs derives (parent_dir, target_dir) for a remote ref under

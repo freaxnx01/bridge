@@ -17,8 +17,8 @@ func setupFakeRepos(t *testing.T) string {
 		"github/otheruser/public/lib",
 		"gitlab/freaxnx01/some-gl-repo",
 		"git-forgejo/forgejo-repo",
-		"ado/bossinfo-repo",
-		"ado/_archive", // must be skipped
+		"ado/DMS cross-customer projects/finnova-archiverestapi",
+		"ado/_archive/old-repo", // project starting with _ must be skipped
 	}
 	for _, p := range layout {
 		full := filepath.Join(root, p)
@@ -61,7 +61,7 @@ func TestDiscoverRepos(t *testing.T) {
 		{"lib", "github", "otheruser", "public"},
 		{"secret-thing", "github", "freaxnx01", "private"},
 		{"bridge", "github", "freaxnx01", "public"},
-		{"bossinfo-repo", "ado", "", ""},
+		{"finnova-archiverestapi", "ado", "DMS cross-customer projects", ""},
 	}
 	sort.Slice(want, func(i, j int) bool { return want[i].name < want[j].name })
 	sort.Slice(repos, func(i, j int) bool { return repos[i].Name < repos[j].Name })
