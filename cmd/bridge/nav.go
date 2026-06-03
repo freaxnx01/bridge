@@ -29,11 +29,16 @@ var navCmd = &cobra.Command{
 			Version:      version,
 			DebugKeys:    navDebugPath(),
 			Once:         navOnce,
-			NameArgs: func(agent string, repo core.Repo, wt string) []string {
-				// Reuse the open path's claude labelling: prepend -n "<repo> [<wt>]"
-				// and install the relabel hook so /clear keeps the name.
-				spec := withClaudeName(agents.AgentSpec{Name: agent}, repo, wt)
-				ensureClaudeRelabel(agents.AgentSpec{Name: agent}, repo, wt)
+			NameArgs: func(agent string, repo core.Repo, wt, label string) []string {
+				// Reuse the open path's claude labelling: prepend -n "<label>" and
+				// install the relabel hook so /clear keeps the name. label is empty
+				// for normal launches (default "<repo> [<wt>]") and "#123 [<title>]"
+				// for issue launches.
+				if label == "" {
+					label = displayName(repo, wt)
+				}
+				spec := withClaudeNameLabel(agents.AgentSpec{Name: agent}, label)
+				ensureClaudeRelabelLabel(agents.AgentSpec{Name: agent}, label)
 				return spec.Args
 			},
 			Clone: func(ref forge.RepoRef) (core.Repo, error) {

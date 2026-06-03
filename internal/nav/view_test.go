@@ -35,6 +35,39 @@ func TestView_Dash_ShowsCreateRowAndRepoName(t *testing.T) {
 	}
 }
 
+func TestView_Dash_IssuesFocus_ShowsIssuesPane(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 30
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", branch: "worktree-fix-x"}}
+	m.issuesState = loadOK
+	m.issues = []issueRow{{number: 127, title: "show open forge issues"}}
+	m.dashFocus = dashFocusIssues
+	out := m.View()
+	if !strings.Contains(out, "Open issues") {
+		t.Errorf("issues-focused dash should show the Open issues pane:\n%s", out)
+	}
+	if !strings.Contains(out, "#127") {
+		t.Errorf("issues pane should list issue #127:\n%s", out)
+	}
+}
+
+func TestView_Dash_HeaderShowsOpenCount(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 30
+	m.screen = screenDash
+	m.repo = core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"}
+	m.localRepos = []repoRow{{
+		repo:       core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"},
+		issueCount: 3,
+		issueState: loadOK,
+	}}
+	if !strings.Contains(m.View(), "3 open") {
+		t.Errorf("dash header should show the open-issue count")
+	}
+}
+
 func TestView_Picker_FitsHeightWithLongList(t *testing.T) {
 	m := initialModel(Config{})
 	m.width, m.height = 80, 20

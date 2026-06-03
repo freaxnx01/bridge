@@ -24,11 +24,15 @@ type Model struct {
 	pickerSel   int
 	sessionSel  int
 
-	repo     core.Repo
-	dashRows []dashRow
-	dashSel  int
-	modal    *newWorktreeModal
-	details  map[string]*worktreeDetails // per-worktree panel cache, keyed by path
+	repo        core.Repo
+	dashRows    []dashRow
+	dashSel     int
+	dashFocus   dashFocus
+	issues      []issueRow
+	issueSel    int
+	issuesState loadState
+	modal       *newWorktreeModal
+	details     map[string]*worktreeDetails // per-worktree panel cache, keyed by path
 
 	status string
 }

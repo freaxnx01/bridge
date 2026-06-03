@@ -25,6 +25,15 @@ const (
 	focusSessions
 )
 
+// dashFocus is which Screen-2 pane has the keyboard: the worktree list (left)
+// or the open-issues list (right). Tab toggles between them.
+type dashFocus int
+
+const (
+	dashFocusWorktrees dashFocus = iota
+	dashFocusIssues
+)
+
 type loadState int
 
 const (
@@ -64,6 +73,15 @@ type dashRow struct {
 	hasSession   bool
 	dirty        dirtyInfo
 	dirtyState   loadState
+	// displayLabel overrides the default "<repo> [<wt>]" session name when set
+	// (issue-launched worktrees carry "#123 [<short title>]"); "" => default.
+	displayLabel string
+}
+
+// issueRow is one open-issue row in the Screen-2 issues pane.
+type issueRow struct {
+	number int
+	title  string
 }
 
 // dirtyInfo is the async git status for a worktree. ahead/behind come from the
@@ -128,8 +146,9 @@ type Config struct {
 	// NameArgs returns extra leading args that label the launched agent session
 	// (e.g. claude's `-n "<repo> [<wt>]"`) and performs any pre-launch setup
 	// (the relabel hook). Injected by cmd/bridge so internal/nav stays free of
-	// agent-label/hook specifics. Nil => no naming.
-	NameArgs func(agent string, repo core.Repo, worktree string) []string
+	// agent-label/hook specifics. Nil => no naming. A non-empty label overrides
+	// the default "<repo> [<wt>]" naming (issue launches pass "#123 [<title>]").
+	NameArgs func(agent string, repo core.Repo, worktree, label string) []string
 	// Version is the vX.Y.Z string shown bottom-right (injected by cmd/bridge).
 	Version string
 	// DebugKeys, when non-empty, is a file path each key press is appended to
@@ -154,6 +173,7 @@ type issueCountMsg struct {
 	key   string // forge/owner/name
 	count int
 }
+type repoIssuesMsg struct{ issues []forge.Issue }
 type dashRowsMsg struct{ rows []dashRow }
 type dirtyMsg struct {
 	path string

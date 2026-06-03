@@ -199,8 +199,11 @@ func TestUpdatePicker_HomeFromFilter_EntersListAtFirst(t *testing.T) {
 func TestLaunchArgvFor_NameArgsInjected(t *testing.T) {
 	m := initialModel(Config{
 		DefaultAgent: "claude",
-		NameArgs: func(agent string, repo core.Repo, wt string) []string {
-			return []string{"-n", repo.Name + " [" + wt + "]"}
+		NameArgs: func(agent string, repo core.Repo, wt, label string) []string {
+			if label == "" {
+				label = repo.Name + " [" + wt + "]"
+			}
+			return []string{"-n", label}
 		},
 	})
 	m.repo = core.Repo{Name: "bridge", Path: "/r"}
@@ -549,5 +552,158 @@ func TestIssueCountCmds_NoCfg_ReturnsNil(t *testing.T) {
 	}}
 	if cmd := m.issueCountCmds(m.localRepos); cmd != nil {
 		t.Errorf("issueCountCmds without cache/fetch config should return nil")
+	}
+}
+
+func TestUpdate_RepoIssuesMsg_PopulatesIssues(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.issuesState = loadPending
+	out, _ := m.Update(repoIssuesMsg{issues: []forge.Issue{
+		{Number: 127, Title: "show open forge issues"},
+		{Number: 114, Title: "nested-tmux launch"},
+	}})
+	got := out.(Model)
+	if got.issuesState != loadOK {
+		t.Errorf("issuesState = %d, want loadOK", got.issuesState)
+	}
+	if len(got.issues) != 2 || got.issues[0].number != 127 {
+		t.Fatalf("issues not populated: %+v", got.issues)
+	}
+}
+
+func TestUpdate_RepoIssuesMsg_EmptyDropsIssuesFocus(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashFocus = dashFocusIssues
+	out, _ := m.Update(repoIssuesMsg{issues: nil})
+	if got := out.(Model); got.dashFocus != dashFocusWorktrees {
+		t.Errorf("empty issues should drop focus back to worktrees, got %d", got.dashFocus)
+	}
+}
+
+func TestUpdateDash_TabTogglesIssuesFocus(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.issues = []issueRow{{number: 1, title: "a"}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	got := out.(Model)
+	if got.dashFocus != dashFocusIssues {
+		t.Fatalf("Tab should focus issues, got %d", got.dashFocus)
+	}
+	out2, _ := got.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if g2 := out2.(Model); g2.dashFocus != dashFocusWorktrees {
+		t.Errorf("Tab again should return to worktrees, got %d", g2.dashFocus)
+	}
+}
+
+func TestUpdateDash_TabNoIssues_StaysOnWorktrees(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
+	if got := out.(Model); got.dashFocus != dashFocusWorktrees {
+		t.Errorf("Tab with no issues should stay on worktrees, got %d", got.dashFocus)
+	}
+}
+
+func TestUpdateDashIssues_Navigation(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	m.dashFocus = dashFocusIssues
+	m.issues = []issueRow{{number: 1}, {number: 2}, {number: 3}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")})
+	if got := out.(Model); got.issueSel != 2 {
+		t.Errorf("G -> issueSel=%d, want 2", got.issueSel)
+	}
+}
+
+func TestUpdateDashIssues_EnterLaunchesWorktree(t *testing.T) {
+	m := initialModel(Config{})
+	m.repo = core.Repo{Name: "bridge", Path: t.TempDir()}
+	m.screen = screenDash
+	m.dashFocus = dashFocusIssues
+	m.issues = []issueRow{{number: 127, title: "show open forge issues"}}
+	m.issueSel = 0
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd == nil {
+		t.Fatal("Enter on an issue should return a createWorktree Cmd")
+	}
+}
+
+func TestLaunchIssue_LabelInjectedThroughNameArgs(t *testing.T) {
+	var gotLabel string
+	m := initialModel(Config{
+		DefaultAgent: "claude",
+		NameArgs: func(agent string, repo core.Repo, wt, label string) []string {
+			gotLabel = label
+			return []string{"-n", label}
+		},
+	})
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	// Simulate the worktree the issue launch creates, carrying its display label.
+	row := dashRow{worktree: "127-show-open-forge-issues", path: "/r/.worktrees/127-show-open-forge-issues",
+		displayLabel: "#127 [show open forge issues]"}
+	argv, err := m.launchArgvFor(row)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotLabel != "#127 [show open forge issues]" {
+		t.Errorf("label passed to NameArgs = %q, want the issue label", gotLabel)
+	}
+	if !strings.Contains(strings.Join(argv, " "), "#127 [show open forge issues]") {
+		t.Errorf("argv missing the issue label: %v", argv)
+	}
+}
+
+func TestLoadRepoIssuesCmd_CacheHit(t *testing.T) {
+	dir := t.TempDir()
+	cacheFile := filepath.Join(dir, "github_owner_myrepo.json")
+	if err := forge.WriteIssueCache(cacheFile, forge.IssueCache{
+		UpdatedAt: time.Now(),
+		Issues:    []forge.Issue{{Number: 7, Title: "x"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := loadRepoIssuesCmd(Config{IssueCacheDir: dir}, "github", "owner", "myrepo")
+	msg, ok := cmd().(repoIssuesMsg)
+	if !ok {
+		t.Fatalf("expected repoIssuesMsg, got %T", cmd())
+	}
+	if len(msg.issues) != 1 || msg.issues[0].Number != 7 {
+		t.Errorf("issues = %+v, want one issue #7", msg.issues)
+	}
+}
+
+func TestIssueWorktreeName(t *testing.T) {
+	cases := []struct {
+		num       int
+		title     string
+		wantWT    string
+		wantLabel string
+	}{
+		{127, "show open forge issues", "127-show-open-forge-issues", "#127 [show open forge issues]"},
+		{5, "feat(nav): Ctrl+N new repo", "5-feat-nav-ctrl-n-new-repo", "#5 [feat(nav): Ctrl+N new repo]"},
+		{42, "", "42", "#42"},
+		{9, "!!!", "9", "#9 [!!!]"},
+	}
+	for _, c := range cases {
+		wt, label := issueWorktreeName(c.num, c.title)
+		if wt != c.wantWT {
+			t.Errorf("issueWorktreeName(%d, %q) wt = %q, want %q", c.num, c.title, wt, c.wantWT)
+		}
+		if label != c.wantLabel {
+			t.Errorf("issueWorktreeName(%d, %q) label = %q, want %q", c.num, c.title, label, c.wantLabel)
+		}
+	}
+}
+
+func TestIssueWorktreeName_LongTitleTruncatesSlug(t *testing.T) {
+	wt, _ := issueWorktreeName(1, strings.Repeat("ab cd ", 20))
+	// "1-" + at most issueSlugMax slug chars (trailing hyphen trimmed).
+	if len(wt) > len("1-")+issueSlugMax {
+		t.Errorf("slug too long: %q (%d)", wt, len(wt))
+	}
+	if strings.HasSuffix(wt, "-") {
+		t.Errorf("slug should not end with a hyphen: %q", wt)
 	}
 }

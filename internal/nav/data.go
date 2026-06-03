@@ -109,13 +109,16 @@ func gitDirtyCmd(path string) tea.Cmd {
 	}
 }
 
-func createWorktreeCmd(repo core.Repo, name string) tea.Cmd {
+// createWorktreeCmd resolves (creating if needed) worktree name and returns a
+// dashRow to launch. label, when non-empty, overrides the session display name
+// (issue launches pass "#123 [<title>]"); "" keeps the default "<repo> [<wt>]".
+func createWorktreeCmd(repo core.Repo, name, label string) tea.Cmd {
 	return func() tea.Msg {
 		dir, _, err := worktree.Resolve(worktree.ExecRunner{}, repo.Path, name)
 		if err != nil {
 			return wtCreatedMsg{err: err}
 		}
-		return wtCreatedMsg{row: dashRow{worktree: name, branch: "worktree-" + name, path: dir, dirtyState: loadPending}}
+		return wtCreatedMsg{row: dashRow{worktree: name, branch: "worktree-" + name, path: dir, displayLabel: label, dirtyState: loadPending}}
 	}
 }
 
@@ -227,32 +230,53 @@ func rowForgeKey(r repoRow) (key, forgeName, owner, name string, ok bool) {
 
 const issueCacheTTL = 10 * time.Minute
 
-// loadIssueCountCmd reads the per-repo issue cache (and refreshes via FetchIssues
-// when stale). Degrades gracefully: cache miss + nil FetchIssues returns count 0;
-// fetch errors return the last cached count.
+// issueCacheFile is the per-repo cache path for forge/owner/repo, or "" when
+// caching is disabled.
+func issueCacheFile(cfg Config, forgeName, owner, repo string) string {
+	if cfg.IssueCacheDir == "" {
+		return ""
+	}
+	return filepath.Join(cfg.IssueCacheDir, forgeName+"_"+owner+"_"+repo+".json")
+}
+
+// fetchIssuesCached returns a repo's open issues, reading the per-repo cache
+// first and refreshing via FetchIssues only when the cache is missing or stale.
+// Degrades gracefully: a cache miss with no FetchIssues yields the (empty)
+// cached slice; a fetch error falls back to the last cached slice.
+func fetchIssuesCached(cfg Config, forgeName, owner, repo string) []forge.Issue {
+	cacheFile := issueCacheFile(cfg, forgeName, owner, repo)
+	var cached forge.IssueCache
+	if cacheFile != "" {
+		cached, _ = forge.ReadIssueCache(cacheFile)
+		if !cached.UpdatedAt.IsZero() && !cached.IsStale(issueCacheTTL) {
+			return cached.Issues
+		}
+	}
+	if cfg.FetchIssues == nil {
+		return cached.Issues
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	issues, err := cfg.FetchIssues(ctx, forgeName, owner, repo)
+	if err != nil {
+		return cached.Issues
+	}
+	if cacheFile != "" {
+		_ = forge.WriteIssueCache(cacheFile, forge.IssueCache{UpdatedAt: time.Now(), Issues: issues})
+	}
+	return issues
+}
+
+// loadIssueCountCmd loads a repo's open-issue count for a picker row.
 func loadIssueCountCmd(cfg Config, key, forgeName, owner, repo string) tea.Cmd {
 	return func() tea.Msg {
-		var cached forge.IssueCache
-		if cfg.IssueCacheDir != "" {
-			cacheFile := filepath.Join(cfg.IssueCacheDir, forgeName+"_"+owner+"_"+repo+".json")
-			cached, _ = forge.ReadIssueCache(cacheFile)
-			if !cached.IsStale(issueCacheTTL) && !cached.UpdatedAt.IsZero() {
-				return issueCountMsg{key: key, count: len(cached.Issues)}
-			}
-		}
-		if cfg.FetchIssues == nil {
-			return issueCountMsg{key: key, count: len(cached.Issues)}
-		}
-		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-		defer cancel()
-		issues, err := cfg.FetchIssues(ctx, forgeName, owner, repo)
-		if err != nil {
-			return issueCountMsg{key: key, count: len(cached.Issues)}
-		}
-		if cfg.IssueCacheDir != "" {
-			cacheFile := filepath.Join(cfg.IssueCacheDir, forgeName+"_"+owner+"_"+repo+".json")
-			_ = forge.WriteIssueCache(cacheFile, forge.IssueCache{UpdatedAt: time.Now(), Issues: issues})
-		}
-		return issueCountMsg{key: key, count: len(issues)}
+		return issueCountMsg{key: key, count: len(fetchIssuesCached(cfg, forgeName, owner, repo))}
+	}
+}
+
+// loadRepoIssuesCmd loads the full open-issue list for the dashboard repo.
+func loadRepoIssuesCmd(cfg Config, forgeName, owner, repo string) tea.Cmd {
+	return func() tea.Msg {
+		return repoIssuesMsg{issues: fetchIssuesCached(cfg, forgeName, owner, repo)}
 	}
 }

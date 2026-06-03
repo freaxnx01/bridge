@@ -101,6 +101,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.err != nil {
 			if m.modal != nil {
 				m.modal.err = msg.err.Error()
+			} else {
+				m.status = "worktree create failed: " + msg.err.Error()
 			}
 			return m, nil
 		}
@@ -127,6 +129,19 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.remoteRepos[i].issueCount = msg.count
 				m.remoteRepos[i].issueState = loadOK
 			}
+		}
+		return m, nil
+	case repoIssuesMsg:
+		m.issues = make([]issueRow, 0, len(msg.issues))
+		for _, is := range msg.issues {
+			m.issues = append(m.issues, issueRow{number: is.Number, title: is.Title})
+		}
+		m.issuesState = loadOK
+		if m.issueSel >= len(m.issues) {
+			m.issueSel = 0
+		}
+		if len(m.issues) == 0 && m.dashFocus == dashFocusIssues {
+			m.dashFocus = dashFocusWorktrees
 		}
 		return m, nil
 
@@ -307,6 +322,28 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenPicker
 		m.pickerFocus = focusList
 		return m, loadSessionsCmd(m.cfg.SlotsPath)
+	case "tab", "shift+tab":
+		// Toggle between the worktree list and the open-issues pane (only when
+		// the repo has issues to land on).
+		if len(m.issues) > 0 {
+			if m.dashFocus == dashFocusWorktrees {
+				m.dashFocus = dashFocusIssues
+				m.issueSel = clampInt(m.issueSel, 0, len(m.issues)-1)
+			} else {
+				m.dashFocus = dashFocusWorktrees
+			}
+		}
+		return m, nil
+	}
+	if m.dashFocus == dashFocusIssues {
+		return m.updateDashIssues(msg)
+	}
+	return m.updateDashWorktrees(msg)
+}
+
+// updateDashWorktrees handles keys when the worktree list (left pane) is focused.
+func (m Model) updateDashWorktrees(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
 	case "up", "k":
 		if n := len(m.dashRows) + 1; n > 0 { // +1 for the "+ create" row
 			m.dashSel = (m.dashSel + n - 1) % n
@@ -339,6 +376,44 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m.ensureDetails()
 }
 
+// updateDashIssues handles keys when the open-issues pane (right) is focused.
+// Enter creates a worktree named after the issue and launches a session in it.
+func (m Model) updateDashIssues(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		if m.issueSel > 0 {
+			m.issueSel--
+		}
+	case "down", "j":
+		if m.issueSel < len(m.issues)-1 {
+			m.issueSel++
+		}
+	case "home", "g":
+		m.issueSel = 0
+	case "end", "G":
+		if len(m.issues) > 0 {
+			m.issueSel = len(m.issues) - 1
+		}
+	case "pgup", "ctrl+u":
+		m.issueSel = clampInt(m.issueSel-m.listPage(), 0, len(m.issues)-1)
+	case "pgdown", "ctrl+d":
+		m.issueSel = clampInt(m.issueSel+m.listPage(), 0, len(m.issues)-1)
+	case "enter":
+		if m.issueSel >= 0 && m.issueSel < len(m.issues) {
+			return m.launchIssue(m.issues[m.issueSel])
+		}
+	}
+	return m, nil
+}
+
+// launchIssue creates (or resolves) a worktree named after the issue and
+// launches a session in it, labelled "#<num> [<short title>]".
+func (m Model) launchIssue(ir issueRow) (tea.Model, tea.Cmd) {
+	wt, label := issueWorktreeName(ir.number, ir.title)
+	m.status = fmt.Sprintf("creating worktree for #%d…", ir.number)
+	return m, createWorktreeCmd(m.repo, wt, label)
+}
+
 func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEsc:
@@ -350,7 +425,7 @@ func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.modal.err = "name required"
 			return m, nil
 		}
-		return m, createWorktreeCmd(m.repo, name)
+		return m, createWorktreeCmd(m.repo, name, "")
 	case tea.KeyBackspace:
 		if r := []rune(m.modal.name); len(r) > 0 {
 			m.modal.name = string(r[:len(r)-1])
@@ -363,14 +438,36 @@ func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// enterDash switches to the dashboard for repo and loads its rows.
+// enterDash switches to the dashboard for repo and loads its rows + open issues.
 func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
 	m.screen = screenDash
 	m.repo = repo
 	m.dashSel = 0
 	m.dashRows = nil
+	m.dashFocus = dashFocusWorktrees
+	m.issues = nil
+	m.issueSel = 0
 	m.status = "ready"
-	return m, loadDashRowsCmd(repo, m.cfg.SlotsPath)
+	cmds := []tea.Cmd{loadDashRowsCmd(repo, m.cfg.SlotsPath)}
+	if c := m.repoIssuesCmd(repo); c != nil {
+		m.issuesState = loadPending
+		cmds = append(cmds, c)
+	} else {
+		m.issuesState = loadOK // nothing to load: an empty, settled pane
+	}
+	return m, tea.Batch(cmds...)
+}
+
+// repoIssuesCmd returns a Cmd loading the repo's open issues, or nil when issue
+// loading is unconfigured or the repo lacks forge identifiers.
+func (m Model) repoIssuesCmd(repo core.Repo) tea.Cmd {
+	if m.cfg.IssueCacheDir == "" && m.cfg.FetchIssues == nil {
+		return nil
+	}
+	if repo.Forge == "" || repo.Owner == "" || repo.Name == "" {
+		return nil
+	}
+	return loadRepoIssuesCmd(m.cfg, repo.Forge, repo.Owner, repo.Name)
 }
 
 // launchPlan decides attach-vs-launch for a row. For a new session it returns
@@ -389,7 +486,7 @@ func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err e
 		return nil, "", "", err
 	}
 	if m.cfg.NameArgs != nil {
-		if na := m.cfg.NameArgs(agent, m.repo, row.worktree); len(na) > 0 {
+		if na := m.cfg.NameArgs(agent, m.repo, row.worktree, row.displayLabel); len(na) > 0 {
 			spec.Args = append(append([]string{}, na...), spec.Args...)
 		}
 	}

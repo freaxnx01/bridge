@@ -149,20 +149,33 @@ func (m Model) viewDash() string {
 
 	var body string
 	if w < dashTwoColMin {
-		body = panel(w, "Sessions & Worktrees", m.dashListBody(false))
+		parts := []string{panel(w, "Sessions & Worktrees", m.dashListBody(false))}
+		// Narrow layout has no detail column, so stack the issues pane below the
+		// worktree list when the repo has any (or is still loading them).
+		if m.issuesState == loadPending || len(m.issues) > 0 {
+			parts = append(parts, m.issuesPanel(w, 0))
+		}
+		body = strings.Join(parts, "\n")
 	} else {
 		leftW := clampInt(w*5/12, 40, 64)
 		rightW := w - leftW
 		listBody := m.dashListBody(true)
+		// Right column is contextual: the open-issues pane when it's focused,
+		// otherwise the selected worktree's detail panels.
+		rightAt := func(h int) string {
+			if m.dashFocus == dashFocusIssues {
+				return m.issuesPanel(rightW, h)
+			}
+			return m.detailColumn(rightW, h)
+		}
 		// Stretch the shorter column so both close their bottom border on the
 		// same line: render each at natural height, take the taller, re-render.
-		h := max(lipgloss.Height(panel(leftW, "Sessions & Worktrees", listBody)), lipgloss.Height(m.detailColumn(rightW, 0)))
+		h := max(lipgloss.Height(panel(leftW, "Sessions & Worktrees", listBody)), lipgloss.Height(rightAt(0)))
 		left := panelH(leftW, h, "Sessions & Worktrees", listBody)
-		right := m.detailColumn(rightW, h)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, left, right)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, left, rightAt(h))
 	}
 
-	hint := m.hintLine("↑↓ move · g/G first/last · ⏎ attach/launch · n new worktree · esc back · q quit")
+	hint := m.hintLine("↑↓ move · tab worktrees/issues · ⏎ attach/launch · n new worktree · esc back · q quit")
 
 	out := header + "\n" + body + "\n" + hint
 	if m.modal != nil {
@@ -199,14 +212,14 @@ func (m Model) dashListBody(compact bool) string {
 			line = fmt.Sprintf("%s %-18s %-14s %-8s %-12s %s",
 				dot, trunc(r.worktree, 18), trunc(r.branch, 14), agent, la, m.dirtyView(r))
 		}
-		if i == m.dashSel {
+		if i == m.dashSel && m.dashFocus == dashFocusWorktrees {
 			line = stSel.Render(line)
 		}
 		b.WriteString(line + "\n")
 	}
 	b.WriteString("\n")
 	createLine := "  + Create new worktree…"
-	if m.dashSel == len(m.dashRows) {
+	if m.dashSel == len(m.dashRows) && m.dashFocus == dashFocusWorktrees {
 		createLine = stSel.Render(stAccent.Render("▸ ") + "+ Create new worktree…")
 	}
 	b.WriteString(createLine)
@@ -285,6 +298,53 @@ func (m Model) detailColumn(w, minH int) string {
 	statusH := minH - lipgloss.Height(branches) - lipgloss.Height(commits)
 	status := stretchPanel(w, statusH, "Git status", statusBody)
 	return lipgloss.JoinVertical(lipgloss.Left, branches, commits, status)
+}
+
+// issuesPanel renders the open-issues pane (a single bordered panel) for the
+// dashboard repo, windowed around the selection and stretched to at least minH.
+// The selection highlight shows only when the issues pane holds focus.
+func (m Model) issuesPanel(w, minH int) string {
+	title := "Open issues"
+	if m.dashFocus == dashFocusIssues {
+		title += "  " + stMuted.Render("(⏎ start worktree)")
+	}
+	return stretchPanel(w, minH, title, m.issuesBody(w, minH))
+}
+
+func (m Model) issuesBody(w, minH int) string {
+	switch m.issuesState {
+	case loadPending:
+		return m.spin.View() + " loading…"
+	case loadErr:
+		return stMuted.Render("unavailable")
+	}
+	if len(m.issues) == 0 {
+		return stOk.Render("✓ no open issues")
+	}
+	// Reserve panel chrome (border + title + blank lines + overflow markers) when
+	// budgeting visible rows; fall back to a small window at natural height.
+	maxVisible := minH - 6
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	start, end := windowAround(len(m.issues), m.issueSel, maxVisible)
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		ir := m.issues[i]
+		text := trunc(fmt.Sprintf("#%d %s", ir.number, ir.title), w-6)
+		if m.dashFocus == dashFocusIssues && i == m.issueSel {
+			b.WriteString(stSel.Render(stAccent.Render("▸ ")+text) + "\n")
+		} else {
+			b.WriteString("  " + stText.Render(text) + "\n")
+		}
+	}
+	if end < len(m.issues) {
+		b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(m.issues)-end)) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
 }
 
 // stretchPanel renders a panel at least minH tall, falling back to its natural

@@ -339,10 +339,17 @@ func displayName(repo core.Repo, worktree string) string {
 // agents (only claude has --name). Builds a fresh Args slice so the shared
 // registry spec is never mutated.
 func withClaudeName(spec agents.AgentSpec, repo core.Repo, worktree string) agents.AgentSpec {
+	return withClaudeNameLabel(spec, displayName(repo, worktree))
+}
+
+// withClaudeNameLabel is withClaudeName with an explicit display label (used by
+// nav for issue launches, which name the session "#123 [<title>]" rather than
+// the default "<repo> [<wt>]").
+func withClaudeNameLabel(spec agents.AgentSpec, label string) agents.AgentSpec {
 	if spec.Name != "claude" {
 		return spec
 	}
-	spec.Args = append([]string{"-n", displayName(repo, worktree)}, spec.Args...)
+	spec.Args = append([]string{"-n", label}, spec.Args...)
 	return spec
 }
 
@@ -389,10 +396,16 @@ func sessionLive(slot string) bool {
 // after /clear wipes it (#85). Non-claude agents are a no-op. Errors are
 // non-fatal: the launch itself is the primary action.
 func ensureClaudeRelabel(spec agents.AgentSpec, repo core.Repo, worktree string) {
+	ensureClaudeRelabelLabel(spec, displayName(repo, worktree))
+}
+
+// ensureClaudeRelabelLabel is ensureClaudeRelabel with an explicit display label
+// (nav's issue launches restore "#123 [<title>]" after /clear).
+func ensureClaudeRelabelLabel(spec agents.AgentSpec, label string) {
 	if spec.Name != "claude" {
 		return
 	}
-	if err := hooks.EnsureRelabel(hooks.EffectiveConfigDir(), displayName(repo, worktree)); err != nil {
+	if err := hooks.EnsureRelabel(hooks.EffectiveConfigDir(), label); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: relabel hook install failed: %v\n", err)
 	}
 }
