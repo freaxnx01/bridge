@@ -12,6 +12,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/gitauth"
 )
 
 // PickerChoice is a discriminated union of local-repo / remote-only results
@@ -249,7 +250,7 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	// the env that direnv injects, without ever writing it to .git/config.
 	// Mirrors the bash _bridge_git_clone_in pattern.
 	gitArgs := []string{}
-	if helper := cloneCredentialHelper(ref.Forge); helper != "" {
+	if helper := gitauth.CredentialHelper(ref.Forge); helper != "" {
 		gitArgs = append(gitArgs, "-c", helper)
 	}
 	gitArgs = append(gitArgs, "clone", url, targetDir)
@@ -262,20 +263,6 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 		return "", fmt.Errorf("clone: %w", err)
 	}
 	return targetDir, nil
-}
-
-// cloneCredentialHelper returns a git -c value that wires an inline credential
-// helper for the given forge. The helper reads the PAT/token from the env at
-// credential-prompt time (so it's never persisted in .git/config or visible
-// in /proc command-line listings). Empty string = no helper, plain clone.
-func cloneCredentialHelper(forge string) string {
-	switch forge {
-	case "ado":
-		return `credential.https://dev.azure.com.helper=!f() { echo username=x; echo "password=${AZURE_DEVOPS_EXT_PAT:-$ADO_PAT}"; }; f`
-	case "github":
-		return `credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_TOKEN:-$GITHUB_TOKEN}"; }; f`
-	}
-	return ""
 }
 
 // remoteCloneDirs derives (parent_dir, target_dir) for a remote ref under
