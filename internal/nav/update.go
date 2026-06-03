@@ -22,14 +22,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case reposMsg:
 		m.localRepos = msg.rows
-		return m, nil
+		return m, m.issueCountCmds(msg.rows)
 	case sessionsMsg:
 		m.sessions = msg.rows
 		return m, nil
 	case remoteMsg:
 		m.remoteRepos = msg.rows
 		m.remoteState = loadOK
-		return m, nil
+		return m, m.issueCountCmds(msg.rows)
 	case remoteErrMsg:
 		m.remoteState = loadErr
 		m.status = "remote unavailable (cached rows shown)"
@@ -113,6 +113,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		return m, loadSessionsCmd(m.cfg.SlotsPath)
 	case slotRegisteredMsg:
+		return m, nil
+
+	case issueCountMsg:
+		for i := range m.localRepos {
+			if k, _, _, _, ok := rowForgeKey(m.localRepos[i]); ok && k == msg.key {
+				m.localRepos[i].issueCount = msg.count
+				m.localRepos[i].issueState = loadOK
+			}
+		}
+		for i := range m.remoteRepos {
+			if k, _, _, _, ok := rowForgeKey(m.remoteRepos[i]); ok && k == msg.key {
+				m.remoteRepos[i].issueCount = msg.count
+				m.remoteRepos[i].issueState = loadOK
+			}
+		}
 		return m, nil
 
 	case tea.KeyMsg:
@@ -545,6 +560,23 @@ func (m Model) ensureDetails() (Model, tea.Cmd) {
 		gitCommitsCmd(path),
 		gitStatusCmd(path),
 	)
+}
+
+// issueCountCmds fires loadIssueCountCmd for each row that has forge identifiers,
+// when at least one of IssueCacheDir or FetchIssues is configured.
+func (m Model) issueCountCmds(rows []repoRow) tea.Cmd {
+	if m.cfg.IssueCacheDir == "" && m.cfg.FetchIssues == nil {
+		return nil
+	}
+	var cmds []tea.Cmd
+	for _, r := range rows {
+		key, forgeName, owner, name, ok := rowForgeKey(r)
+		if !ok {
+			continue
+		}
+		cmds = append(cmds, loadIssueCountCmd(m.cfg, key, forgeName, owner, name))
+	}
+	return tea.Batch(cmds...)
 }
 
 // logKey appends a key diagnostic line to path (BRIDGE_NAV_DEBUG).

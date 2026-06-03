@@ -5,10 +5,12 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/forge"
 )
 
 func TestUpdate_ReposMsg_PopulatesLocal(t *testing.T) {
@@ -463,5 +465,89 @@ func TestUpdate_FetchDoneMsg_Error_KeepsLastKnown(t *testing.T) {
 	_, cmd := m.Update(fetchDoneMsg{err: errFake})
 	if cmd != nil {
 		t.Errorf("a failed fetch should be a no-op (keep last-known), got a Cmd")
+	}
+}
+
+func TestUpdate_IssueCountMsg_UpdatesLocalAndRemote(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{
+		label: "github/public/bridge",
+		repo:  core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"},
+	}}
+	m.remoteRepos = []repoRow{{
+		label:  "↓ github/public/other",
+		remote: &forge.RepoRef{Forge: "github", Owner: "freaxnx01", Name: "other"},
+	}}
+
+	out, _ := m.Update(issueCountMsg{key: "github/freaxnx01/bridge", count: 5})
+	got := out.(Model)
+	if got.localRepos[0].issueCount != 5 {
+		t.Errorf("local issueCount = %d, want 5", got.localRepos[0].issueCount)
+	}
+	if got.localRepos[0].issueState != loadOK {
+		t.Errorf("local issueState = %d, want loadOK", got.localRepos[0].issueState)
+	}
+
+	out2, _ := got.Update(issueCountMsg{key: "github/freaxnx01/other", count: 3})
+	got2 := out2.(Model)
+	if got2.remoteRepos[0].issueCount != 3 {
+		t.Errorf("remote issueCount = %d, want 3", got2.remoteRepos[0].issueCount)
+	}
+	if got2.remoteRepos[0].issueState != loadOK {
+		t.Errorf("remote issueState = %d, want loadOK", got2.remoteRepos[0].issueState)
+	}
+}
+
+func TestUpdate_IssueCountMsg_UnknownKey_IsNoop(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{label: "a", repo: core.Repo{Forge: "github", Owner: "x", Name: "y"}}}
+	out, _ := m.Update(issueCountMsg{key: "github/other/repo", count: 9})
+	got := out.(Model)
+	if got.localRepos[0].issueCount != 0 {
+		t.Errorf("unknown key should not modify any row, issueCount=%d", got.localRepos[0].issueCount)
+	}
+}
+
+func TestLoadIssueCountCmd_CacheHit_ReturnsCount(t *testing.T) {
+	dir := t.TempDir()
+	cacheFile := filepath.Join(dir, "github_owner_myrepo.json")
+	if err := forge.WriteIssueCache(cacheFile, forge.IssueCache{
+		UpdatedAt: time.Now(),
+		Issues:    []forge.Issue{{Number: 1}, {Number: 2}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	cmd := loadIssueCountCmd(Config{IssueCacheDir: dir}, "github/owner/myrepo", "github", "owner", "myrepo")
+	msg, ok := cmd().(issueCountMsg)
+	if !ok {
+		t.Fatalf("expected issueCountMsg, got %T", cmd())
+	}
+	if msg.count != 2 {
+		t.Errorf("count = %d, want 2", msg.count)
+	}
+	if msg.key != "github/owner/myrepo" {
+		t.Errorf("key = %q, want github/owner/myrepo", msg.key)
+	}
+}
+
+func TestLoadIssueCountCmd_NoConfigNoop_ReturnsZero(t *testing.T) {
+	cmd := loadIssueCountCmd(Config{}, "github/x/y", "github", "x", "y")
+	msg, ok := cmd().(issueCountMsg)
+	if !ok {
+		t.Fatalf("expected issueCountMsg, got %T", cmd())
+	}
+	if msg.count != 0 {
+		t.Errorf("count = %d, want 0 (no cache, no FetchIssues)", msg.count)
+	}
+}
+
+func TestIssueCountCmds_NoCfg_ReturnsNil(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{
+		label: "github/public/bridge",
+		repo:  core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"},
+	}}
+	if cmd := m.issueCountCmds(m.localRepos); cmd != nil {
+		t.Errorf("issueCountCmds without cache/fetch config should return nil")
 	}
 }

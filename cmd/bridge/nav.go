@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -42,6 +43,14 @@ var navCmd = &cobra.Command{
 				}
 				return repoFromClonedRef(reposRoot(), ref, dir), nil
 			},
+			FetchIssues: func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
+				c := clientFor(forgeName)
+				if c == nil {
+					return nil, nil
+				}
+				return c.ListOpenIssues(ctx, owner, repo)
+			},
+			IssueCacheDir: filepath.Join(cacheRoot(), "issues"),
 		}
 		return nav.Run(cfg)
 	},

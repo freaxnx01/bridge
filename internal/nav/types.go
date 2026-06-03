@@ -4,6 +4,8 @@
 package nav
 
 import (
+	"context"
+
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
@@ -33,9 +35,11 @@ const (
 
 // repoRow is one picker row. Remote rows carry a forge.RepoRef for clone.
 type repoRow struct {
-	label  string // display label, e.g. github/public/bridge
-	repo   core.Repo
-	remote *forge.RepoRef // non-nil => clone-on-select
+	label      string // display label, e.g. github/public/bridge
+	repo       core.Repo
+	remote     *forge.RepoRef // non-nil => clone-on-select
+	issueCount int
+	issueState loadState
 }
 
 // sessionRow is one global active-session row on the picker.
@@ -132,6 +136,12 @@ type Config struct {
 	// (set via BRIDGE_NAV_DEBUG) for diagnosing key handling.
 	DebugKeys string
 	Once      bool
+	// FetchIssues fetches open issues for a repo. Nil disables live fetching
+	// (cache-only). Injected by cmd/bridge so internal/nav is forge-token-free.
+	FetchIssues func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error)
+	// IssueCacheDir is the directory for per-repo issue cache files.
+	// Empty disables caching (and, combined with nil FetchIssues, skips all issue loading).
+	IssueCacheDir string
 }
 
 // --- messages ---
@@ -140,6 +150,10 @@ type reposMsg struct{ rows []repoRow }
 type sessionsMsg struct{ rows []sessionRow }
 type remoteMsg struct{ rows []repoRow }
 type remoteErrMsg struct{ err error }
+type issueCountMsg struct {
+	key   string // forge/owner/name
+	count int
+}
 type dashRowsMsg struct{ rows []dashRow }
 type dirtyMsg struct {
 	path string

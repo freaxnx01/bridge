@@ -122,10 +122,11 @@ func (m Model) viewPicker() string {
 			rb.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
 		}
 		for i := start; i < end; i++ {
+			tag := repoIssueTag(rows[i])
 			if m.pickerFocus == focusList && i == sel {
-				rb.WriteString(stSel.Render(stAccent.Render("▸ ")+rows[i].label) + "\n")
+				rb.WriteString(stSel.Render(stAccent.Render("▸ ")+rows[i].label+tag) + "\n")
 			} else {
-				rb.WriteString("  " + stText.Render(rows[i].label) + "\n")
+				rb.WriteString("  " + stText.Render(rows[i].label) + tag + "\n")
 			}
 		}
 		if end < len(rows) {
@@ -140,7 +141,11 @@ func (m Model) viewPicker() string {
 
 func (m Model) viewDash() string {
 	w := m.width
-	header := panel(w, "bridge nav · "+m.repo.Name, stMuted.Render(m.repo.Path))
+	headerTitle := "bridge nav · " + m.repo.Name
+	if n := m.repoIssueCount(); n > 0 {
+		headerTitle += "  " + stWarn.Render(fmt.Sprintf("●%d open", n))
+	}
+	header := panel(w, headerTitle, stMuted.Render(m.repo.Path))
 
 	var body string
 	if w < dashTwoColMin {
@@ -158,9 +163,8 @@ func (m Model) viewDash() string {
 	}
 
 	hint := m.hintLine("↑↓ move · g/G first/last · ⏎ attach/launch · n new worktree · esc back · q quit")
-	footer := stMuted.Render("(later: Open issues · forge statusbar)")
 
-	out := header + "\n" + body + "\n" + hint + "\n" + footer
+	out := header + "\n" + body + "\n" + hint
 	if m.modal != nil {
 		out += "\n" + m.viewModal()
 	}
@@ -394,6 +398,26 @@ func windowList(n, max int) (shown, more int) {
 		shown = 1
 	}
 	return shown, n - shown
+}
+
+// repoIssueCount returns the loaded open-issue count for the current dashboard repo.
+func (m Model) repoIssueCount() int {
+	key := m.repo.Forge + "/" + m.repo.Owner + "/" + m.repo.Name
+	for _, r := range m.localRepos {
+		if k, _, _, _, ok := rowForgeKey(r); ok && k == key {
+			return r.issueCount
+		}
+	}
+	return 0
+}
+
+// repoIssueTag returns a short styled issue-count suffix for a picker row, or ""
+// when the count is zero or not yet loaded.
+func repoIssueTag(r repoRow) string {
+	if r.issueState != loadOK || r.issueCount <= 0 {
+		return ""
+	}
+	return "  " + stWarn.Render(fmt.Sprintf("●%d", r.issueCount))
 }
 
 // hintLine renders the muted hint left-aligned with the version pinned to the

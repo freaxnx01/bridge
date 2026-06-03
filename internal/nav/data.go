@@ -1,7 +1,9 @@
 package nav
 
 import (
+	"context"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -204,4 +206,53 @@ func remoteLabel(r forge.RepoRef) string {
 		return r.Forge + "/" + r.Owner + "/" + r.Name
 	}
 	return r.Forge + "/" + r.Name
+}
+
+// rowForgeKey returns a stable key and forge/owner/name for a picker row.
+// Returns ok=false when the row lacks identifiers needed for issue loading.
+func rowForgeKey(r repoRow) (key, forgeName, owner, name string, ok bool) {
+	if r.remote != nil {
+		if r.remote.Forge == "" || r.remote.Owner == "" || r.remote.Name == "" {
+			return "", "", "", "", false
+		}
+		return r.remote.Forge + "/" + r.remote.Owner + "/" + r.remote.Name,
+			r.remote.Forge, r.remote.Owner, r.remote.Name, true
+	}
+	if r.repo.Forge == "" || r.repo.Owner == "" || r.repo.Name == "" {
+		return "", "", "", "", false
+	}
+	return r.repo.Forge + "/" + r.repo.Owner + "/" + r.repo.Name,
+		r.repo.Forge, r.repo.Owner, r.repo.Name, true
+}
+
+const issueCacheTTL = 10 * time.Minute
+
+// loadIssueCountCmd reads the per-repo issue cache (and refreshes via FetchIssues
+// when stale). Degrades gracefully: cache miss + nil FetchIssues returns count 0;
+// fetch errors return the last cached count.
+func loadIssueCountCmd(cfg Config, key, forgeName, owner, repo string) tea.Cmd {
+	return func() tea.Msg {
+		var cached forge.IssueCache
+		if cfg.IssueCacheDir != "" {
+			cacheFile := filepath.Join(cfg.IssueCacheDir, forgeName+"_"+owner+"_"+repo+".json")
+			cached, _ = forge.ReadIssueCache(cacheFile)
+			if !cached.IsStale(issueCacheTTL) && !cached.UpdatedAt.IsZero() {
+				return issueCountMsg{key: key, count: len(cached.Issues)}
+			}
+		}
+		if cfg.FetchIssues == nil {
+			return issueCountMsg{key: key, count: len(cached.Issues)}
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		issues, err := cfg.FetchIssues(ctx, forgeName, owner, repo)
+		if err != nil {
+			return issueCountMsg{key: key, count: len(cached.Issues)}
+		}
+		if cfg.IssueCacheDir != "" {
+			cacheFile := filepath.Join(cfg.IssueCacheDir, forgeName+"_"+owner+"_"+repo+".json")
+			_ = forge.WriteIssueCache(cacheFile, forge.IssueCache{UpdatedAt: time.Now(), Issues: issues})
+		}
+		return issueCountMsg{key: key, count: len(issues)}
+	}
 }
