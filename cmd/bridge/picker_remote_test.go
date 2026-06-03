@@ -1,6 +1,8 @@
 package main
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -96,6 +98,40 @@ func TestRemoteCloneDirsForgejo(t *testing.T) {
 func TestRemoteCloneDirsUnknownForgeErrors(t *testing.T) {
 	if _, _, err := remoteCloneDirs("/r", forge.RepoRef{Forge: "bitbucket", Name: "x"}); err == nil {
 		t.Error("expected error for unknown forge")
+	}
+}
+
+func TestDirHasContentsMissingDir(t *testing.T) {
+	got, err := dirHasContents(filepath.Join(t.TempDir(), "nope"))
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("missing dir should report no contents")
+	}
+}
+
+func TestDirHasContentsEmptyDir(t *testing.T) {
+	got, err := dirHasContents(t.TempDir())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if got {
+		t.Error("empty dir should report no contents")
+	}
+}
+
+func TestDirHasContentsNonEmptyDir(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "f"), []byte("x"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	got, err := dirHasContents(dir)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !got {
+		t.Error("non-empty dir should report contents")
 	}
 }
 

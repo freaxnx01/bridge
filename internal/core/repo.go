@@ -26,6 +26,7 @@ type Repo struct {
 //	github/<owner>/(public|private)/<repo>
 //	gitlab/<owner>/<repo>
 //	git-forgejo/<repo>
+//	ado/<project>/<repo>
 func DiscoverRepos(root string) ([]Repo, error) {
 	var out []Repo
 	walkGithub := func(forgeDir string) error {
@@ -113,22 +114,36 @@ func DiscoverRepos(root string) ([]Repo, error) {
 	}
 
 	walkADO := func(forgeDir string) error {
-		repos, err := os.ReadDir(forgeDir)
+		projects, err := os.ReadDir(forgeDir)
 		if err != nil {
 			return err
 		}
-		for _, r := range repos {
-			if !r.IsDir() {
+		for _, project := range projects {
+			if !project.IsDir() {
 				continue
 			}
-			if strings.HasPrefix(r.Name(), ".") || strings.HasPrefix(r.Name(), "_") {
+			if strings.HasPrefix(project.Name(), ".") || strings.HasPrefix(project.Name(), "_") {
 				continue
 			}
-			out = append(out, Repo{
-				Name:  r.Name(),
-				Path:  filepath.Join(forgeDir, r.Name()),
-				Forge: "ado",
-			})
+			projectDir := filepath.Join(forgeDir, project.Name())
+			repos, err := os.ReadDir(projectDir)
+			if err != nil {
+				continue
+			}
+			for _, r := range repos {
+				if !r.IsDir() {
+					continue
+				}
+				if strings.HasPrefix(r.Name(), ".") {
+					continue
+				}
+				out = append(out, Repo{
+					Name:  r.Name(),
+					Path:  filepath.Join(projectDir, r.Name()),
+					Forge: "ado",
+					Owner: project.Name(),
+				})
+			}
 		}
 		return nil
 	}
