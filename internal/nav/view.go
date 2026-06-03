@@ -145,6 +145,9 @@ func (m Model) viewDash() string {
 	if n := m.repoIssueCount(); n > 0 {
 		headerTitle += "  " + stWarn.Render(fmt.Sprintf("●%d open", n))
 	}
+	if len(m.notes) > 0 {
+		headerTitle += "  " + stAccent.Render("✎ "+m.notesNames())
+	}
 	header := panel(w, headerTitle, stMuted.Render(m.repo.Path))
 
 	var body string
@@ -155,6 +158,9 @@ func (m Model) viewDash() string {
 		if m.issuesState == loadPending || len(m.issues) > 0 {
 			parts = append(parts, m.issuesPanel(w, 0))
 		}
+		if m.notesState == loadPending || len(m.notes) > 0 {
+			parts = append(parts, m.notesPanel(w, 0))
+		}
 		body = strings.Join(parts, "\n")
 	} else {
 		leftW := clampInt(w*5/12, 40, 64)
@@ -163,10 +169,14 @@ func (m Model) viewDash() string {
 		// Right column is contextual: the open-issues pane when it's focused,
 		// otherwise the selected worktree's detail panels.
 		rightAt := func(h int) string {
-			if m.dashFocus == dashFocusIssues {
+			switch m.dashFocus {
+			case dashFocusIssues:
 				return m.issuesPanel(rightW, h)
+			case dashFocusNotes:
+				return m.notesPanel(rightW, h)
+			default:
+				return m.detailColumn(rightW, h)
 			}
-			return m.detailColumn(rightW, h)
 		}
 		// Stretch the shorter column so both close their bottom border on the
 		// same line: render each at natural height, take the taller, re-render.
@@ -175,7 +185,7 @@ func (m Model) viewDash() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, rightAt(h))
 	}
 
-	hint := m.hintLine("↑↓ move · tab worktrees/issues · ⏎ attach/launch · n new worktree · esc back · q quit")
+	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · esc back · q quit")
 
 	out := header + "\n" + body + "\n" + hint
 	if m.modal != nil {
@@ -345,6 +355,81 @@ func (m Model) issuesBody(w, minH int) string {
 		b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(m.issues)-end)) + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
+}
+
+// notesNames joins the present note file names for the header chip (e.g.
+// "ideas.md · TODO.md").
+func (m Model) notesNames() string {
+	names := make([]string, 0, len(m.notes))
+	for _, nf := range m.notes {
+		names = append(names, nf.name)
+	}
+	return strings.Join(names, " · ")
+}
+
+// notesPanel renders the repo-root notes (ideas.md / TODO.md) pane, scrolled to
+// notesScroll and stretched to at least minH. Shown as a focusable right-column
+// pane when wide, and stacked below the worktree list when narrow.
+func (m Model) notesPanel(w, minH int) string {
+	title := "Notes"
+	if m.dashFocus == dashFocusNotes {
+		title += "  " + stMuted.Render("(↑↓ scroll)")
+	}
+	return stretchPanel(w, minH, title, m.notesBody(w, minH))
+}
+
+func (m Model) notesBody(w, minH int) string {
+	if text, ok := m.panelState(m.notesState); !ok {
+		return text
+	}
+	lines := m.noteDisplayLines(w)
+	if len(lines) == 0 {
+		return stMuted.Render("(no notes)")
+	}
+	// Reserve panel chrome (border + title + blank lines + overflow markers) when
+	// budgeting visible rows; fall back to a small window at natural height.
+	maxVisible := minH - 6
+	if maxVisible < 3 {
+		maxVisible = 3
+	}
+	start := clampInt(m.notesScroll, 0, max(0, len(lines)-maxVisible))
+	end := min(len(lines), start+maxVisible)
+	var b strings.Builder
+	if start > 0 {
+		b.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
+	}
+	for i := start; i < end; i++ {
+		b.WriteString(lines[i] + "\n")
+	}
+	if end < len(lines) {
+		b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(lines)-end)) + "\n")
+	}
+	return strings.TrimRight(b.String(), "\n")
+}
+
+// noteDisplayLines renders the notes pane as one styled string per display line
+// (file headers, body lines, the binary marker, blank separators), ready to be
+// windowed by notesBody. Must stay in lockstep with notesTotalLines.
+func (m Model) noteDisplayLines(w int) []string {
+	var lines []string
+	for i, nf := range m.notes {
+		if i > 0 {
+			lines = append(lines, "")
+		}
+		head := stAccent.Render(nf.name)
+		if nf.truncated {
+			head += stMuted.Render("  (truncated)")
+		}
+		lines = append(lines, head)
+		if nf.binary {
+			lines = append(lines, stMuted.Render("(binary or non-text content)"))
+			continue
+		}
+		for _, ln := range nf.lines {
+			lines = append(lines, stText.Render(trunc(ln, w-4)))
+		}
+	}
+	return lines
 }
 
 // stretchPanel renders a panel at least minH tall, falling back to its natural

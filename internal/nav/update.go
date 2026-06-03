@@ -144,6 +144,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.dashFocus = dashFocusWorktrees
 		}
 		return m, nil
+	case notesMsg:
+		m.notes = msg.notes
+		m.notesState = loadOK
+		m.notesScroll = 0
+		if len(m.notes) == 0 && m.dashFocus == dashFocusNotes {
+			m.dashFocus = dashFocusWorktrees
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		if m.cfg.DebugKeys != "" {
@@ -322,21 +330,16 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.screen = screenPicker
 		m.pickerFocus = focusList
 		return m, loadSessionsCmd(m.cfg.SlotsPath)
-	case "tab", "shift+tab":
-		// Toggle between the worktree list and the open-issues pane (only when
-		// the repo has issues to land on).
-		if len(m.issues) > 0 {
-			if m.dashFocus == dashFocusWorktrees {
-				m.dashFocus = dashFocusIssues
-				m.issueSel = clampInt(m.issueSel, 0, len(m.issues)-1)
-			} else {
-				m.dashFocus = dashFocusWorktrees
-			}
-		}
-		return m, nil
+	case "tab":
+		return m.cycledDashFocus(1), nil
+	case "shift+tab":
+		return m.cycledDashFocus(-1), nil
 	}
-	if m.dashFocus == dashFocusIssues {
+	switch m.dashFocus {
+	case dashFocusIssues:
 		return m.updateDashIssues(msg)
+	case dashFocusNotes:
+		return m.updateDashNotes(msg)
 	}
 	return m.updateDashWorktrees(msg)
 }
@@ -406,6 +409,83 @@ func (m Model) updateDashIssues(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
+// dashPaneCycle is the ordered set of panes the dashboard's Tab key rotates
+// through: the worktree list, then the open-issues pane (when the repo has open
+// issues) and the notes pane (when the repo has note files). Empty panes are
+// skipped so Tab never lands on a box with nothing to show.
+func (m Model) dashPaneCycle() []dashFocus {
+	cycle := []dashFocus{dashFocusWorktrees}
+	if len(m.issues) > 0 {
+		cycle = append(cycle, dashFocusIssues)
+	}
+	if len(m.notes) > 0 {
+		cycle = append(cycle, dashFocusNotes)
+	}
+	return cycle
+}
+
+// cycledDashFocus advances (dir +1) or reverses (dir -1) the dashboard focus
+// through dashPaneCycle, wrapping around, and seeds the landed pane's selection.
+func (m Model) cycledDashFocus(dir int) Model {
+	cycle := m.dashPaneCycle()
+	idx := 0
+	for i, f := range cycle {
+		if f == m.dashFocus {
+			idx = i
+			break
+		}
+	}
+	idx = ((idx+dir)%len(cycle) + len(cycle)) % len(cycle)
+	m.dashFocus = cycle[idx]
+	switch m.dashFocus {
+	case dashFocusIssues:
+		m.issueSel = clampInt(m.issueSel, 0, len(m.issues)-1)
+	case dashFocusNotes:
+		m.notesScroll = clampInt(m.notesScroll, 0, max(0, m.notesTotalLines()-1))
+	}
+	return m
+}
+
+// updateDashNotes handles scrolling when the notes pane holds focus.
+func (m Model) updateDashNotes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "up", "k":
+		m.notesScroll--
+	case "down", "j":
+		m.notesScroll++
+	case "home", "g":
+		m.notesScroll = 0
+	case "end", "G":
+		m.notesScroll = m.notesTotalLines()
+	case "pgup", "ctrl+u":
+		m.notesScroll -= m.listPage()
+	case "pgdown", "ctrl+d":
+		m.notesScroll += m.listPage()
+	}
+	m.notesScroll = clampInt(m.notesScroll, 0, max(0, m.notesTotalLines()-1))
+	return m, nil
+}
+
+// notesTotalLines counts the display lines the notes pane renders (file headers,
+// body lines, the binary marker, and blank separators between files) to bound
+// scrolling. Width-independent: line wrapping is by truncation, one line each.
+// Must stay in lockstep with noteDisplayLines.
+func (m Model) notesTotalLines() int {
+	n := 0
+	for i, nf := range m.notes {
+		if i > 0 {
+			n++ // blank separator between files
+		}
+		n++ // file-name header
+		if nf.binary {
+			n++ // "(binary…)" marker
+			continue
+		}
+		n += len(nf.lines)
+	}
+	return n
+}
+
 // launchIssue creates (or resolves) a worktree named after the issue and
 // launches a session in it, labelled "#<num> [<short title>]".
 func (m Model) launchIssue(ir issueRow) (tea.Model, tea.Cmd) {
@@ -447,8 +527,11 @@ func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
 	m.dashFocus = dashFocusWorktrees
 	m.issues = nil
 	m.issueSel = 0
+	m.notes = nil
+	m.notesScroll = 0
+	m.notesState = loadPending
 	m.status = "ready"
-	cmds := []tea.Cmd{loadDashRowsCmd(repo, m.cfg.SlotsPath)}
+	cmds := []tea.Cmd{loadDashRowsCmd(repo, m.cfg.SlotsPath), loadNotesCmd(repo.Path)}
 	if c := m.repoIssuesCmd(repo); c != nil {
 		m.issuesState = loadPending
 		cmds = append(cmds, c)

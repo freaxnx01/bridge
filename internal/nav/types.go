@@ -26,12 +26,14 @@ const (
 )
 
 // dashFocus is which Screen-2 pane has the keyboard: the worktree list (left)
-// or the open-issues list (right). Tab toggles between them.
+// or one of the contextual right-column panes (open issues, repo notes). Tab
+// cycles through the panes that have content (see Model.dashPaneCycle).
 type dashFocus int
 
 const (
 	dashFocusWorktrees dashFocus = iota
 	dashFocusIssues
+	dashFocusNotes
 )
 
 type loadState int
@@ -82,6 +84,16 @@ type dashRow struct {
 type issueRow struct {
 	number int
 	title  string
+}
+
+// noteFile is one repo-root backlog file (ideas.md / TODO.md) surfaced on the
+// dashboard. lines holds the UTF-8 text preview (empty when binary); truncated
+// marks a file clipped at notesMaxBytes; binary marks non-text content.
+type noteFile struct {
+	name      string
+	lines     []string
+	truncated bool
+	binary    bool
 }
 
 // dirtyInfo is the async git status for a worktree. ahead/behind come from the
@@ -174,6 +186,7 @@ type issueCountMsg struct {
 	count int
 }
 type repoIssuesMsg struct{ issues []forge.Issue }
+type notesMsg struct{ notes []noteFile }
 type dashRowsMsg struct{ rows []dashRow }
 type dirtyMsg struct {
 	path string

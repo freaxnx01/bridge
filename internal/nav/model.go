@@ -31,6 +31,9 @@ type Model struct {
 	issues      []issueRow
 	issueSel    int
 	issuesState loadState
+	notes       []noteFile
+	notesScroll int // top display-line offset of the notes pane
+	notesState  loadState
 	modal       *newWorktreeModal
 	details     map[string]*worktreeDetails // per-worktree panel cache, keyed by path
 
