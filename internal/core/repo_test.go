@@ -17,6 +17,8 @@ func setupFakeRepos(t *testing.T) string {
 		"github/otheruser/public/lib",
 		"gitlab/freaxnx01/some-gl-repo",
 		"git-forgejo/forgejo-repo",
+		"ado/bossinfo-repo",
+		"ado/_archive", // must be skipped
 	}
 	for _, p := range layout {
 		full := filepath.Join(root, p)
@@ -47,8 +49,8 @@ func TestDiscoverRepos(t *testing.T) {
 	}
 	sort.Slice(repos, func(i, j int) bool { return repos[i].Path < repos[j].Path })
 
-	if len(repos) != 5 {
-		t.Fatalf("want 5 repos, got %d: %+v", len(repos), repos)
+	if len(repos) != 6 {
+		t.Fatalf("want 6 repos, got %d: %+v", len(repos), repos)
 	}
 
 	want := []struct {
@@ -59,6 +61,7 @@ func TestDiscoverRepos(t *testing.T) {
 		{"lib", "github", "otheruser", "public"},
 		{"secret-thing", "github", "freaxnx01", "private"},
 		{"bridge", "github", "freaxnx01", "public"},
+		{"bossinfo-repo", "ado", "", ""},
 	}
 	sort.Slice(want, func(i, j int) bool { return want[i].name < want[j].name })
 	sort.Slice(repos, func(i, j int) bool { return repos[i].Name < repos[j].Name })

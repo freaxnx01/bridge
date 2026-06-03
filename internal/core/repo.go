@@ -112,6 +112,27 @@ func DiscoverRepos(root string) ([]Repo, error) {
 		return nil
 	}
 
+	walkADO := func(forgeDir string) error {
+		repos, err := os.ReadDir(forgeDir)
+		if err != nil {
+			return err
+		}
+		for _, r := range repos {
+			if !r.IsDir() {
+				continue
+			}
+			if strings.HasPrefix(r.Name(), ".") || strings.HasPrefix(r.Name(), "_") {
+				continue
+			}
+			out = append(out, Repo{
+				Name:  r.Name(),
+				Path:  filepath.Join(forgeDir, r.Name()),
+				Forge: "ado",
+			})
+		}
+		return nil
+	}
+
 	if d := filepath.Join(root, "github"); dirExists(d) {
 		if err := walkGithub(d); err != nil {
 			return nil, err
@@ -124,6 +145,11 @@ func DiscoverRepos(root string) ([]Repo, error) {
 	}
 	if d := filepath.Join(root, "git-forgejo"); dirExists(d) {
 		if err := walkForgejo(d); err != nil {
+			return nil, err
+		}
+	}
+	if d := filepath.Join(root, "ado"); dirExists(d) {
+		if err := walkADO(d); err != nil {
 			return nil, err
 		}
 	}
