@@ -12,7 +12,7 @@ build:
 
 [windows]
 build:
-    #!/usr/bin/env pwsh
+    #!pwsh.exe
     git pull
     $ver = git describe --tags --always --dirty 2>$null
     if (-not $ver) { $ver = 'dev' }
