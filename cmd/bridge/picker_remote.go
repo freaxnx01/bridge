@@ -48,10 +48,6 @@ func entryLabel(forge, owner, vis, name string) string {
 	}
 }
 
-func localEntryLabel(r core.Repo) string {
-	return entryLabel(r.Forge, r.Owner, r.Visibility, r.Name)
-}
-
 // collidingLabels returns the set of base entry-labels (case-insensitive) that
 // map to more than one distinct owner across the combined local+remote set —
 // i.e. labels that would render identically for different repos. Only github
