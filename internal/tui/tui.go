@@ -174,6 +174,10 @@ func panelStyle(focused bool) lipgloss.Style {
 // without subtracting the border emits 2 trailing cells per row and an
 // extra blank line — the .Width-vs-rounded-border glitch tracked in #73.
 func renderPanel(focused bool, outerW, outerH int, content string) string {
+	// Trim the builders' trailing newline so content height is exactly
+	// title + rows; a stray blank line would push the panel one row past
+	// outerH and clip the layout's top on short terminals (#103).
+	content = strings.TrimRight(content, "\n")
 	return panelStyle(focused).Width(outerW - 2).Height(outerH - 2).Render(content)
 }
 
@@ -460,7 +464,9 @@ func (m model) viewRepos(w, h int) string {
 	focused := m.focus == paneRepos
 	var b strings.Builder
 	b.WriteString(titleStyle(focused).Render(" Repos ") + "\n\n")
-	for i, r := range m.repos {
+	start, end := windowRange(len(m.repos), panelRows(h), m.sel[paneRepos])
+	for i := start; i < end; i++ {
+		r := m.repos[i]
 		visRaw := r.vis
 		visStyled := pubStyle.Render(visRaw)
 		if r.vis == "pri" {
@@ -496,7 +502,9 @@ func (m model) viewIssues(w, h int) string {
 	if titleW < 10 {
 		titleW = 10
 	}
-	for i, is := range m.issues {
+	start, end := windowRange(len(m.issues), panelRows(h), m.sel[paneIssues])
+	for i := start; i < end; i++ {
+		is := m.issues[i]
 		numRaw := fmt.Sprintf("#%-4d", is.num)
 		num := accentStyle.Render(numRaw)
 		repoRaw := truncate(is.repo, repoW)
@@ -520,7 +528,9 @@ func (m model) viewSessions(w, h int) string {
 	focused := m.focus == paneSessions
 	var b strings.Builder
 	b.WriteString(titleStyle(focused).Render(" Sessions ") + "\n\n")
-	for i, s := range m.sessions {
+	start, end := windowRange(len(m.sessions), panelRows(h), m.sel[paneSessions])
+	for i := start; i < end; i++ {
+		s := m.sessions[i]
 		var dot string
 		switch s.state {
 		case "attached":
@@ -599,11 +609,33 @@ func (m model) viewHint(w int) string {
 		lipgloss.NewStyle().Width(w).Render(status)
 }
 
+// Dashboard layout heights. chromeH is the fixed cost of the header (3), the
+// command bar (3) and the hint line (2). minPanelH is the smallest a list panel
+// can be and still show its border + title + one row; minPanelsH is the floor
+// for the two stacked panels together, below which the view degrades to a
+// "terminal too small" hint instead of clipping the top (#103).
+const (
+	chromeH    = 8
+	minPanelH  = 5
+	minPanelsH = minPanelH * 2
+)
+
 func (m model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "initialising…"
 	}
 	w := m.width
+
+	// The chrome — header, command bar, hint — has a fixed height; the rest of
+	// m.height is split between the repos/issues row and the sessions panel.
+	// Deriving these from m.height (rather than hardcoding 11/7) keeps the top
+	// from scrolling off the alt-screen on short terminals (#103).
+	avail := m.height - chromeH
+	if avail < minPanelsH {
+		return m.viewTooSmall()
+	}
+	sessionsH := clampInt(avail/3, minPanelH, 7)
+	rowH := clampInt(avail-sessionsH, minPanelH, 11)
 
 	header := m.viewHeader(w)
 
@@ -613,12 +645,11 @@ func (m model) View() string {
 		reposW = w / 2
 	}
 	issuesW := w - reposW
-	rowH := 11
 	repos := m.viewRepos(reposW, rowH)
 	issues := m.viewIssues(issuesW, rowH)
 	topRow := lipgloss.JoinHorizontal(lipgloss.Top, repos, issues)
 
-	sessions := m.viewSessions(w, 7)
+	sessions := m.viewSessions(w, sessionsH)
 
 	cmd := m.viewCommand(w)
 	hint := m.viewHint(w)
@@ -647,11 +678,54 @@ func helpText() string {
 	}, "\n")
 }
 
+// viewTooSmall renders a centred hint when the terminal has too few rows for
+// the dashboard layout, sized to exactly fill (and not exceed) the screen.
+func (m model) viewTooSmall() string {
+	msg := badStyle.Render(fmt.Sprintf("terminal too small — %d rows, need %d+", m.height, chromeH+minPanelsH))
+	return lipgloss.Place(m.width, m.height, lipgloss.Center, lipgloss.Center, msg)
+}
+
 func max(a, b int) int {
 	if a > b {
 		return a
 	}
 	return b
+}
+
+func clampInt(v, lo, hi int) int {
+	if v < lo {
+		return lo
+	}
+	if v > hi {
+		return hi
+	}
+	return v
+}
+
+// windowRange returns the [start, end) slice of `total` rows that fits in
+// `capacity` visible rows while keeping index `sel` on screen (scroll-follow),
+// so a list longer than its panel doesn't overflow the dashboard height (#103).
+func windowRange(total, capacity, sel int) (int, int) {
+	if capacity <= 0 {
+		return 0, 0
+	}
+	if total <= capacity {
+		return 0, total
+	}
+	start := sel - capacity/2
+	if start < 0 {
+		start = 0
+	}
+	if start+capacity > total {
+		start = total - capacity
+	}
+	return start, start + capacity
+}
+
+// panelRows is how many list rows fit in a panel of outer height h: the two
+// border lines and the two-line title leave h-4 for rows.
+func panelRows(h int) int {
+	return h - 4
 }
 
 func truncate(s string, n int) string {
