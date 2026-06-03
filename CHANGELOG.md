@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge nav` dashboard: read-only **Branches**, **Recent commits**, and **Git status** panels for the highlighted worktree, in a master-detail layout beside the worktree list. Loaded lazily and cached per worktree; refreshed on detach-return. Terminals narrower than 90 columns keep the list-only view.
 - `bridge nav` dashboard: per-worktree remote sync status — **ahead**, **behind**, and a distinct **no-upstream** marker — kept accurate by a non-blocking background `git fetch` on dashboard entry (last-known shown immediately; offline is a no-op). A worktree's modified-file count (`●N`) is shown alongside the no-upstream marker.
 
+### Fixed
+
+- Combined repo picker (`-r`): a locally-cloned repo no longer appears twice (once local, once remote `↓`). The remote dedup now compares forge/owner/name **case-insensitively** — GitHub logins are case-insensitive and on-disk owner dirs may be cased differently from the forge API, which previously let the remote duplicate survive. (#124)
+
 ## [2.6.1] - 2026-06-01
 
 ### Changed
