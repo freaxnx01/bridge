@@ -32,12 +32,9 @@ func pickRepo(repos []core.Repo) (core.Repo, bool, error) {
 	sort.Slice(repos, func(i, j int) bool {
 		return localSortKey(repos[i]) < localSortKey(repos[j])
 	})
-	var input bytes.Buffer
-	for _, r := range repos {
-		input.WriteString(localEntryLabel(r) + "\t" + r.Path + "\n")
-	}
+	input := bytes.NewBufferString(localPickerRows(repos))
 	cmd := exec.Command("fzf", "--with-nth=1", "--delimiter=\t", "--prompt=bridge> ", "--layout=reverse", "--tiebreak=index")
-	cmd.Stdin = &input
+	cmd.Stdin = input
 	cmd.Stderr = os.Stderr
 	var out bytes.Buffer
 	cmd.Stdout = &out
@@ -62,6 +59,19 @@ func pickRepo(repos []core.Repo) (core.Repo, bool, error) {
 		}
 	}
 	return core.Repo{}, false, errors.New("picker: chosen repo not in list")
+}
+
+// localPickerRows builds the fzf input for the local-only picker: one
+// "<label>\t<path>" line per repo. Labels for repo names that collide across
+// owners are owner-qualified (github/<vis>/<owner>/<name>) so the rows are
+// distinguishable; uniquely-named repos keep the clean owner-less label.
+func localPickerRows(repos []core.Repo) string {
+	collide := collidingLabels(repos, nil)
+	var b strings.Builder
+	for _, r := range repos {
+		b.WriteString(pickerLabel(collide, r.Forge, r.Owner, r.Visibility, r.Name) + "\t" + r.Path + "\n")
+	}
+	return b.String()
 }
 
 // pickSession mirrors pickRepo for sessions. Returns "" on cancel.
