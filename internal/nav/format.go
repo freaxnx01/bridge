@@ -54,10 +54,67 @@ func dedupRemoteRows(local, remote []repoRow) []repoRow {
 // repoRowKey is the case-insensitive forge+owner+name identity of a repo row,
 // taken from its remote ref when present, otherwise its local repo.
 func repoRowKey(r repoRow) string {
+	forge, owner, _, name := rowParts(r)
+	return strings.ToLower(forge + "\x00" + owner + "\x00" + name)
+}
+
+// rowParts returns the forge, owner, visibility, and name of a repo row, from
+// its remote ref when present, otherwise its local repo.
+func rowParts(r repoRow) (forge, owner, vis, name string) {
 	if r.remote != nil {
-		return strings.ToLower(r.remote.Forge + "\x00" + r.remote.Owner + "\x00" + r.remote.Name)
+		return r.remote.Forge, r.remote.Owner, r.remote.Visibility, r.remote.Name
 	}
-	return strings.ToLower(r.repo.Forge + "\x00" + r.repo.Owner + "\x00" + r.repo.Name)
+	return r.repo.Forge, r.repo.Owner, r.repo.Visibility, r.repo.Name
+}
+
+// disambiguateOwners rewrites labels for rows that base-render identically (same
+// forge/visibility/name) but belong to different owners — e.g. freaxnx01 and
+// anim-bossinfo-ch both having ai-instructions, which otherwise both show as
+// github/public/ai-instructions and look like the #124 duplicate. Such rows get
+// the owner injected (github/<vis>/<owner>/<name>) so they're distinguishable;
+// rows with a unique base label keep the clean owner-less form. Returns a new
+// slice; the input rows are not mutated.
+func disambiguateOwners(rows []repoRow) []repoRow {
+	idxByLabel := map[string][]int{}
+	ownersByLabel := map[string]map[string]bool{}
+	for i, r := range rows {
+		key := repoSortKey(r.label)
+		idxByLabel[key] = append(idxByLabel[key], i)
+		if ownersByLabel[key] == nil {
+			ownersByLabel[key] = map[string]bool{}
+		}
+		_, owner, _, _ := rowParts(r)
+		ownersByLabel[key][strings.ToLower(owner)] = true
+	}
+	out := append([]repoRow{}, rows...)
+	for key, idxs := range idxByLabel {
+		if len(ownersByLabel[key]) < 2 {
+			continue // unique repo (or same owner): keep the clean label
+		}
+		for _, i := range idxs {
+			out[i].label = ownerQualifiedLabel(out[i])
+		}
+	}
+	return out
+}
+
+// ownerQualifiedLabel returns r's label with the owner injected for
+// disambiguation. For github (whose base label drops the owner) it becomes
+// github/<vis>/<owner>/<name>; other forges already carry the owner, so their
+// existing label is returned unchanged. The remote "↓ " prefix is preserved.
+func ownerQualifiedLabel(r repoRow) string {
+	forge, owner, vis, name := rowParts(r)
+	if forge != "github" {
+		return r.label
+	}
+	if vis == "" {
+		vis = "-"
+	}
+	display := "github/" + vis + "/" + owner + "/" + name
+	if r.remote != nil {
+		return "↓ " + display
+	}
+	return display
 }
 
 // filterRepos keeps rows whose label contains q (case-insensitive). Empty q

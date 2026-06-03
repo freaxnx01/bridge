@@ -52,8 +52,49 @@ func localEntryLabel(r core.Repo) string {
 	return entryLabel(r.Forge, r.Owner, r.Visibility, r.Name)
 }
 
-func remoteEntryLabel(r forge.RepoRef) string {
-	return entryLabel(r.Forge, r.Owner, r.Visibility, r.Name)
+// collidingLabels returns the set of base entry-labels (case-insensitive) that
+// map to more than one distinct owner across the combined local+remote set —
+// i.e. labels that would render identically for different repos. Only github
+// labels can collide, since they drop the owner (github/<vis>/<name>); other
+// forges already carry the owner in the label.
+func collidingLabels(local []core.Repo, remote []forge.RepoRef) map[string]bool {
+	owners := map[string]map[string]bool{}
+	add := func(forgeName, owner, vis, name string) {
+		key := strings.ToLower(entryLabel(forgeName, owner, vis, name))
+		if owners[key] == nil {
+			owners[key] = map[string]bool{}
+		}
+		owners[key][strings.ToLower(owner)] = true
+	}
+	for _, r := range local {
+		add(r.Forge, r.Owner, r.Visibility, r.Name)
+	}
+	for _, r := range remote {
+		add(r.Forge, r.Owner, r.Visibility, r.Name)
+	}
+	out := map[string]bool{}
+	for key, owns := range owners {
+		if len(owns) > 1 {
+			out[key] = true
+		}
+	}
+	return out
+}
+
+// pickerLabel returns the fzf display label for a repo (without the remote
+// "↓ " prefix), injecting the owner when its base label collides with a
+// different owner in collide. For github a collision yields
+// github/<vis>/<owner>/<name>; other forges already carry the owner.
+func pickerLabel(collide map[string]bool, forgeName, owner, vis, name string) string {
+	base := entryLabel(forgeName, owner, vis, name)
+	if !collide[strings.ToLower(base)] || forgeName != "github" {
+		return base
+	}
+	v := vis
+	if v == "" {
+		v = "-"
+	}
+	return forgeName + "/" + v + "/" + owner + "/" + name
 }
 
 // entrySortKey returns a comparison key that orders entries by:
@@ -124,12 +165,16 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 		kind    string
 		key     string
 	}
+	// Different owners with the same github repo name base-render identically
+	// (github/<vis>/<name>); inject the owner for just those so they aren't
+	// mistaken for duplicates.
+	collide := collidingLabels(local, remote)
 	var rows []row
 	for _, r := range local {
-		rows = append(rows, row{localEntryLabel(r), localSortKey(r), "local", r.Path})
+		rows = append(rows, row{pickerLabel(collide, r.Forge, r.Owner, r.Visibility, r.Name), localSortKey(r), "local", r.Path})
 	}
 	for _, r := range remote {
-		rows = append(rows, row{"↓ " + remoteEntryLabel(r), remoteSortKey(r), "remote", r.Forge + "|" + r.Owner + "|" + r.Name})
+		rows = append(rows, row{"↓ " + pickerLabel(collide, r.Forge, r.Owner, r.Visibility, r.Name), remoteSortKey(r), "remote", r.Forge + "|" + r.Owner + "|" + r.Name})
 	}
 	sort.Slice(rows, func(i, j int) bool {
 		if rows[i].sortKey != rows[j].sortKey {
