@@ -175,9 +175,9 @@ func gitStatusCmd(path string) tea.Cmd {
 // store, so one fetch updates remote refs for all of them. Non-fatal: a failed
 // fetch (offline / missing credential) reports the error; the reducer keeps
 // last-known state.
-func gitFetchCmd(path, forge string) tea.Cmd {
+func gitFetchCmd(path, forgeName string) tea.Cmd {
 	return func() tea.Msg {
-		err := buildFetchCmd(path, forge, haveDirenv()).Run()
+		err := buildFetchCmd(path, forgeName, haveDirenv()).Run()
 		return fetchDoneMsg{err: err}
 	}
 }
@@ -189,10 +189,10 @@ func gitFetchCmd(path, forge string) tea.Cmd {
 // falls back to plain git when direnv is unavailable. It always sets
 // GIT_TERMINAL_PROMPT=0 so a missing or invalid credential fails fast instead of
 // leaking an interactive password prompt into the Bubble Tea UI.
-func buildFetchCmd(path, forge string, direnvAvailable bool) *exec.Cmd {
+func buildFetchCmd(path, forgeName string, direnvAvailable bool) *exec.Cmd {
 	fetchArgs := []string{"-C", path, "fetch", "--quiet"}
 	var cmd *exec.Cmd
-	if helper := gitauth.CredentialHelper(forge); helper != "" && direnvAvailable {
+	if helper := gitauth.CredentialHelper(forgeName); helper != "" && direnvAvailable {
 		args := append([]string{"exec", path, "git", "-c", helper}, fetchArgs...)
 		cmd = exec.Command("direnv", args...)
 	} else {
