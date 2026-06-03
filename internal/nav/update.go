@@ -178,10 +178,13 @@ func (m Model) dirtyCmds() tea.Cmd {
 }
 
 // visibleRepos is the filtered local+remote row list shown in the picker.
-// Remote rows already cloned locally are dropped so a repo isn't listed twice.
+// Remote rows already cloned locally are dropped so a repo isn't listed twice;
+// rows from different owners that share a name are owner-qualified so they're
+// not mistaken for duplicates.
 func (m Model) visibleRepos() []repoRow {
 	all := append([]repoRow{}, m.localRepos...)
 	all = append(all, dedupRemoteRows(m.localRepos, m.remoteRepos)...)
+	all = disambiguateOwners(all)
 	return filterRepos(all, m.filter.Value())
 }
 

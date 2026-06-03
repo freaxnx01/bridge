@@ -180,6 +180,36 @@ func TestEntryLabelGithubVisInPath(t *testing.T) {
 	}
 }
 
+// Two different owners with the same github repo name + visibility base-render
+// to the same label (github/public/ai-instructions) and look like a duplicate.
+// They are different repos, so the owner is injected to disambiguate; a
+// uniquely-named repo keeps its clean owner-less label.
+func TestPickerLabel_SameNameDifferentOwners_OwnerQualified(t *testing.T) {
+	local := []core.Repo{
+		{Forge: "github", Owner: "freaxnx01", Name: "ai-instructions", Visibility: "public"},
+		{Forge: "github", Owner: "freaxnx01", Name: "bridge", Visibility: "public"},
+	}
+	remote := []forge.RepoRef{
+		{Forge: "github", Owner: "anim-bossinfo-ch", Name: "ai-instructions", Visibility: "public"},
+	}
+	collide := collidingLabels(local, remote)
+
+	tests := []struct {
+		name, forge, owner, vis, repo, want string
+	}{
+		{"local colliding", "github", "freaxnx01", "public", "ai-instructions", "github/public/freaxnx01/ai-instructions"},
+		{"remote colliding", "github", "anim-bossinfo-ch", "public", "ai-instructions", "github/public/anim-bossinfo-ch/ai-instructions"},
+		{"unique name keeps clean label", "github", "freaxnx01", "public", "bridge", "github/public/bridge"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := pickerLabel(collide, tt.forge, tt.owner, tt.vis, tt.repo); got != tt.want {
+				t.Errorf("pickerLabel = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepoFromClonedRef(t *testing.T) {
 	ref := forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"}
 	got := repoFromClonedRef("/r", ref, "/r/github/me/public/bridge")
