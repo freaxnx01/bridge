@@ -144,32 +144,6 @@ func TestEntryLabelGithubVisInPath(t *testing.T) {
 	}
 }
 
-func TestCloneCredentialHelperADO(t *testing.T) {
-	h := cloneCredentialHelper("ado")
-	if !strings.HasPrefix(h, "credential.https://dev.azure.com.helper=") {
-		t.Errorf("ado helper missing prefix: %q", h)
-	}
-	if !strings.Contains(h, "AZURE_DEVOPS_EXT_PAT") || !strings.Contains(h, "ADO_PAT") {
-		t.Errorf("ado helper should reference both env vars: %q", h)
-	}
-}
-
-func TestCloneCredentialHelperGithub(t *testing.T) {
-	h := cloneCredentialHelper("github")
-	if !strings.HasPrefix(h, "credential.https://github.com.helper=") {
-		t.Errorf("github helper missing prefix: %q", h)
-	}
-	if !strings.Contains(h, "GH_TOKEN") || !strings.Contains(h, "GITHUB_TOKEN") {
-		t.Errorf("github helper should reference both env vars: %q", h)
-	}
-}
-
-func TestCloneCredentialHelperOthers(t *testing.T) {
-	if cloneCredentialHelper("gitlab") != "" || cloneCredentialHelper("forgejo") != "" {
-		t.Error("non-github/non-ado should return empty (plain clone)")
-	}
-}
-
 func TestRepoFromClonedRef(t *testing.T) {
 	ref := forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"}
 	got := repoFromClonedRef("/r", ref, "/r/github/me/public/bridge")

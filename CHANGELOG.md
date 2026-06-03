@@ -14,6 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `bridge nav` dashboard: the background `git fetch` on dashboard entry no longer leaks an interactive `Password for 'https://…@dev.azure.com'` prompt into the TUI for token-auth repos (ADO, GitHub). It now authenticates via the direnv-loaded PAT using the same inline credential helper as clone, and always runs with `GIT_TERMINAL_PROMPT=0` so a missing/invalid credential fails fast (last-known status is kept) instead of blocking on a prompt.
 - Combined repo picker (`-r`): a locally-cloned repo no longer appears twice (once local, once remote `↓`). The remote dedup now compares forge/owner/name **case-insensitively** — GitHub logins are case-insensitive and on-disk owner dirs may be cased differently from the forge API, which previously let the remote duplicate survive. (#124)
 
 ## [2.6.1] - 2026-06-01

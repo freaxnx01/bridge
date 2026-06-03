@@ -2,6 +2,7 @@ package nav
 
 import (
 	"context"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"time"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/gitauth"
 	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
@@ -171,12 +173,40 @@ func gitStatusCmd(path string) tea.Cmd {
 // gitFetchCmd freshens the repo's remote-tracking refs so ahead/behind are
 // accurate. Runs once per dashboard — worktrees of a repo share the object
 // store, so one fetch updates remote refs for all of them. Non-fatal: a failed
-// fetch (offline) reports the error; the reducer keeps last-known state.
-func gitFetchCmd(path string) tea.Cmd {
+// fetch (offline / missing credential) reports the error; the reducer keeps
+// last-known state.
+func gitFetchCmd(path, forge string) tea.Cmd {
 	return func() tea.Msg {
-		err := exec.Command("git", "-C", path, "fetch", "--quiet").Run()
+		err := buildFetchCmd(path, forge, haveDirenv()).Run()
 		return fetchDoneMsg{err: err}
 	}
+}
+
+// buildFetchCmd assembles the `git fetch` invocation for a worktree. For forges
+// that authenticate with a PAT/token (ado, github) it runs through
+// `direnv exec <path> git -c <helper> …` so the credential helper reads the
+// token direnv injects from the repo's .envrc — mirroring the clone path — and
+// falls back to plain git when direnv is unavailable. It always sets
+// GIT_TERMINAL_PROMPT=0 so a missing or invalid credential fails fast instead of
+// leaking an interactive password prompt into the Bubble Tea UI.
+func buildFetchCmd(path, forge string, direnvAvailable bool) *exec.Cmd {
+	fetchArgs := []string{"-C", path, "fetch", "--quiet"}
+	var cmd *exec.Cmd
+	if helper := gitauth.CredentialHelper(forge); helper != "" && direnvAvailable {
+		args := append([]string{"exec", path, "git", "-c", helper}, fetchArgs...)
+		cmd = exec.Command("direnv", args...)
+	} else {
+		cmd = exec.Command("git", fetchArgs...)
+	}
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return cmd
+}
+
+// haveDirenv reports whether direnv is on PATH (required to load the per-repo
+// .envrc that carries the forge token).
+func haveDirenv() bool {
+	_, err := exec.LookPath("direnv")
+	return err == nil
 }
 
 func repoLabel(r core.Repo) string {
