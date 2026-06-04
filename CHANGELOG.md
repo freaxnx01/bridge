@@ -14,6 +14,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge nav` dashboard: read-only **Branches**, **Recent commits**, and **Git status** panels for the highlighted worktree, in a master-detail layout beside the worktree list. Loaded lazily and cached per worktree; refreshed on detach-return. Terminals narrower than 90 columns keep the list-only view.
 - `bridge nav` dashboard: per-worktree remote sync status — **ahead**, **behind**, and a distinct **no-upstream** marker — kept accurate by a non-blocking background `git fetch` on dashboard entry (last-known shown immediately; offline is a no-op). A worktree's modified-file count (`●N`) is shown alongside the no-upstream marker.
 
+### Changed
+
+- `bridge nav` dashboard: **Open Issues**, **Ideas**, and **Todos** are now three separate, always-visible panes stacked in the right column (previously a single Notes pane combined `ideas.md` and `TODO.md`, and you had to Tab between Issues and Notes to see each). Each scrolls independently; missing sources show a placeholder. Tab cycles a fixed Worktrees → Issues → Ideas → Todos loop, and the worktree list keeps its Branches/Commits/Status detail column.
+
 ### Fixed
 
 - `bridge nav` dashboard: the background `git fetch` on dashboard entry no longer leaks an interactive `Password for 'https://…@dev.azure.com'` prompt into the TUI for token-auth repos (ADO, GitHub). It now authenticates via the direnv-loaded PAT using the same inline credential helper as clone, and always runs with `GIT_TERMINAL_PROMPT=0` so a missing/invalid credential fails fast (last-known status is kept) instead of blocking on a prompt.

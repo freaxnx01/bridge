@@ -140,17 +140,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.issueSel >= len(m.issues) {
 			m.issueSel = 0
 		}
-		if len(m.issues) == 0 && m.dashFocus == dashFocusIssues {
-			m.dashFocus = dashFocusWorktrees
-		}
 		return m, nil
 	case notesMsg:
 		m.notes = msg.notes
 		m.notesState = loadOK
-		m.notesScroll = 0
-		if len(m.notes) == 0 && m.dashFocus == dashFocusNotes {
-			m.dashFocus = dashFocusWorktrees
-		}
+		m.ideasScroll = 0
+		m.todosScroll = 0
 		return m, nil
 
 	case tea.KeyMsg:
@@ -341,8 +336,10 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch m.dashFocus {
 	case dashFocusIssues:
 		return m.updateDashIssues(msg)
-	case dashFocusNotes:
-		return m.updateDashNotes(msg)
+	case dashFocusIdeas:
+		return m.updateDashIdeas(msg)
+	case dashFocusTodos:
+		return m.updateDashTodos(msg)
 	}
 	return m.updateDashWorktrees(msg)
 }
@@ -412,19 +409,12 @@ func (m Model) updateDashIssues(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 
-// dashPaneCycle is the ordered set of panes the dashboard's Tab key rotates
-// through: the worktree list, then the open-issues pane (when the repo has open
-// issues) and the notes pane (when the repo has note files). Empty panes are
-// skipped so Tab never lands on a box with nothing to show.
+// dashPaneCycle is the fixed order the dashboard's Tab key rotates through:
+// the worktree list, then the three always-visible backlog panes. The backlog
+// panes are always shown (with placeholders when empty), so Tab stops on every
+// one regardless of content.
 func (m Model) dashPaneCycle() []dashFocus {
-	cycle := []dashFocus{dashFocusWorktrees}
-	if len(m.issues) > 0 {
-		cycle = append(cycle, dashFocusIssues)
-	}
-	if len(m.notes) > 0 {
-		cycle = append(cycle, dashFocusNotes)
-	}
-	return cycle
+	return []dashFocus{dashFocusWorktrees, dashFocusIssues, dashFocusIdeas, dashFocusTodos}
 }
 
 // cycledDashFocus advances (dir +1) or reverses (dir -1) the dashboard focus
@@ -443,50 +433,44 @@ func (m Model) cycledDashFocus(dir int) Model {
 	switch m.dashFocus {
 	case dashFocusIssues:
 		m.issueSel = clampInt(m.issueSel, 0, len(m.issues)-1)
-	case dashFocusNotes:
-		m.notesScroll = clampInt(m.notesScroll, 0, max(0, m.notesTotalLines()-1))
+	case dashFocusIdeas:
+		m.ideasScroll = clampInt(m.ideasScroll, 0, max(0, noteLineCount(m.ideaNote())-1))
+	case dashFocusTodos:
+		m.todosScroll = clampInt(m.todosScroll, 0, max(0, noteLineCount(m.todoNote())-1))
 	}
 	return m
 }
 
-// updateDashNotes handles scrolling when the notes pane holds focus.
-func (m Model) updateDashNotes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "up", "k":
-		m.notesScroll--
-	case "down", "j":
-		m.notesScroll++
-	case "home", "g":
-		m.notesScroll = 0
-	case "end", "G":
-		m.notesScroll = m.notesTotalLines()
-	case "pgup", "ctrl+u":
-		m.notesScroll -= m.listPage()
-	case "pgdown", "ctrl+d":
-		m.notesScroll += m.listPage()
-	}
-	m.notesScroll = clampInt(m.notesScroll, 0, max(0, m.notesTotalLines()-1))
+// updateDashIdeas handles scrolling when the Ideas pane holds focus.
+func (m Model) updateDashIdeas(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.ideasScroll = scrollByKey(msg, m.ideasScroll, noteLineCount(m.ideaNote()), m.listPage())
 	return m, nil
 }
 
-// notesTotalLines counts the display lines the notes pane renders (file headers,
-// body lines, the binary marker, and blank separators between files) to bound
-// scrolling. Width-independent: line wrapping is by truncation, one line each.
-// Must stay in lockstep with noteDisplayLines.
-func (m Model) notesTotalLines() int {
-	n := 0
-	for i, nf := range m.notes {
-		if i > 0 {
-			n++ // blank separator between files
-		}
-		n++ // file-name header
-		if nf.binary {
-			n++ // "(binary…)" marker
-			continue
-		}
-		n += len(nf.lines)
+// updateDashTodos handles scrolling when the Todos pane holds focus.
+func (m Model) updateDashTodos(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	m.todosScroll = scrollByKey(msg, m.todosScroll, noteLineCount(m.todoNote()), m.listPage())
+	return m, nil
+}
+
+// scrollByKey maps a scroll key to a new top-line offset, clamped to [0, total-1].
+// page is the PgUp/PgDown step. total is the owning file's display-line count.
+func scrollByKey(msg tea.KeyMsg, scroll, total, page int) int {
+	switch msg.String() {
+	case "up", "k":
+		scroll--
+	case "down", "j":
+		scroll++
+	case "home", "g":
+		scroll = 0
+	case "end", "G":
+		scroll = total
+	case "pgup", "ctrl+u":
+		scroll -= page
+	case "pgdown", "ctrl+d":
+		scroll += page
 	}
-	return n
+	return clampInt(scroll, 0, max(0, total-1))
 }
 
 // launchIssue creates (or resolves) a worktree named after the issue and
@@ -531,7 +515,8 @@ func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
 	m.issues = nil
 	m.issueSel = 0
 	m.notes = nil
-	m.notesScroll = 0
+	m.ideasScroll = 0
+	m.todosScroll = 0
 	m.notesState = loadPending
 	m.status = "ready"
 	cmds := []tea.Cmd{loadDashRowsCmd(repo, m.cfg.SlotsPath), loadNotesCmd(repo.Path)}

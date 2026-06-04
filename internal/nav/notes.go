@@ -11,12 +11,19 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 )
 
+// ideasFileName / todoFileName are the two conventional repo-root backlog files
+// surfaced as the Ideas and Todos panes. The set is intentionally fixed.
+const (
+	ideasFileName = "ideas.md"
+	todoFileName  = "TODO.md"
+)
+
 // noteFileNames is the fixed, minimal set of repo-root backlog files surfaced on
 // the dashboard (#130). The set is intentionally NOT configurable: keeping it to
 // the two conventional names keeps discovery predictable and the default small.
 // Matched case-insensitively against the repo-root entries so common spellings
 // (TODO.md, todo.md, Ideas.md) all resolve.
-var noteFileNames = []string{"ideas.md", "TODO.md"}
+var noteFileNames = []string{ideasFileName, todoFileName}
 
 // notesMaxBytes caps how much of a note file is read into the preview. Larger
 // files are read up to the cap and flagged truncated, so a huge file scrolls a
@@ -88,4 +95,33 @@ func readNote(name, path string) (noteFile, bool) {
 	body := strings.ReplaceAll(string(data), "\r\n", "\n")
 	nf.lines = strings.Split(strings.TrimRight(body, "\n"), "\n")
 	return nf, true
+}
+
+// noteByName returns the loaded note file matching want (case-insensitive on the
+// file name), or nil when that file is absent for the dashboard repo.
+func (m Model) noteByName(want string) *noteFile {
+	for i := range m.notes {
+		if strings.EqualFold(m.notes[i].name, want) {
+			return &m.notes[i]
+		}
+	}
+	return nil
+}
+
+// ideaNote returns the loaded ideas.md note, or nil when absent.
+func (m Model) ideaNote() *noteFile { return m.noteByName(ideasFileName) }
+
+// todoNote returns the loaded TODO.md note, or nil when absent.
+func (m Model) todoNote() *noteFile { return m.noteByName(todoFileName) }
+
+// noteLineCount is the number of scrollable display lines a note pane renders for
+// nf: zero when absent, one for the binary marker, else the text line count.
+func noteLineCount(nf *noteFile) int {
+	if nf == nil {
+		return 0
+	}
+	if nf.binary {
+		return 1
+	}
+	return len(nf.lines)
 }
