@@ -267,3 +267,20 @@ func TestNoteLineCount(t *testing.T) {
 		t.Errorf("text => len(lines), got %d", got)
 	}
 }
+
+func TestNoteFilePanel_TruncatedFileShowsHint(t *testing.T) {
+	m := initialModel(Config{})
+	m.notesState = loadOK
+
+	// A file clipped at notesMaxBytes surfaces a (truncated) hint in the title.
+	m.notes = []noteFile{{name: "ideas.md", lines: []string{"x"}, truncated: true}}
+	if out := m.ideasPanel(60, 0); !strings.Contains(out, "truncated") {
+		t.Errorf("truncated note should show a (truncated) hint in the panel:\n%s", out)
+	}
+
+	// A non-truncated file must not show the hint.
+	m.notes = []noteFile{{name: "ideas.md", lines: []string{"x"}}}
+	if out := m.ideasPanel(60, 0); strings.Contains(out, "truncated") {
+		t.Errorf("non-truncated note must not show the hint:\n%s", out)
+	}
+}

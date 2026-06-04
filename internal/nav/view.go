@@ -392,12 +392,16 @@ func (m Model) todosPanel(w, minH int) string {
 }
 
 // noteFilePanel renders one backlog note file as a bordered, scrollable panel.
-// The title carries the on-disk file name when present and a scroll hint when
-// focused. wantName names the file for the "no <name>" placeholder when absent.
+// The title carries the on-disk file name when present, a (truncated) marker for
+// a file clipped at notesMaxBytes, and a scroll hint when focused. wantName names
+// the file for the "no <name>" placeholder when absent.
 func (m Model) noteFilePanel(w, minH int, focus dashFocus, label, wantName string, nf *noteFile, scroll int) string {
 	title := label
 	if nf != nil {
 		title += "  " + stMuted.Render("· "+nf.name)
+		if nf.truncated {
+			title += "  " + stMuted.Render("(truncated)")
+		}
 	}
 	if m.dashFocus == focus {
 		title += "  " + stMuted.Render("(↑↓ scroll)")
