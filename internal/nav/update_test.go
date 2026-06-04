@@ -572,40 +572,6 @@ func TestUpdate_RepoIssuesMsg_PopulatesIssues(t *testing.T) {
 	}
 }
 
-func TestUpdate_RepoIssuesMsg_EmptyDropsIssuesFocus(t *testing.T) {
-	m := initialModel(Config{})
-	m.screen = screenDash
-	m.dashFocus = dashFocusIssues
-	out, _ := m.Update(repoIssuesMsg{issues: nil})
-	if got := out.(Model); got.dashFocus != dashFocusWorktrees {
-		t.Errorf("empty issues should drop focus back to worktrees, got %d", got.dashFocus)
-	}
-}
-
-func TestUpdateDash_TabTogglesIssuesFocus(t *testing.T) {
-	m := initialModel(Config{})
-	m.screen = screenDash
-	m.issues = []issueRow{{number: 1, title: "a"}}
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	got := out.(Model)
-	if got.dashFocus != dashFocusIssues {
-		t.Fatalf("Tab should focus issues, got %d", got.dashFocus)
-	}
-	out2, _ := got.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if g2 := out2.(Model); g2.dashFocus != dashFocusWorktrees {
-		t.Errorf("Tab again should return to worktrees, got %d", g2.dashFocus)
-	}
-}
-
-func TestUpdateDash_TabNoIssues_StaysOnWorktrees(t *testing.T) {
-	m := initialModel(Config{})
-	m.screen = screenDash
-	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyTab})
-	if got := out.(Model); got.dashFocus != dashFocusWorktrees {
-		t.Errorf("Tab with no issues should stay on worktrees, got %d", got.dashFocus)
-	}
-}
-
 func TestUpdateDashIssues_Navigation(t *testing.T) {
 	m := initialModel(Config{})
 	m.screen = screenDash

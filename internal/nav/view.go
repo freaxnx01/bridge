@@ -152,31 +152,27 @@ func (m Model) viewDash() string {
 
 	var body string
 	if w < dashTwoColMin {
-		parts := []string{panel(w, "Sessions & Worktrees", m.dashListBody(false))}
-		// Narrow layout has no detail column, so stack the issues pane below the
-		// worktree list when the repo has any (or is still loading them).
-		if m.issuesState == loadPending || len(m.issues) > 0 {
-			parts = append(parts, m.issuesPanel(w, 0))
-		}
-		if m.notesState == loadPending || len(m.notes) > 0 {
-			parts = append(parts, m.notesPanel(w, 0))
+		// Narrow layout has no detail column, so stack the three backlog panes
+		// below the worktree list. They are always shown (with placeholders) so
+		// the layout is stable and a missing TODO.md is visible.
+		parts := []string{
+			panel(w, "Sessions & Worktrees", m.dashListBody(false)),
+			m.issuesPanel(w, 0),
+			m.ideasPanel(w, 0),
+			m.todosPanel(w, 0),
 		}
 		body = strings.Join(parts, "\n")
 	} else {
 		leftW := clampInt(w*5/12, 40, 64)
 		rightW := w - leftW
 		listBody := m.dashListBody(true)
-		// Right column is contextual: the open-issues pane when it's focused,
-		// otherwise the selected worktree's detail panels.
+		// Right column has two modes: the selected worktree's Details when the
+		// worktree list is focused, otherwise the three stacked backlog panes.
 		rightAt := func(h int) string {
-			switch m.dashFocus {
-			case dashFocusIssues:
-				return m.issuesPanel(rightW, h)
-			case dashFocusNotes:
-				return m.notesPanel(rightW, h)
-			default:
+			if m.dashFocus == dashFocusWorktrees {
 				return m.detailColumn(rightW, h)
 			}
+			return m.backlogColumn(rightW, h)
 		}
 		// Stretch the shorter column so both close their bottom border on the
 		// same line: render each at natural height, take the taller, re-render.
@@ -367,24 +363,64 @@ func (m Model) notesNames() string {
 	return strings.Join(names, " · ")
 }
 
-// notesPanel renders the repo-root notes (ideas.md / TODO.md) pane, scrolled to
-// notesScroll and stretched to at least minH. Shown as a focusable right-column
-// pane when wide, and stacked below the worktree list when narrow.
-func (m Model) notesPanel(w, minH int) string {
-	title := "Notes"
-	if m.dashFocus == dashFocusNotes {
-		title += "  " + stMuted.Render("(↑↓ scroll)")
+// backlogColumn stacks the three backlog panes (Open Issues, Ideas, Todos) as
+// the dashboard's right column when a backlog pane is focused. Each pane gets
+// roughly a third of the height; the last absorbs the slack so the column
+// bottom-aligns with the worktree list. minH <= 0 renders at natural height.
+func (m Model) backlogColumn(w, minH int) string {
+	per := (m.height - 14) / 3
+	if per < 3 {
+		per = 3
 	}
-	return stretchPanel(w, minH, title, m.notesBody(w, minH))
+	issues := m.issuesPanel(w, per)
+	ideas := m.ideasPanel(w, per)
+	todosH := minH - lipgloss.Height(issues) - lipgloss.Height(ideas)
+	todos := m.todosPanel(w, todosH)
+	return lipgloss.JoinVertical(lipgloss.Left, issues, ideas, todos)
 }
 
-func (m Model) notesBody(w, minH int) string {
+// ideasPanel renders the repo-root ideas.md pane (a single bordered panel),
+// scrolled by ideasScroll and stretched to at least minH.
+func (m Model) ideasPanel(w, minH int) string {
+	return m.noteFilePanel(w, minH, dashFocusIdeas, "Ideas", ideasFileName, m.ideaNote(), m.ideasScroll)
+}
+
+// todosPanel renders the repo-root TODO.md pane (a single bordered panel),
+// scrolled by todosScroll and stretched to at least minH.
+func (m Model) todosPanel(w, minH int) string {
+	return m.noteFilePanel(w, minH, dashFocusTodos, "Todos", todoFileName, m.todoNote(), m.todosScroll)
+}
+
+// noteFilePanel renders one backlog note file as a bordered, scrollable panel.
+// The title carries the on-disk file name when present and a scroll hint when
+// focused. wantName names the file for the "no <name>" placeholder when absent.
+func (m Model) noteFilePanel(w, minH int, focus dashFocus, label, wantName string, nf *noteFile, scroll int) string {
+	title := label
+	if nf != nil {
+		title += "  " + stMuted.Render("· "+nf.name)
+	}
+	if m.dashFocus == focus {
+		title += "  " + stMuted.Render("(↑↓ scroll)")
+	}
+	return stretchPanel(w, minH, title, m.noteFileBody(w, minH, wantName, nf, scroll))
+}
+
+// noteFileBody renders a single note file's windowed text. It shares the
+// loading/error states with the other backlog notes (one notesState load), then
+// shows a placeholder when the file is absent, the binary marker, or the
+// scrolled text window with overflow markers.
+func (m Model) noteFileBody(w, minH int, wantName string, nf *noteFile, scroll int) string {
 	if text, ok := m.panelState(m.notesState); !ok {
 		return text
 	}
-	lines := m.noteDisplayLines(w)
-	if len(lines) == 0 {
-		return stMuted.Render("(no notes)")
+	if nf == nil {
+		return stMuted.Render("no " + wantName)
+	}
+	if nf.binary {
+		return stMuted.Render("(binary or non-text content)")
+	}
+	if len(nf.lines) == 0 {
+		return stMuted.Render("(empty)")
 	}
 	// Reserve panel chrome (border + title + blank lines + overflow markers) when
 	// budgeting visible rows; fall back to a small window at natural height.
@@ -392,44 +428,19 @@ func (m Model) notesBody(w, minH int) string {
 	if maxVisible < 3 {
 		maxVisible = 3
 	}
-	start := clampInt(m.notesScroll, 0, max(0, len(lines)-maxVisible))
-	end := min(len(lines), start+maxVisible)
+	start := clampInt(scroll, 0, max(0, len(nf.lines)-maxVisible))
+	end := min(len(nf.lines), start+maxVisible)
 	var b strings.Builder
 	if start > 0 {
 		b.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
 	}
 	for i := start; i < end; i++ {
-		b.WriteString(lines[i] + "\n")
+		b.WriteString(stText.Render(trunc(nf.lines[i], w-4)) + "\n")
 	}
-	if end < len(lines) {
-		b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(lines)-end)) + "\n")
+	if end < len(nf.lines) {
+		b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(nf.lines)-end)) + "\n")
 	}
 	return strings.TrimRight(b.String(), "\n")
-}
-
-// noteDisplayLines renders the notes pane as one styled string per display line
-// (file headers, body lines, the binary marker, blank separators), ready to be
-// windowed by notesBody. Must stay in lockstep with notesTotalLines.
-func (m Model) noteDisplayLines(w int) []string {
-	var lines []string
-	for i, nf := range m.notes {
-		if i > 0 {
-			lines = append(lines, "")
-		}
-		head := stAccent.Render(nf.name)
-		if nf.truncated {
-			head += stMuted.Render("  (truncated)")
-		}
-		lines = append(lines, head)
-		if nf.binary {
-			lines = append(lines, stMuted.Render("(binary or non-text content)"))
-			continue
-		}
-		for _, ln := range nf.lines {
-			lines = append(lines, stText.Render(trunc(ln, w-4)))
-		}
-	}
-	return lines
 }
 
 // stretchPanel renders a panel at least minH tall, falling back to its natural

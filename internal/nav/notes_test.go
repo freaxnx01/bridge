@@ -99,80 +99,118 @@ func TestReadNote_CRLFNormalised(t *testing.T) {
 	}
 }
 
-func TestUpdate_NotesMsg_LoadsAndClearsFocusWhenEmpty(t *testing.T) {
+func TestUpdate_NotesMsg_LoadsAndKeepsFocus(t *testing.T) {
 	m := initialModel(Config{})
 	m.screen = screenDash
-	m.dashFocus = dashFocusNotes
+	m.dashFocus = dashFocusIdeas
+	m.ideasScroll = 5
+	m.todosScroll = 7
 	updated, _ := m.Update(notesMsg{notes: nil})
 	m = updated.(Model)
 	if m.notesState != loadOK {
 		t.Errorf("notesState should be loadOK after notesMsg")
 	}
-	if m.dashFocus != dashFocusWorktrees {
-		t.Errorf("focus should fall back to worktrees when notes are empty")
+	// Panes are always shown now, so focus stays put even when empty.
+	if m.dashFocus != dashFocusIdeas {
+		t.Errorf("focus should stay on Ideas; panes are always present, got %d", m.dashFocus)
+	}
+	if m.ideasScroll != 0 || m.todosScroll != 0 {
+		t.Errorf("notesMsg should reset both scroll offsets, got ideas=%d todos=%d", m.ideasScroll, m.todosScroll)
 	}
 }
 
-func TestUpdateDash_TabCyclesThroughNotes(t *testing.T) {
+func TestUpdateDash_TabCyclesAllFourPanes(t *testing.T) {
 	m := initialModel(Config{})
 	m.screen = screenDash
 	m.repo = core.Repo{Name: "bridge"}
-	m.issues = []issueRow{{number: 1, title: "x"}}
-	m.notes = []noteFile{{name: "ideas.md", lines: []string{"a"}}}
-
+	// Deliberately leave issues/notes empty: Tab must still stop on every pane.
 	tab := tea.KeyMsg{Type: tea.KeyTab}
 	step := func(mod Model) Model {
 		u, _ := mod.updateDash(tab)
 		return u.(Model)
 	}
-	m = step(m)
-	if m.dashFocus != dashFocusIssues {
-		t.Fatalf("first tab => issues, got %d", m.dashFocus)
-	}
-	m = step(m)
-	if m.dashFocus != dashFocusNotes {
-		t.Fatalf("second tab => notes, got %d", m.dashFocus)
-	}
-	m = step(m)
-	if m.dashFocus != dashFocusWorktrees {
-		t.Fatalf("third tab wraps to worktrees, got %d", m.dashFocus)
+	want := []dashFocus{dashFocusIssues, dashFocusIdeas, dashFocusTodos, dashFocusWorktrees}
+	for i, w := range want {
+		m = step(m)
+		if m.dashFocus != w {
+			t.Fatalf("tab %d => %d, want %d", i+1, m.dashFocus, w)
+		}
 	}
 }
 
-func TestUpdateDashNotes_ScrollClamped(t *testing.T) {
+func TestUpdateDashScroll_IdeasAndTodosIndependent(t *testing.T) {
 	m := initialModel(Config{})
 	m.screen = screenDash
-	m.dashFocus = dashFocusNotes
-	m.notes = []noteFile{{name: "ideas.md", lines: []string{"l1", "l2", "l3"}}}
-	// total display lines = 1 header + 3 body = 4.
-
-	up := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")}
-	u, _ := m.updateDashNotes(up)
-	if got := u.(Model).notesScroll; got != 0 {
-		t.Errorf("scroll must not go below 0, got %d", got)
+	m.notes = []noteFile{
+		{name: "ideas.md", lines: []string{"i1", "i2", "i3"}},
+		{name: "TODO.md", lines: []string{"t1", "t2", "t3"}},
 	}
 
-	end := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("G")}
-	u, _ = m.updateDashNotes(end)
-	if got := u.(Model).notesScroll; got != m.notesTotalLines()-1 {
-		t.Errorf("G should clamp to last line %d, got %d", m.notesTotalLines()-1, got)
+	down := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("j")}
+
+	// Scrolling Ideas moves only ideasScroll.
+	mi := m
+	mi.dashFocus = dashFocusIdeas
+	u, _ := mi.updateDashIdeas(down)
+	mi = u.(Model)
+	if mi.ideasScroll != 1 || mi.todosScroll != 0 {
+		t.Errorf("ideas scroll should be independent: ideas=%d todos=%d", mi.ideasScroll, mi.todosScroll)
+	}
+
+	// Scrolling Todos moves only todosScroll.
+	mt := m
+	mt.dashFocus = dashFocusTodos
+	u, _ = mt.updateDashTodos(down)
+	mt = u.(Model)
+	if mt.todosScroll != 1 || mt.ideasScroll != 0 {
+		t.Errorf("todos scroll should be independent: ideas=%d todos=%d", mt.ideasScroll, mt.todosScroll)
+	}
+
+	// Up past the top clamps at 0.
+	up := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("k")}
+	u, _ = m.updateDashIdeas(up)
+	if got := u.(Model).ideasScroll; got != 0 {
+		t.Errorf("ideas scroll must clamp at 0, got %d", got)
 	}
 }
 
-func TestViewDash_Wide_NotesFocus_RendersContent(t *testing.T) {
+func TestViewDash_Wide_BacklogShowsThreePanesWithPlaceholders(t *testing.T) {
 	m := initialModel(Config{})
 	m.width, m.height = 130, 40
 	m.screen = screenDash
 	m.repo = core.Repo{Name: "bridge"}
 	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	m.issuesState = loadOK
 	m.notesState = loadOK
-	m.notes = []noteFile{{name: "ideas.md", lines: []string{"surface notes on the dashboard"}}}
-	m.dashFocus = dashFocusNotes
+	// Only ideas.md present; TODO.md absent must show a placeholder, not vanish.
+	m.notes = []noteFile{{name: "ideas.md", lines: []string{"faster picker"}}}
+	m.dashFocus = dashFocusIdeas
+
 	out := m.View()
-	for _, want := range []string{"Notes", "ideas.md", "surface notes on the dashboard"} {
+	for _, want := range []string{"Open issues", "Ideas", "Todos", "faster picker", "no " + todoFileName} {
 		if !strings.Contains(out, want) {
-			t.Errorf("notes-focused dash missing %q\n%s", want, out)
+			t.Errorf("backlog-focused dash missing %q\n%s", want, out)
 		}
+	}
+}
+
+func TestViewDash_Wide_WorktreeFocus_ShowsDetailsNotBacklog(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 130, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{{worktree: "fix-x", path: "/r/fix-x"}}
+	m.dashSel = 0
+	m.dashFocus = dashFocusWorktrees
+	m.notesState = loadOK
+	m.notes = []noteFile{{name: "ideas.md", lines: []string{"faster picker"}}}
+
+	out := m.View()
+	if !strings.Contains(out, "Branches") {
+		t.Errorf("worktree focus should render Details (Branches) column:\n%s", out)
+	}
+	if strings.Contains(out, "faster picker") {
+		t.Errorf("worktree focus must not render the Ideas body:\n%s", out)
 	}
 }
 

@@ -26,14 +26,16 @@ const (
 )
 
 // dashFocus is which Screen-2 pane has the keyboard: the worktree list (left)
-// or one of the contextual right-column panes (open issues, repo notes). Tab
-// cycles through the panes that have content (see Model.dashPaneCycle).
+// or one of the three right-column backlog panes (open issues, ideas, todos).
+// Tab cycles through all four in order (see Model.dashPaneCycle); when the
+// worktree list is focused the right column shows worktree Details instead.
 type dashFocus int
 
 const (
 	dashFocusWorktrees dashFocus = iota
 	dashFocusIssues
-	dashFocusNotes
+	dashFocusIdeas
+	dashFocusTodos
 )
 
 type loadState int
