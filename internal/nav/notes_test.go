@@ -200,3 +200,32 @@ func TestViewDash_Narrow_StacksNotesPanel(t *testing.T) {
 		t.Errorf("narrow dash should stack the notes panel:\n%s", out)
 	}
 }
+
+func TestNoteByName_CaseInsensitiveAndAbsent(t *testing.T) {
+	m := Model{notes: []noteFile{
+		{name: "Ideas.md", lines: []string{"a"}},
+		{name: "todo.md", lines: []string{"b"}},
+	}}
+	if nf := m.ideaNote(); nf == nil || nf.name != "Ideas.md" {
+		t.Errorf("ideaNote should match Ideas.md case-insensitively, got %+v", nf)
+	}
+	if nf := m.todoNote(); nf == nil || nf.name != "todo.md" {
+		t.Errorf("todoNote should match todo.md case-insensitively, got %+v", nf)
+	}
+	empty := Model{}
+	if empty.ideaNote() != nil || empty.todoNote() != nil {
+		t.Errorf("absent files must resolve to nil")
+	}
+}
+
+func TestNoteLineCount(t *testing.T) {
+	if got := noteLineCount(nil); got != 0 {
+		t.Errorf("nil => 0, got %d", got)
+	}
+	if got := noteLineCount(&noteFile{binary: true}); got != 1 {
+		t.Errorf("binary => 1, got %d", got)
+	}
+	if got := noteLineCount(&noteFile{lines: []string{"x", "y"}}); got != 2 {
+		t.Errorf("text => len(lines), got %d", got)
+	}
+}
