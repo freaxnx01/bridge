@@ -83,7 +83,12 @@ func fixtureRoot(t *testing.T) string {
 func run(t *testing.T, reposRoot, cacheRoot string, args ...string) (stdout, stderr string, code int) {
 	t.Helper()
 	cmd := exec.Command(bridgeBin(t), args...)
-	cmd.Env = append(os.Environ(),
+	// Scrub the developer's ambient BRIDGE_* env (e.g. BRIDGE_DEFAULT_AGENT,
+	// BRIDGE_SHIM_LOADED exported by a loaded shim) so the binary's behaviour
+	// is decided solely by what each test sets below — otherwise a configured
+	// default agent turns `open`'s cd: directive into an exec: launch and the
+	// contract assertions fail only on machines that have it set.
+	cmd.Env = append(bridgeFreeEnv(),
 		"BRIDGE_REPOS_ROOT="+reposRoot,
 		"XDG_CACHE_HOME="+cacheRoot,
 		// The real shell shim exports this on every invocation; mirror it so
@@ -105,6 +110,20 @@ func run(t *testing.T, reposRoot, cacheRoot string, args ...string) (stdout, std
 		}
 	}
 	return so.String(), se.String(), code
+}
+
+// bridgeFreeEnv returns the current environment with every BRIDGE_* variable
+// removed, so e2e runs are independent of the developer's shell configuration.
+func bridgeFreeEnv() []string {
+	all := os.Environ()
+	clean := make([]string, 0, len(all))
+	for _, kv := range all {
+		if strings.HasPrefix(kv, "BRIDGE_") {
+			continue
+		}
+		clean = append(clean, kv)
+	}
+	return clean
 }
 
 // contains is a thin wrapper that fails the test with the full output for
