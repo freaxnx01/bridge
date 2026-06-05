@@ -48,9 +48,13 @@ func DiscoverRepos(root string) ([]Repo, error) {
 					if !r.IsDir() {
 						continue
 					}
+					repoPath := filepath.Join(visDir, r.Name())
+					if !isGitRepo(repoPath) {
+						continue
+					}
 					out = append(out, Repo{
 						Name:       r.Name(),
-						Path:       filepath.Join(visDir, r.Name()),
+						Path:       repoPath,
 						Forge:      "github",
 						Owner:      owner.Name(),
 						Visibility: vis,
@@ -81,9 +85,13 @@ func DiscoverRepos(root string) ([]Repo, error) {
 				if strings.HasPrefix(r.Name(), ".") {
 					continue
 				}
+				repoPath := filepath.Join(ownerDir, r.Name())
+				if !isGitRepo(repoPath) {
+					continue
+				}
 				out = append(out, Repo{
 					Name:  r.Name(),
-					Path:  filepath.Join(ownerDir, r.Name()),
+					Path:  repoPath,
 					Forge: "gitlab",
 					Owner: owner.Name(),
 				})
@@ -103,9 +111,13 @@ func DiscoverRepos(root string) ([]Repo, error) {
 			if strings.HasPrefix(r.Name(), ".") {
 				continue
 			}
+			repoPath := filepath.Join(forgeDir, r.Name())
+			if !isGitRepo(repoPath) {
+				continue
+			}
 			out = append(out, Repo{
 				Name:  r.Name(),
-				Path:  filepath.Join(forgeDir, r.Name()),
+				Path:  repoPath,
 				Forge: "forgejo",
 				Owner: "freax",
 			})
@@ -137,9 +149,13 @@ func DiscoverRepos(root string) ([]Repo, error) {
 				if strings.HasPrefix(r.Name(), ".") {
 					continue
 				}
+				repoPath := filepath.Join(projectDir, r.Name())
+				if !isGitRepo(repoPath) {
+					continue
+				}
 				out = append(out, Repo{
 					Name:  r.Name(),
-					Path:  filepath.Join(projectDir, r.Name()),
+					Path:  repoPath,
 					Forge: "ado",
 					Owner: project.Name(),
 				})
@@ -174,4 +190,14 @@ func DiscoverRepos(root string) ([]Repo, error) {
 func dirExists(p string) bool {
 	fi, err := os.Stat(p)
 	return err == nil && fi.IsDir()
+}
+
+// isGitRepo reports whether dir is a git checkout — it has a `.git` entry (a
+// directory for a normal clone, a file for a linked worktree/submodule).
+// Directories under a forge/owner folder that are not git checkouts (e.g. a
+// synced notes or LINQPad-query folder) are skipped so nav never lists them as
+// repos and offers worktree creation that would fail with a raw git error.
+func isGitRepo(dir string) bool {
+	_, err := os.Stat(filepath.Join(dir, ".git"))
+	return err == nil
 }

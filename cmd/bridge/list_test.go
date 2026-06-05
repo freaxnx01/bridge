@@ -38,7 +38,8 @@ func writeFakeRepos(t *testing.T) string {
 		"github/freaxnx01/private/secret",
 		"gitlab/freaxnx01/glrepo",
 	} {
-		if err := os.MkdirAll(filepath.Join(root, p), 0o755); err != nil {
+		// Discovery only lists git checkouts, so mark each as one with a .git entry.
+		if err := os.MkdirAll(filepath.Join(root, p, ".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -97,7 +98,7 @@ func TestListSpansMultipleBases(t *testing.T) {
 		filepath.Join(baseA, "github", "ownerA", "public", "alpha"),
 		filepath.Join(baseB, "github", "ownerB", "public", "beta"),
 	} {
-		if err := os.MkdirAll(p, 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(p, ".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -119,8 +120,8 @@ func TestListSpansMultipleBases(t *testing.T) {
 func TestListBaseFlagOverridesEnv(t *testing.T) {
 	envBase := t.TempDir()
 	flagBase := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(envBase, "github", "o", "public", "fromenv"), 0o755)
-	_ = os.MkdirAll(filepath.Join(flagBase, "github", "o", "public", "fromflag"), 0o755)
+	_ = os.MkdirAll(filepath.Join(envBase, "github", "o", "public", "fromenv", ".git"), 0o755)
+	_ = os.MkdirAll(filepath.Join(flagBase, "github", "o", "public", "fromflag", ".git"), 0o755)
 
 	cmd := bridgeCmd("--base", flagBase, "list")
 	cmd.Env = append(envWithout("BRIDGE_REPOS_ROOT", "BRIDGE_BASE"),
@@ -141,7 +142,7 @@ func TestListBaseFlagOverridesEnv(t *testing.T) {
 
 func TestListMissingBaseWarns(t *testing.T) {
 	base := t.TempDir()
-	_ = os.MkdirAll(filepath.Join(base, "github", "o", "public", "real"), 0o755)
+	_ = os.MkdirAll(filepath.Join(base, "github", "o", "public", "real", ".git"), 0o755)
 	cmd := bridgeCmd("list")
 	cmd.Env = append(envWithout("BRIDGE_REPOS_ROOT", "BRIDGE_BASE"),
 		"BRIDGE_BASE="+base+string(os.PathListSeparator)+"/nope/does/not/exist",

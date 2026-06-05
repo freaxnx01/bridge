@@ -59,8 +59,9 @@ func bridgeBin(t *testing.T) string {
 }
 
 // fixtureRoot creates a repos-root containing the three forge layouts the
-// discovery walker recognises (github public/private + gitlab). Caller
-// gets a path it can pass via BRIDGE_REPOS_ROOT.
+// discovery walker recognises (github public/private + gitlab). Each fixture is
+// marked as a git checkout (a .git entry) because discovery only lists git
+// checkouts. Caller gets a path it can pass via BRIDGE_REPOS_ROOT.
 func fixtureRoot(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
@@ -69,7 +70,7 @@ func fixtureRoot(t *testing.T) string {
 		"github/freaxnx01/private/secret",
 		"gitlab/freaxnx01/glrepo",
 	} {
-		if err := os.MkdirAll(filepath.Join(root, p), 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(root, p, ".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}

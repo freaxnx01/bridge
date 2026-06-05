@@ -11,7 +11,8 @@ import (
 func setupFakeRepos(t *testing.T) string {
 	t.Helper()
 	root := t.TempDir()
-	layout := []string{
+	// Real repos: git checkouts (marked with a .git entry below).
+	repos := []string{
 		"github/freaxnx01/public/bridge",
 		"github/freaxnx01/private/secret-thing",
 		"github/otheruser/public/lib",
@@ -20,9 +21,21 @@ func setupFakeRepos(t *testing.T) string {
 		"ado/DMS cross-customer projects/finnova-archiverestapi",
 		"ado/_archive/old-repo", // project starting with _ must be skipped
 	}
-	for _, p := range layout {
+	// Non-repo directories that sit under a forge/owner folder but are not git
+	// checkouts (e.g. a OneDrive-synced notes folder) — must be skipped.
+	nonRepos := []string{
+		"github/freaxnx01/private/LINQPad-Queries",
+		"ado/_archive",
+	}
+	for _, p := range append(append([]string{}, repos...), nonRepos...) {
 		full := filepath.Join(root, p)
 		if err := os.MkdirAll(full, 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	for _, p := range repos {
+		gitDir := filepath.Join(root, p, ".git")
+		if err := os.MkdirAll(gitDir, 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -70,6 +83,12 @@ func TestDiscoverRepos(t *testing.T) {
 		if repos[i].Name != w.name || repos[i].Forge != w.forge ||
 			repos[i].Owner != w.owner || repos[i].Visibility != w.vis {
 			t.Errorf("[%d] got %+v, want %+v", i, repos[i], w)
+		}
+	}
+
+	for _, r := range repos {
+		if r.Name == "LINQPad-Queries" {
+			t.Errorf("non-git directory LINQPad-Queries must not be discovered: %+v", r)
 		}
 	}
 }

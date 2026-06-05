@@ -98,12 +98,12 @@ func TestDiscoverAllRootsSpansBases(t *testing.T) {
 	resetEnv(t)
 	baseA := t.TempDir()
 	baseB := t.TempDir()
-	// One github repo under baseA, one under baseB.
+	// One github repo under baseA, one under baseB (git checkouts: .git entry).
 	for _, p := range []string{
 		filepath.Join(baseA, "github", "ownerA", "public", "repo1"),
 		filepath.Join(baseB, "github", "ownerB", "public", "repo2"),
 	} {
-		if err := os.MkdirAll(p, 0o755); err != nil {
+		if err := os.MkdirAll(filepath.Join(p, ".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -127,7 +127,7 @@ func TestDiscoverAllRootsDedupesByPath(t *testing.T) {
 	resetEnv(t)
 	base := t.TempDir()
 	p := filepath.Join(base, "github", "o", "public", "dup")
-	if err := os.MkdirAll(p, 0o755); err != nil {
+	if err := os.MkdirAll(filepath.Join(p, ".git"), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("BRIDGE_BASE", base+string(os.PathListSeparator)+base)
