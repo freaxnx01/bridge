@@ -3,9 +3,32 @@ package nav
 import (
 	"reflect"
 	"testing"
+	"time"
 
+	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/gitauth"
 )
+
+func TestBuildSessionRows_NoMatchingSlot_FallsBackToTmuxSessionName(t *testing.T) {
+	now := time.Date(2026, 6, 5, 12, 0, 0, 0, time.UTC)
+	live := []core.Session{
+		{SlotID: "claude", State: "detached", LastActivity: now},
+		{SlotID: "bridge", State: "attached", LastActivity: now},
+	}
+	slots := []core.Slot{
+		{ID: "bridge", Repo: "bridge", Worktree: "main", Agent: "claude"},
+	}
+
+	rows := buildSessionRows(live, slots, now)
+
+	want := []sessionRow{
+		{slotID: "claude", repoLabel: "claude", state: "detached", lastAccessed: humanLastAccessed(0)},
+		{slotID: "bridge", repoLabel: "bridge", worktree: "main", agent: "claude", state: "attached", lastAccessed: humanLastAccessed(0)},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Errorf("rows = %#v, want %#v", rows, want)
+	}
+}
 
 func envHas(env []string, want string) bool {
 	for _, e := range env {

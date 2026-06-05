@@ -41,27 +41,36 @@ func loadSessionsCmd(slotsPath string) tea.Cmd {
 	return func() tea.Msg {
 		live, _ := core.LiveSessions()
 		slots, _ := core.LoadSlots(slotsPath)
-		bySlot := make(map[string]core.Slot, len(slots))
-		for _, s := range slots {
-			bySlot[s.ID] = s
-		}
-		now := time.Now()
-		rows := make([]sessionRow, 0, len(live))
-		for _, s := range live {
-			row := sessionRow{
-				slotID:       s.SlotID,
-				state:        s.State,
-				lastAccessed: humanLastAccessed(now.Sub(s.LastActivity)),
-			}
-			if sl, ok := bySlot[s.SlotID]; ok {
-				row.repoLabel = sl.Repo
-				row.worktree = sl.Worktree
-				row.agent = sl.Agent
-			}
-			rows = append(rows, row)
-		}
-		return sessionsMsg{rows: rows}
+		return sessionsMsg{rows: buildSessionRows(live, slots, time.Now())}
 	}
+}
+
+// buildSessionRows pairs each live tmux session with its slot record (if any) to
+// build the "Active sessions" panel rows. Sessions created outside bridge have no
+// slot, so the name column falls back to the tmux session name (slotID) to keep
+// every row identifiable rather than blank.
+func buildSessionRows(live []core.Session, slots []core.Slot, now time.Time) []sessionRow {
+	bySlot := make(map[string]core.Slot, len(slots))
+	for _, s := range slots {
+		bySlot[s.ID] = s
+	}
+	rows := make([]sessionRow, 0, len(live))
+	for _, s := range live {
+		row := sessionRow{
+			slotID:       s.SlotID,
+			state:        s.State,
+			lastAccessed: humanLastAccessed(now.Sub(s.LastActivity)),
+		}
+		if sl, ok := bySlot[s.SlotID]; ok {
+			row.repoLabel = sl.Repo
+			row.worktree = sl.Worktree
+			row.agent = sl.Agent
+		} else {
+			row.repoLabel = s.SlotID
+		}
+		rows = append(rows, row)
+	}
+	return rows
 }
 
 func loadRemoteCmd(cachePath string) tea.Cmd {
