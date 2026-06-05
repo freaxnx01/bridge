@@ -100,7 +100,8 @@ func TestLoadReposFromDiscovery(t *testing.T) {
 		"github/freaxnx01/public/bridge",
 		"github/freaxnx01/private/secret",
 	} {
-		if err := os.MkdirAll(filepath.Join(root, p), 0o755); err != nil {
+		// Discovery only lists git checkouts, so mark each as one with a .git entry.
+		if err := os.MkdirAll(filepath.Join(root, p, ".git"), 0o755); err != nil {
 			t.Fatal(err)
 		}
 	}
