@@ -121,6 +121,7 @@ Most bash-era behavior was ported during cutover; the remaining subsystems were 
 - Go code lives in `cmd/bridge/` (CLI) and `internal/` (libraries).
 - Install locally: `make install-go`. Build only: `make build-go`.
 - See [`CLAUDE.md`](CLAUDE.md) for commit conventions (Conventional Commits; tag releases as `vX.Y.Z`).
+- See [`CONTRIBUTING.md`](CONTRIBUTING.md) for how to contribute.
 - Design docs: `docs/specs/2026-05-25-bridge-core-redesign-design.md`. Plans: `docs/plans/2026-05-26-bridge-core-redesign-plan-{a,b,b1,c}.md`.
 
 ## Testing
