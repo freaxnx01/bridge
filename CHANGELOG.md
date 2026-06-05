@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- Repo discovery now lists only **git checkouts**: a directory under a forge/owner folder that has no `.git` entry (e.g. a OneDrive-synced LINQPad-query or notes folder) is skipped, so it no longer shows up as a repo in `bridge nav` and then fails worktree creation with a raw `git worktree list: fatal: not a git repository` error.
+
 ## [2.8.0] - 2026-06-05
 
 ### Changed
