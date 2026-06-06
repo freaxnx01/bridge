@@ -2,6 +2,9 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -80,4 +83,46 @@ func TestGithubAuthHeader(t *testing.T) {
 	defer srv.Close()
 	c := NewGithubClient("tok", srv.URL)
 	_, _ = c.ListRepos(context.Background(), "x")
+}
+
+func TestGithubCreateRepo(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/user/repos" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "Bearer T" {
+			t.Fatalf("bad auth %q", r.Header.Get("Authorization"))
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"name":"foo","visibility":"private","default_branch":"main",
+			"html_url":"https://gh/freaxnx01/foo","ssh_url":"git@github.com:freaxnx01/foo.git",
+			"owner":{"login":"freaxnx01"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	ref, err := c.CreateRepo(context.Background(), "foo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["private"] != true || gotBody["auto_init"] != true {
+		t.Fatalf("body = %v", gotBody)
+	}
+	if ref.Name != "foo" || ref.Owner != "freaxnx01" || ref.Visibility != "private" {
+		t.Fatalf("ref = %+v", ref)
+	}
+}
+
+func TestGithubCreateRepoExists(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+	}))
+	defer srv.Close()
+	_, err := NewGithubClient("T", srv.URL).CreateRepo(context.Background(), "foo", true)
+	if !errors.Is(err, ErrRepoExists) {
+		t.Fatalf("want ErrRepoExists, got %v", err)
+	}
 }

@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -61,6 +62,53 @@ type ghRepo struct {
 	Owner         struct {
 		Login string `json:"login"`
 	} `json:"owner"`
+}
+
+func (c *GithubClient) post(ctx context.Context, path string, body, out any) error {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusUnprocessableEntity {
+		return ErrRepoExists
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github %s: %s: %s", path, resp.Status, string(b))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// CreateRepo creates a repo under the authenticated user (auto-initialized).
+func (c *GithubClient) CreateRepo(ctx context.Context, name string, private bool) (RepoRef, error) {
+	body := map[string]any{"name": name, "private": private, "auto_init": true}
+	var r ghRepo
+	if err := c.post(ctx, "/user/repos", body, &r); err != nil {
+		return RepoRef{}, err
+	}
+	vis := r.Visibility
+	if vis == "" {
+		vis = "public"
+	}
+	return RepoRef{
+		Forge: "github", Owner: r.Owner.Login, Name: r.Name,
+		DefaultBranch: r.DefaultBranch, Visibility: vis,
+		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL,
+	}, nil
 }
 
 // ListRepos returns the repos owned by the authenticated user (the token's
