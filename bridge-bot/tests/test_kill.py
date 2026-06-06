@@ -50,11 +50,13 @@ class CreateRepoTests(unittest.TestCase):
             return mock.Mock(stdout='{"name":"foo"}', returncode=0)
         with mock.patch.object(bridge_bot.subprocess, "run", side_effect=fake):
             bridge_bot._create_repo("foo", "github", False)
-        self.assertEqual(seen["cmd"][:3], ["bridge", "create", "foo"])
+        self.assertEqual(seen["cmd"][:2], ["bridge", "create"])
         self.assertIn("--forge", seen["cmd"])
         self.assertIn("github", seen["cmd"])
         self.assertIn("--public", seen["cmd"])  # private=False → --public
         self.assertIn("--json", seen["cmd"])
+        # name passed after a `--` separator (argv flag-smuggling guard)
+        self.assertEqual(seen["cmd"][-2:], ["--", "foo"])
 
     def test_create_repo_failure_returns_none(self):
         with mock.patch.object(bridge_bot.subprocess, "run",

@@ -118,9 +118,10 @@ def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
 
 
 def _create_repo(name: str, forge: str, private: bool) -> dict | None:
-    cmd = ["bridge", "create", name, "--forge", forge, "--json"]
+    cmd = ["bridge", "create", "--forge", forge, "--json"]
     if not private:
         cmd.append("--public")
+    cmd += ["--", name]
     try:
         out = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
                              env=spawn.clean_env())  # create+clone can be slow

@@ -11,7 +11,7 @@ import (
 
 func TestValidRepoName(t *testing.T) {
 	ok := []string{"foo", "foo-bar", "foo_bar.baz", "A1"}
-	bad := []string{"", "foo bar", "foo/bar", "foo;rm", "..", "foo$x"}
+	bad := []string{"", "foo bar", "foo/bar", "foo;rm", "..", "foo$x", "-foo", "--public", "-h"}
 	for _, n := range ok {
 		if !validRepoName(n) {
 			t.Errorf("want valid: %q", n)

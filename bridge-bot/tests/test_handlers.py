@@ -204,6 +204,11 @@ class NewRepoTests(unittest.TestCase):
         handlers.cmd_newrepo(ctx, 7, "bad name")
         self.assertIn("invalid", ctx.bot.sent[-1]["text"].lower())
 
+    def test_newrepo_leading_dash_rejected(self):
+        ctx = make_ctx()
+        handlers.cmd_newrepo(ctx, 7, "--public")
+        self.assertIn("invalid", ctx.bot.sent[-1]["text"].lower())
+
     def test_create_callback_invokes_creator_and_offers_launch(self):
         ctx = make_ctx()
         seen = {}

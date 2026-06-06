@@ -39,7 +39,7 @@ HELP_TEXT = (
 )
 
 
-_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
 def cmd_newrepo(ctx: Context, chat_id: int, args: str) -> None:

@@ -14,7 +14,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
-var repoNameRe = regexp.MustCompile(`^[A-Za-z0-9._-]+$`)
+var repoNameRe = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
 
 func validRepoName(s string) bool {
 	return s != ".." && s != "." && repoNameRe.MatchString(s)
