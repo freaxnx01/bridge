@@ -126,6 +126,14 @@ class SpawnBridgeTests(unittest.TestCase):
         self.assertIn("open", cmdline)
         self.assertIn("bridge", cmdline)
 
+    def test_cmdline_enables_remote_control(self):
+        # Sessions started via the bot must be Remote-Control-enabled so the
+        # user can take them over via RC afterward.
+        with mock.patch("spawn.subprocess.run") as run:
+            spawn.spawn_bridge("bridge")
+            cmdline = self._captured_cmdline(run)
+        self.assertIn("--rc", cmdline)
+
     def test_cmdline_passes_extra_args_after_agent(self):
         with mock.patch("spawn.subprocess.run") as run:
             spawn.spawn_bridge("bridge", ["-w", "feature-x"])
