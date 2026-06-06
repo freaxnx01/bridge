@@ -24,7 +24,8 @@ class SetMyCommandsTests(unittest.TestCase):
         # Guard: every advertised command (except help/start aliases) must be
         # dispatched in _handle_message.
         advertised = {c["command"] for c in bridge_bot.BOT_COMMANDS}
-        self.assertEqual(advertised, {"new", "status", "kill", "cancel", "help"})
+        self.assertEqual(advertised,
+                         {"new", "newrepo", "status", "kill", "cancel", "help"})
 
 
 class StatusTests(unittest.TestCase):

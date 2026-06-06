@@ -35,5 +35,32 @@ class KillSlotTests(unittest.TestCase):
             self.assertFalse(bridge_bot._kill_slot("nope"))
 
 
+class CreateRepoTests(unittest.TestCase):
+    def test_create_repo_parses_json(self):
+        payload = '{"name":"foo","full_name":"o/foo","forge":"forgejo","private":true,"path":"/r/foo"}'
+        with mock.patch.object(bridge_bot.subprocess, "run",
+                               return_value=mock.Mock(stdout=payload, returncode=0)):
+            out = bridge_bot._create_repo("foo", "forgejo", True)
+        self.assertEqual(out["full_name"], "o/foo")
+
+    def test_create_repo_command_shape(self):
+        seen = {}
+        def fake(cmd, **kw):
+            seen["cmd"] = cmd
+            return mock.Mock(stdout='{"name":"foo"}', returncode=0)
+        with mock.patch.object(bridge_bot.subprocess, "run", side_effect=fake):
+            bridge_bot._create_repo("foo", "github", False)
+        self.assertEqual(seen["cmd"][:3], ["bridge", "create", "foo"])
+        self.assertIn("--forge", seen["cmd"])
+        self.assertIn("github", seen["cmd"])
+        self.assertIn("--public", seen["cmd"])  # private=False → --public
+        self.assertIn("--json", seen["cmd"])
+
+    def test_create_repo_failure_returns_none(self):
+        with mock.patch.object(bridge_bot.subprocess, "run",
+                               return_value=mock.Mock(stdout="not json", stderr="err", returncode=1)):
+            self.assertIsNone(bridge_bot._create_repo("foo", "forgejo", True))
+
+
 if __name__ == "__main__":
     unittest.main()

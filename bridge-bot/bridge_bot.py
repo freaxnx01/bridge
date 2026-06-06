@@ -52,6 +52,7 @@ def _kill_slot(slot: str) -> bool:
 
 BOT_COMMANDS = [
     {"command": "new", "description": "Start a session (repo picker)"},
+    {"command": "newrepo", "description": "Create a new repo (Forgejo/GitHub)"},
     {"command": "status", "description": "Bridge summary + live sessions"},
     {"command": "kill", "description": "Stop a session"},
     {"command": "cancel", "description": "Drop the current picker"},
@@ -116,6 +117,25 @@ def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
     return hit
 
 
+def _create_repo(name: str, forge: str, private: bool) -> dict | None:
+    cmd = ["bridge", "create", name, "--forge", forge, "--json"]
+    if not private:
+        cmd.append("--public")
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                             env=spawn.clean_env())  # create+clone can be slow
+        if out.returncode != 0:
+            _log_event(evt="create_repo", name=name, ok=False, error=out.stderr.strip())
+            return None
+        result = json.loads(out.stdout)
+        _log_event(evt="create_repo", name=name, ok=True,
+                   full_name=result.get("full_name"))
+        return result
+    except (subprocess.SubprocessError, json.JSONDecodeError, ValueError) as e:
+        _log_event(evt="create_repo", name=name, ok=False, error=str(e))
+        return None
+
+
 def build_context(bot: tg.Bot) -> handlers.Context:
     return handlers.Context(
         bot=bot,
@@ -126,6 +146,7 @@ def build_context(bot: tg.Bot) -> handlers.Context:
         spawner=_spawn_and_confirm,
         kill_session=_kill_slot,
         status_provider=_status,
+        repo_creator=_create_repo,
     )
 
 
@@ -161,6 +182,8 @@ def _handle_message(ctx: handlers.Context, msg: dict) -> None:
         if ctx.pickers.get(chat_id) is None:
             _refresh_remote_if_stale()  # cheap, only triggers if stale
         handlers.cmd_new(ctx, chat_id, rest.strip())
+    elif cmd == "newrepo":
+        handlers.cmd_newrepo(ctx, chat_id, rest.strip())
     elif cmd == "status":
         handlers.cmd_status(ctx, chat_id)
     elif cmd == "kill":
