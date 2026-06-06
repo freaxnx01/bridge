@@ -26,13 +26,25 @@ def clean_env(src: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def read_slots(path: str = SLOTS_PATH) -> dict:
+    """Return {slot_key: entry} for active slots, normalizing both on-disk formats.
+
+    Legacy clrepo wrote a dict keyed by slot number; current bridge writes a
+    list of {id, repo, worktree, ...} whose `id` is the tmux session name.
+    Both are normalized to a dict keyed by slot id/number.
+    """
     if not os.path.exists(path):
         return {}
-    with open(path) as fh:
-        try:
-            return json.load(fh).get("slots", {})
-        except (json.JSONDecodeError, ValueError):
-            return {}
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (json.JSONDecodeError, ValueError, OSError):
+        return {}
+    slots = data.get("slots") if isinstance(data, dict) else None
+    if isinstance(slots, dict):
+        return slots
+    if isinstance(slots, list):
+        return {e["id"]: e for e in slots if isinstance(e, dict) and e.get("id")}
+    return {}
 
 
 def find_new_slot(path: str, before_keys: set[str], repo: str) -> dict | None:
@@ -42,7 +54,9 @@ def find_new_slot(path: str, before_keys: set[str], repo: str) -> dict | None:
     for k in new_keys:
         entry = now[k] or {}
         if entry.get("repo") == repo:
-            return {"slot": k, "session": entry.get("session"), **entry}
+            # In the list format there is no `session` field; the tmux session
+            # name equals the slot id/key.
+            return {**entry, "slot": k, "session": entry.get("session") or k}
     return None
 
 

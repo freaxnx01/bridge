@@ -68,6 +68,45 @@ class SlotPollTests(unittest.TestCase):
         self.assertIsNone(result)
 
 
+class ListFormatSlotTests(unittest.TestCase):
+    """Current bridge writes slots as a list of {id,repo,worktree,...} (session==id)."""
+
+    def setUp(self):
+        self.tmp = tempfile.NamedTemporaryFile(mode="w", suffix=".json", delete=False)
+        json.dump({"slots": [{"id": "old-wt-x", "repo": "old", "worktree": "x"}]}, self.tmp)
+        self.tmp.close()
+
+    def tearDown(self):
+        os.unlink(self.tmp.name)
+
+    def test_read_slots_normalizes_list_to_dict_keyed_by_id(self):
+        slots = spawn.read_slots(self.tmp.name)
+        self.assertEqual(set(slots), {"old-wt-x"})
+        self.assertEqual(slots["old-wt-x"]["repo"], "old")
+
+    def test_find_new_slot_detects_list_entry_session_defaults_to_id(self):
+        before = set(spawn.read_slots(self.tmp.name))
+        with open(self.tmp.name, "w") as fh:
+            json.dump({"slots": [
+                {"id": "old-wt-x", "repo": "old", "worktree": "x"},
+                {"id": "bridge-wt-main", "repo": "bridge", "worktree": "main"},
+            ]}, fh)
+        result = spawn.find_new_slot(self.tmp.name, before_keys=before, repo="bridge")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["slot"], "bridge-wt-main")
+        self.assertEqual(result["session"], "bridge-wt-main")  # session defaults to id
+
+    def test_find_new_slot_list_no_match_returns_none(self):
+        before = set(spawn.read_slots(self.tmp.name))
+        with open(self.tmp.name, "w") as fh:
+            json.dump({"slots": [
+                {"id": "old-wt-x", "repo": "old", "worktree": "x"},
+                {"id": "other-wt-y", "repo": "other", "worktree": "y"},
+            ]}, fh)
+        self.assertIsNone(
+            spawn.find_new_slot(self.tmp.name, before_keys=before, repo="bridge"))
+
+
 class SpawnBridgeTests(unittest.TestCase):
     def _captured_cmdline(self, mock_run):
         # subprocess.run was called with positional args=[tmux ... bash -lc <cmdline>]
