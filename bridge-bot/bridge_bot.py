@@ -38,10 +38,12 @@ def _kill_slot(slot: str) -> bool:
     """Kill the tmux session belonging to a bridge slot."""
     slots = spawn.read_slots()
     entry = slots.get(str(slot))
-    if not entry or not entry.get("session"):
+    if not entry:
         return False
+    # List-format entries have no `session`; the tmux name equals the slot id/key.
+    session = entry.get("session") or str(slot)
     try:
-        subprocess.run(["tmux", "kill-session", "-t", entry["session"]],
+        subprocess.run(["tmux", "kill-session", "-t", session],
                        check=True, env=spawn.clean_env())
         return True
     except subprocess.CalledProcessError:
