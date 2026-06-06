@@ -39,6 +39,9 @@ def make_ctx(items=("foo", "bar", "baz")):
         spawner=lambda name, extra: {"slot": "2", "session": name},
         kill_session=lambda s: True,
         status_provider=lambda: "status output",
+        repo_creator=lambda name, forge, private: {
+            "name": name, "full_name": f"o/{name}", "forge": forge,
+            "private": private, "path": f"/r/{name}", "html_url": "u"},
     )
 
 
@@ -178,6 +181,59 @@ class CallbackTests(unittest.TestCase):
         handlers.on_callback(ctx, chat_id=1, callback_id="cb5", data="search",
                              message_id=st.message_id)
         self.assertTrue(ctx.pickers[1].awaiting_query)
+
+
+class NewRepoTests(unittest.TestCase):
+    def test_newrepo_shows_forge_visibility_keyboard(self):
+        ctx = make_ctx()
+        handlers.cmd_newrepo(ctx, 7, "myproj")
+        kb = ctx.bot.sent[-1]["reply_markup"]["inline_keyboard"]
+        datas = [b["callback_data"] for row in kb for b in row]
+        self.assertIn("newrepo:forgejo:private:myproj", datas)
+        self.assertIn("newrepo:forgejo:public:myproj", datas)
+        self.assertIn("newrepo:github:private:myproj", datas)
+        self.assertIn("newrepo:github:public:myproj", datas)
+
+    def test_newrepo_empty_name_usage(self):
+        ctx = make_ctx()
+        handlers.cmd_newrepo(ctx, 7, "")
+        self.assertIn("Usage", ctx.bot.sent[-1]["text"])
+
+    def test_newrepo_invalid_name_rejected(self):
+        ctx = make_ctx()
+        handlers.cmd_newrepo(ctx, 7, "bad name")
+        self.assertIn("invalid", ctx.bot.sent[-1]["text"].lower())
+
+    def test_create_callback_invokes_creator_and_offers_launch(self):
+        ctx = make_ctx()
+        seen = {}
+        ctx.repo_creator = lambda name, forge, private: (
+            seen.update(name=name, forge=forge, private=private)
+            or {"name": name, "full_name": f"o/{name}", "forge": forge,
+                "private": private, "path": "/r/x", "html_url": "u"})
+        handlers.on_callback(ctx, chat_id=7, callback_id="c",
+                             data="newrepo:github:public:myproj", message_id=5)
+        self.assertEqual(seen, {"name": "myproj", "forge": "github", "private": False})
+        kb = ctx.bot.edited[-1]["reply_markup"]["inline_keyboard"]
+        datas = [b["callback_data"] for row in kb for b in row]
+        self.assertIn("newrepo_launch:myproj", datas)
+
+    def test_create_callback_failure_reports_error(self):
+        ctx = make_ctx()
+        ctx.repo_creator = lambda *a: None
+        handlers.on_callback(ctx, chat_id=7, callback_id="c",
+                             data="newrepo:forgejo:private:myproj", message_id=5)
+        self.assertIn("failed", ctx.bot.edited[-1]["text"].lower())
+
+    def test_launch_callback_spawns(self):
+        ctx = make_ctx()
+        seen = {}
+        ctx.spawner = lambda name, extra: (
+            seen.update(name=name) or {"slot": name, "session": name})
+        handlers.on_callback(ctx, chat_id=7, callback_id="c",
+                             data="newrepo_launch:myproj", message_id=5)
+        self.assertEqual(seen["name"], "myproj")
+        self.assertIn("Launched", ctx.bot.edited[-1]["text"])
 
 
 if __name__ == "__main__":

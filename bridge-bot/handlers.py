@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import shlex
 from dataclasses import dataclass
 from typing import Callable
@@ -22,6 +23,7 @@ class Context:
     spawner: Callable[[str, list[str] | None], dict | None]  # (name, extra_args) -> {slot, session} or None
     kill_session: Callable[[str], bool]
     status_provider: Callable[[], str]
+    repo_creator: Callable[[str, str, bool], dict | None]
 
 
 HELP_TEXT = (
@@ -29,11 +31,34 @@ HELP_TEXT = (
     "  /new            Open repo picker (local, MRU)\n"
     "  /new <query>    Filter the picker by query\n"
     "  /new <name>     Launch directly if exactly one match\n"
+    "  /newrepo <name> Create a new repo (Forgejo/GitHub)\n"
     "  /status         Show bridge slot status\n"
     "  /kill <slot>    Kill a slot's tmux session (confirms)\n"
     "  /cancel         Drop the current picker\n"
     "  /help           This message"
 )
+
+
+_REPO_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def cmd_newrepo(ctx: Context, chat_id: int, args: str) -> None:
+    name = args.strip()
+    if not name:
+        ctx.bot.send_message(chat_id, "Usage: /newrepo <name>")
+        return
+    if not _REPO_NAME_RE.match(name):
+        ctx.bot.send_message(chat_id, "Invalid name (allowed: A-Za-z0-9._-)")
+        return
+    ctx.bot.send_message(
+        chat_id, f'Create "{name}" where?',
+        reply_markup={"inline_keyboard": [
+            [{"text": "Forgejo · Private", "callback_data": f"newrepo:forgejo:private:{name}"},
+             {"text": "Forgejo · Public", "callback_data": f"newrepo:forgejo:public:{name}"}],
+            [{"text": "GitHub · Private", "callback_data": f"newrepo:github:private:{name}"},
+             {"text": "GitHub · Public", "callback_data": f"newrepo:github:public:{name}"}],
+        ]},
+    )
 
 
 def _basename(path: str) -> str:
@@ -144,6 +169,32 @@ def on_text_message(ctx: Context, chat_id: int, text: str) -> None:
 
 
 def on_callback(ctx: Context, chat_id: int, callback_id: str, data: str, message_id: int) -> None:
+    if data.startswith("newrepo:"):
+        _, forge, vis, name = data.split(":", 3)
+        ctx.bot.answer_callback_query(callback_id, f"Creating {name}…")
+        result = ctx.repo_creator(name, forge, vis == "private")
+        if result:
+            ctx.bot.edit_message_text(
+                chat_id, message_id,
+                f"✅ Created + cloned: {result['full_name']} ({forge})",
+                reply_markup={"inline_keyboard": [[
+                    {"text": "🚀 Launch session", "callback_data": f"newrepo_launch:{name}"}]]},
+            )
+        else:
+            ctx.bot.edit_message_text(
+                chat_id, message_id, f"❌ Create failed for {name}",
+                reply_markup={"inline_keyboard": []})
+        return
+    if data.startswith("newrepo_launch:"):
+        name = data.split(":", 1)[1]
+        ctx.bot.answer_callback_query(callback_id, f"Launching {name}…")
+        result = ctx.spawner(name, [])
+        if result:
+            text = f"✅ Launched: {name} → slot {result['slot']} (tmux: {result['session']})"
+        else:
+            text = "⏳ Spawn dispatched. Check /status in a few seconds."
+        ctx.bot.edit_message_text(chat_id, message_id, text, reply_markup={"inline_keyboard": []})
+        return
     if data.startswith("kill_confirm:"):
         slot = data.split(":", 1)[1]
         ok = ctx.kill_session(slot)
