@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -49,6 +50,54 @@ type fjRepo struct {
 	HTMLURL       string    `json:"html_url"`
 	SSHURL        string    `json:"ssh_url"`
 	UpdatedAt     time.Time `json:"updated_at"`
+	Owner         struct {
+		Login string `json:"login"`
+	} `json:"owner"`
+}
+
+func (c *ForgejoClient) post(ctx context.Context, path string, body, out any) error {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, _ := http.NewRequestWithContext(ctx, "POST", c.baseURL+path, bytes.NewReader(buf))
+	if c.token != "" {
+		req.Header.Set("Authorization", "token "+c.token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusConflict {
+		return ErrRepoExists
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("forgejo %s: %s: %s", path, resp.Status, string(b))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// CreateRepo creates a repo under the authenticated user (auto-initialized).
+func (c *ForgejoClient) CreateRepo(ctx context.Context, name string, private bool) (RepoRef, error) {
+	body := map[string]any{
+		"name": name, "private": private, "auto_init": true, "default_branch": "main",
+	}
+	var r fjRepo
+	if err := c.post(ctx, "/api/v1/user/repos", body, &r); err != nil {
+		return RepoRef{}, err
+	}
+	vis := "public"
+	if r.Private {
+		vis = "private"
+	}
+	return RepoRef{
+		Forge: "forgejo", Owner: r.Owner.Login, Name: r.Name,
+		DefaultBranch: r.DefaultBranch, Visibility: vis,
+		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL,
+	}, nil
 }
 
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {

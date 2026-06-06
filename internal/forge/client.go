@@ -2,8 +2,12 @@ package forge
 
 import (
 	"context"
+	"errors"
 	"time"
 )
+
+// ErrRepoExists is returned by CreateRepo when the repo already exists.
+var ErrRepoExists = errors.New("repo already exists")
 
 type RepoRef struct {
 	Forge         string    `json:"forge"`

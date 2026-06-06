@@ -2,6 +2,9 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -43,5 +46,50 @@ func TestForgejoListIssues(t *testing.T) {
 	}
 	if len(issues) != 1 || issues[0].Number != 5 || issues[0].Labels[0] != "x" {
 		t.Errorf("%+v", issues)
+	}
+}
+
+func TestForgejoCreateRepo(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/user/repos" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		if r.Header.Get("Authorization") != "token T" {
+			t.Fatalf("missing token auth: %q", r.Header.Get("Authorization"))
+		}
+		b, _ := io.ReadAll(r.Body)
+		_ = json.Unmarshal(b, &gotBody)
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"name":"foo","private":true,"default_branch":"main",
+			"html_url":"https://git/h/foo","ssh_url":"ssh://git@git/h/foo.git",
+			"owner":{"login":"freax"}}`))
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("T", srv.URL)
+	ref, err := c.CreateRepo(context.Background(), "foo", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["private"] != true || gotBody["auto_init"] != true {
+		t.Fatalf("body = %v", gotBody)
+	}
+	if ref.Name != "foo" || ref.Owner != "freax" || ref.Visibility != "private" {
+		t.Fatalf("ref = %+v", ref)
+	}
+	if ref.SSHURL == "" {
+		t.Fatal("missing ssh_url")
+	}
+}
+
+func TestForgejoCreateRepoConflict(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusConflict)
+	}))
+	defer srv.Close()
+	_, err := NewForgejoClient("T", srv.URL).CreateRepo(context.Background(), "foo", true)
+	if !errors.Is(err, ErrRepoExists) {
+		t.Fatalf("want ErrRepoExists, got %v", err)
 	}
 }
