@@ -50,17 +50,57 @@ def _kill_slot(slot: str) -> bool:
         return False
 
 
-def _status() -> str:
+BOT_COMMANDS = [
+    {"command": "new", "description": "Start a session (repo picker)"},
+    {"command": "status", "description": "Bridge summary + live sessions"},
+    {"command": "kill", "description": "Stop a session"},
+    {"command": "cancel", "description": "Drop the current picker"},
+    {"command": "help", "description": "Show help"},
+]
+
+
+def _bridge_summary() -> str:
     try:
         out = subprocess.run(
-            ["bash", "-lc", "bridge --status"],
-            capture_output=True, text=True, timeout=10,
+            ["bridge", "status"], capture_output=True, text=True, timeout=10,
             env=spawn.clean_env(),
         )
-        return (out.stdout + out.stderr).strip() or "(empty)"
+        return (out.stdout + out.stderr).strip()
     except subprocess.SubprocessError as e:
-        LOG.warning("bridge --status failed: %s", e)
+        LOG.warning("bridge status failed: %s", e)
         return f"(error: {e})"
+
+
+def _sessions_table() -> str:
+    try:
+        out = subprocess.run(
+            ["bridge", "sessions", "--json"], capture_output=True, text=True,
+            timeout=10, env=spawn.clean_env(),
+        )
+        rows = json.loads(out.stdout) or []
+    except (subprocess.SubprocessError, json.JSONDecodeError, ValueError) as e:
+        return f"(sessions error: {e})"
+    if not rows:
+        return "(no live sessions)"
+    width = max(len(r.get("slot_id", "?")) for r in rows)
+    lines = []
+    for r in rows:
+        sid = r.get("slot_id", "?")
+        state = r.get("state", "?")
+        when = (r.get("last_activity") or "")[:16].replace("T", " ")
+        lines.append(f"{sid:<{width}}  {state:<8}  {when}")
+    return "\n".join(lines)
+
+
+def _status() -> str:
+    """Structured status: bridge summary, then a table of live sessions."""
+    summary = _bridge_summary()
+    table = _sessions_table()
+    sections = []
+    if summary:
+        sections.append(summary)
+    sections.append("Sessions:\n" + table)
+    return "\n\n".join(sections) or "(empty)"
 
 
 def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
@@ -180,6 +220,12 @@ def main() -> int:
     bot = tg.Bot(token)
     ctx = build_context(bot)
     rl = auth.RateLimiter(capacity=20, refill_per_sec=20 / 60.0)
+
+    try:
+        bot.set_my_commands(BOT_COMMANDS)
+        _log_event(evt="commands_registered", n=len(BOT_COMMANDS))
+    except tg.TelegramAPIError as e:
+        _log_event(evt="commands_error", error=str(e))
 
     offset = int(cfg.get("last_update_id", 0)) + 1
     last_beat = 0.0

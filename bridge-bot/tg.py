@@ -70,6 +70,10 @@ class Bot:
             params["text"] = text
         self._call("answerCallbackQuery", params)
 
+    def set_my_commands(self, commands: list[dict]) -> None:
+        """Register the slash-command menu shown when the user types '/'."""
+        self._call("setMyCommands", {"commands": commands})
+
 
 def fetch_token_from_passbolt(resource_id: str) -> str:
     """Shell out to `passbolt get resource --id <id>`, parse Password line."""
