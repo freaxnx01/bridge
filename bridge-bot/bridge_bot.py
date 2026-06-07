@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -24,6 +25,14 @@ import tg
 
 LOG = logging.getLogger("bridge-bot")
 PID_PATH = Path.home() / ".cache" / "bridge" / "bridge-bot.pid"
+
+# Resolve OUR bridge binary explicitly. systemd's PATH omits ~/.local/bin, so a
+# bare "bridge" would hit the iproute2 networking tool in /usr/sbin. Prefer
+# ~/.local/bin so direct subprocess calls use the real bridge CLI.
+BRIDGE_BIN = shutil.which(
+    "bridge",
+    path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", ""),
+) or os.path.expanduser("~/.local/bin/bridge")
 
 # Reload flag set by SIGHUP handler.
 _RELOAD = {"want": False}
@@ -63,7 +72,7 @@ BOT_COMMANDS = [
 def _bridge_summary() -> str:
     try:
         out = subprocess.run(
-            ["bridge", "status"], capture_output=True, text=True, timeout=10,
+            [BRIDGE_BIN, "status"], capture_output=True, text=True, timeout=10,
             env=spawn.clean_env(),
         )
         full = (out.stdout + out.stderr).strip()
@@ -79,7 +88,7 @@ def _bridge_summary() -> str:
 def _sessions_table() -> str:
     try:
         out = subprocess.run(
-            ["bridge", "sessions", "--json"], capture_output=True, text=True,
+            [BRIDGE_BIN, "sessions", "--json"], capture_output=True, text=True,
             timeout=10, env=spawn.clean_env(),
         )
         rows = json.loads(out.stdout) or []
@@ -122,7 +131,7 @@ def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
 
 
 def _create_repo(name: str, forge: str, private: bool) -> dict | None:
-    cmd = ["bridge", "create", "--forge", forge, "--json"]
+    cmd = [BRIDGE_BIN, "create", "--forge", forge, "--json"]
     if not private:
         cmd.append("--public")
     cmd += ["--", name]

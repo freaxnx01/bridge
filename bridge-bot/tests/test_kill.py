@@ -50,7 +50,8 @@ class CreateRepoTests(unittest.TestCase):
             return mock.Mock(stdout='{"name":"foo"}', returncode=0)
         with mock.patch.object(bridge_bot.subprocess, "run", side_effect=fake):
             bridge_bot._create_repo("foo", "github", False)
-        self.assertEqual(seen["cmd"][:2], ["bridge", "create"])
+        self.assertTrue(seen["cmd"][0].endswith("bridge"))  # absolute path to our binary
+        self.assertEqual(seen["cmd"][1], "create")
         self.assertIn("--forge", seen["cmd"])
         self.assertIn("github", seen["cmd"])
         self.assertIn("--public", seen["cmd"])  # private=False → --public
