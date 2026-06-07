@@ -42,6 +42,7 @@ def make_ctx(items=("foo", "bar", "baz")):
         repo_creator=lambda name, forge, private: {
             "name": name, "full_name": f"o/{name}", "forge": forge,
             "private": private, "path": f"/r/{name}", "html_url": "u"},
+        pending={},
     )
 
 
@@ -194,10 +195,28 @@ class NewRepoTests(unittest.TestCase):
         self.assertIn("newrepo:github:private:myproj", datas)
         self.assertIn("newrepo:github:public:myproj", datas)
 
-    def test_newrepo_empty_name_usage(self):
+    def test_newrepo_no_arg_prompts_for_name(self):
+        # Tapping /newrepo from the slash-menu sends no arg → prompt + pending.
         ctx = make_ctx()
         handlers.cmd_newrepo(ctx, 7, "")
-        self.assertIn("Usage", ctx.bot.sent[-1]["text"])
+        self.assertIn("name", ctx.bot.sent[-1]["text"].lower())
+        self.assertEqual(ctx.pending.get(7), "newrepo")
+
+    def test_pending_name_then_shows_choices(self):
+        ctx = make_ctx()
+        ctx.pending[7] = "newrepo"
+        handlers.on_text_message(ctx, 7, "myproj")
+        self.assertNotIn(7, ctx.pending)  # consumed
+        kb = ctx.bot.sent[-1]["reply_markup"]["inline_keyboard"]
+        datas = [b["callback_data"] for row in kb for b in row]
+        self.assertIn("newrepo:forgejo:private:myproj", datas)
+
+    def test_pending_invalid_name_rejected(self):
+        ctx = make_ctx()
+        ctx.pending[7] = "newrepo"
+        handlers.on_text_message(ctx, 7, "bad name")
+        self.assertIn("invalid", ctx.bot.sent[-1]["text"].lower())
+        self.assertNotIn(7, ctx.pending)  # cleared even on reject
 
     def test_newrepo_invalid_name_rejected(self):
         ctx = make_ctx()

@@ -1,5 +1,6 @@
 """Command + callback handlers. Pure orchestration around an injectable Context."""
 
+import html
 import logging
 import os
 import re
@@ -24,6 +25,7 @@ class Context:
     kill_session: Callable[[str], bool]
     status_provider: Callable[[], str]
     repo_creator: Callable[[str, str, bool], dict | None]
+    pending: dict  # chat_id -> awaiting marker (e.g. "newrepo")
 
 
 HELP_TEXT = (
@@ -42,14 +44,10 @@ HELP_TEXT = (
 _REPO_NAME_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
 
 
-def cmd_newrepo(ctx: Context, chat_id: int, args: str) -> None:
-    name = args.strip()
-    if not name:
-        ctx.bot.send_message(chat_id, "Usage: /newrepo <name>")
-        return
-    if not _REPO_NAME_RE.match(name):
-        ctx.bot.send_message(chat_id, "Invalid name (allowed: A-Za-z0-9._-)")
-        return
+_BAD_NAME_MSG = "Invalid name (allowed: A-Za-z0-9._-, must start alphanumeric)"
+
+
+def _send_newrepo_choices(ctx: Context, chat_id: int, name: str) -> None:
     ctx.bot.send_message(
         chat_id, f'Create "{name}" where?',
         reply_markup={"inline_keyboard": [
@@ -59,6 +57,21 @@ def cmd_newrepo(ctx: Context, chat_id: int, args: str) -> None:
              {"text": "GitHub · Public", "callback_data": f"newrepo:github:public:{name}"}],
         ]},
     )
+
+
+def cmd_newrepo(ctx: Context, chat_id: int, args: str) -> None:
+    name = args.strip()
+    if not name:
+        # Tapping /newrepo from the slash-menu sends no argument, so prompt for
+        # the name and capture the next text message (see on_text_message).
+        ctx.pending[chat_id] = "newrepo"
+        ctx.bot.send_message(chat_id, "Send the repo name (or /cancel):")
+        return
+    if not _REPO_NAME_RE.match(name):
+        ctx.bot.send_message(chat_id, _BAD_NAME_MSG)
+        return
+    ctx.pending.pop(chat_id, None)
+    _send_newrepo_choices(ctx, chat_id, name)
 
 
 def _basename(path: str) -> str:
@@ -128,7 +141,7 @@ def cmd_new(ctx: Context, chat_id: int, args: str) -> None:
 
 def cmd_status(ctx: Context, chat_id: int) -> None:
     out = ctx.status_provider()
-    ctx.bot.send_message(chat_id, f"<pre>{out}</pre>", parse_mode="HTML")
+    ctx.bot.send_message(chat_id, f"<pre>{html.escape(out)}</pre>", parse_mode="HTML")
 
 
 def cmd_kill(ctx: Context, chat_id: int, args: str) -> None:
@@ -148,13 +161,21 @@ def cmd_kill(ctx: Context, chat_id: int, args: str) -> None:
 
 
 def cmd_cancel(ctx: Context, chat_id: int) -> None:
-    if chat_id in ctx.pickers:
-        del ctx.pickers[chat_id]
+    ctx.pickers.pop(chat_id, None)
+    ctx.pending.pop(chat_id, None)
     ctx.bot.send_message(chat_id, "Cancelled.")
 
 
 def on_text_message(ctx: Context, chat_id: int, text: str) -> None:
-    """Plain text — consumed as filter query if picker is awaiting one."""
+    """Plain text — consumed as a pending repo name or a picker filter query."""
+    if ctx.pending.get(chat_id) == "newrepo":
+        del ctx.pending[chat_id]
+        name = text.strip()
+        if not _REPO_NAME_RE.match(name):
+            ctx.bot.send_message(chat_id, _BAD_NAME_MSG)
+            return
+        _send_newrepo_choices(ctx, chat_id, name)
+        return
     state = ctx.pickers.get(chat_id)
     if not state or not state.awaiting_query:
         ctx.bot.send_message(chat_id, "Unknown input. /help for commands.")

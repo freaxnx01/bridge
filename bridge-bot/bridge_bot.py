@@ -66,7 +66,11 @@ def _bridge_summary() -> str:
             ["bridge", "status"], capture_output=True, text=True, timeout=10,
             env=spawn.clean_env(),
         )
-        return (out.stdout + out.stderr).strip()
+        full = (out.stdout + out.stderr).strip()
+        # `bridge status` prints a counts block, a blank line, then its own
+        # per-slot table. Keep only the counts block — _status renders its own
+        # compact session table (avoids a duplicated, wide table on mobile).
+        return full.split("\n\n", 1)[0]
     except subprocess.SubprocessError as e:
         LOG.warning("bridge status failed: %s", e)
         return f"(error: {e})"
@@ -148,6 +152,7 @@ def build_context(bot: tg.Bot) -> handlers.Context:
         kill_session=_kill_slot,
         status_provider=_status,
         repo_creator=_create_repo,
+        pending={},
     )
 
 
