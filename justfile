@@ -3,16 +3,15 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 default:
     @just --list
 
-# Pull latest, rebuild + reinstall bridge (binary + shim), print version.
+# Rebuild + reinstall bridge from the current tree (binary + shim), print version.
+# Use `just sync-build` to pull latest first.
 [unix]
 build:
-    git pull
     make install
     bridge --version
 
 [windows]
 build:
-    git pull
     $v=(git describe --tags --always --dirty 2>$null);if(-not $v){$v='dev'};$c=(git rev-parse --short HEAD 2>$null);if(-not $c){$c='none'};$d=(Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ');go build -ldflags "-X main.version=$v -X main.commit=$c -X main.date=$d" -o bridge.exe ./cmd/bridge;if($LASTEXITCODE -ne 0){exit $LASTEXITCODE}
     $dest=Join-Path $env:USERPROFILE '.local\bin';New-Item -ItemType Directory -Force -Path $dest|Out-Null;Copy-Item -Force bridge.exe "$dest\bridge.exe";Copy-Item -Force shims\bridge-shim.ps1 "$dest\bridge.ps1";Write-Host "Bridge installed to $dest"
     & (Join-Path $env:USERPROFILE '.local\bin' 'bridge.exe') --version
