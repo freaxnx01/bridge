@@ -319,3 +319,26 @@ func loadRepoIssuesCmd(cfg Config, forgeName, owner, repo string) tea.Cmd {
 		return repoIssuesMsg{issues: fetchIssuesCached(cfg, forgeName, owner, repo)}
 	}
 }
+
+// refreshRemoteCmd re-queries the forge via the injected FetchRemote callback
+// and rebuilds the ↓-prefixed remote rows. When FetchRemote is nil (callback
+// not wired), it falls back to re-reading the on-disk cache.
+func (m Model) refreshRemoteCmd() tea.Cmd {
+	if m.cfg.FetchRemote == nil {
+		return loadRemoteCmd(m.cfg.RemoteCache)
+	}
+	fetch := m.cfg.FetchRemote
+	return func() tea.Msg {
+		refs, err := fetch(context.Background())
+		if err != nil {
+			return remoteErrMsg{err: err}
+		}
+		rows := make([]repoRow, 0, len(refs))
+		for i := range refs {
+			ref := refs[i]
+			rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
+		}
+		sortRepoRows(rows)
+		return remoteMsg{rows: rows}
+	}
+}
