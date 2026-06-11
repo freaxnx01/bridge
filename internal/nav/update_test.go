@@ -746,3 +746,22 @@ func TestUpdatePicker_R_NilFetchRemote_FallsBackToCache(t *testing.T) {
 		t.Errorf("fallback did not read cache: %+v", rm.rows)
 	}
 }
+
+func TestUpdatePicker_R_FetchRemote_GetsDeadlineContext(t *testing.T) {
+	gotDeadline := false
+	m := initialModel(Config{
+		FetchRemote: func(ctx context.Context) ([]forge.RepoRef, error) {
+			_, gotDeadline = ctx.Deadline()
+			return nil, nil
+		},
+	})
+	m.pickerFocus = focusList
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatal("r should return a Cmd")
+	}
+	cmd() // invoke to run the fetch closure
+	if !gotDeadline {
+		t.Error("FetchRemote should receive a deadline-bounded context")
+	}
+}

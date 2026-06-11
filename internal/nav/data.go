@@ -79,14 +79,19 @@ func loadRemoteCmd(cachePath string) tea.Cmd {
 		if err != nil {
 			return remoteErrMsg{err: err}
 		}
-		rows := make([]repoRow, 0, len(c.Repos))
-		for i := range c.Repos {
-			ref := c.Repos[i]
-			rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
-		}
-		sortRepoRows(rows)
-		return remoteMsg{rows: rows}
+		return remoteMsg{rows: remoteRows(c.Repos)}
 	}
+}
+
+// remoteRows builds sorted, ↓-prefixed picker rows from forge repo refs.
+func remoteRows(refs []forge.RepoRef) []repoRow {
+	rows := make([]repoRow, 0, len(refs))
+	for i := range refs {
+		ref := refs[i]
+		rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
+	}
+	sortRepoRows(rows)
+	return rows
 }
 
 // registerSlotCmd records a launched session in the slot registry so the
@@ -329,16 +334,12 @@ func (m Model) refreshRemoteCmd() tea.Cmd {
 	}
 	fetch := m.cfg.FetchRemote
 	return func() tea.Msg {
-		refs, err := fetch(context.Background())
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		refs, err := fetch(ctx)
 		if err != nil {
 			return remoteErrMsg{err: err}
 		}
-		rows := make([]repoRow, 0, len(refs))
-		for i := range refs {
-			ref := refs[i]
-			rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
-		}
-		sortRepoRows(rows)
-		return remoteMsg{rows: rows}
+		return remoteMsg{rows: remoteRows(refs)}
 	}
 }
