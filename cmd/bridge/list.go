@@ -64,7 +64,7 @@ func runList(cmd *cobra.Command, args []string) error {
 		return nil
 	}
 
-	remote, err := loadOrFetchRemote(cmd.Context(), local, listRefresh)
+	remoteRepos, err := loadOrFetchRemote(cmd.Context(), local, listRefresh)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: remote fetch failed, using cache: %v\n", err)
 	}
@@ -72,14 +72,14 @@ func runList(cmd *cobra.Command, args []string) error {
 		return emitJSON(cmd.OutOrStdout(), struct {
 			Local  []core.Repo     `json:"local"`
 			Remote []forge.RepoRef `json:"remote"`
-		}{local, remote})
+		}{local, remoteRepos})
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "# local")
 	for _, r := range local {
 		fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-12s %s\n", r.Forge, r.Owner, r.Name)
 	}
 	fmt.Fprintln(cmd.OutOrStdout(), "# remote")
-	for _, r := range remote {
+	for _, r := range remoteRepos {
 		fmt.Fprintf(cmd.OutOrStdout(), "%-12s %-12s %s\n", r.Forge, r.Owner, r.Name)
 	}
 	return nil

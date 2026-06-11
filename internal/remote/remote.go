@@ -69,6 +69,9 @@ func Refresh(ctx context.Context, roots []string, cachePath string) ([]forge.Rep
 // GitHub is the only forge that nests an extra visibility level, so its token
 // .envrc may live at github/<owner>/<visibility>/.envrc; we accept either
 // placement and emit a single deduped target per owner.
+//
+// Owner-less ADO is intentional: ADO clones live under ado/<project>/<repo>
+// where "project" is the API's project.name, not a forge-level owner.
 func discoverRemoteTargets(root string) []remoteTarget {
 	var out []remoteTarget
 	if d := filepath.Join(root, "github"); dirExists(d) {

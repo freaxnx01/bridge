@@ -13,8 +13,10 @@ func TestDiscoverRemoteTargets_LayoutVariants(t *testing.T) {
 	root := t.TempDir()
 	// github owner with .envrc at owner level
 	mustMkdirEnvrc(t, filepath.Join(root, "github", "acme"))
-	// github owner with .envrc only under a visibility subdir
+	// github owner with .envrc only under visibility subdirs (several of them)
+	// must collapse to exactly one target (ownerEnvrcDir picks the first marker)
 	mustMkdirEnvrc(t, filepath.Join(root, "github", "globex", "public"))
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "globex", "private"))
 	// gitlab owner with .envrc at owner level
 	mustMkdirEnvrc(t, filepath.Join(root, "gitlab", "initech"))
 	// forgejo + ado markers at fixed locations
