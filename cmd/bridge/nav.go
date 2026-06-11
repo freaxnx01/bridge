@@ -12,6 +12,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/nav"
+	"github.com/freaxnx01/bridge/internal/remote"
 )
 
 var navOnce bool
@@ -54,6 +55,9 @@ var navCmd = &cobra.Command{
 					return nil, nil
 				}
 				return c.ListOpenIssues(ctx, owner, repo)
+			},
+			FetchRemote: func(ctx context.Context) ([]forge.RepoRef, error) {
+				return remote.Refresh(ctx, reposRoots(), filepath.Join(cacheRoot(), "remote.list"))
 			},
 			IssueCacheDir: filepath.Join(cacheRoot(), "issues"),
 		}
