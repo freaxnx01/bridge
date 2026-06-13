@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -671,5 +672,96 @@ func TestIssueWorktreeName_LongTitleTruncatesSlug(t *testing.T) {
 	}
 	if strings.HasSuffix(wt, "-") {
 		t.Errorf("slug should not end with a hyphen: %q", wt)
+	}
+}
+
+func TestUpdatePicker_R_WithFetchRemote_BuildsRemoteRows(t *testing.T) {
+	m := initialModel(Config{
+		FetchRemote: func(_ context.Context) ([]forge.RepoRef, error) {
+			return []forge.RepoRef{
+				{Forge: "github", Owner: "acme", Name: "zeta"},
+				{Forge: "github", Owner: "acme", Name: "alpha"},
+			}, nil
+		},
+	})
+	m.pickerFocus = focusList
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if got := out.(Model).remoteState; got != loadPending {
+		t.Fatalf("remoteState = %d, want loadPending while fetching", got)
+	}
+	if cmd == nil {
+		t.Fatal("r should return a fetch Cmd")
+	}
+	msg := cmd()
+	rm, ok := msg.(remoteMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want remoteMsg", msg)
+	}
+	if len(rm.rows) != 2 {
+		t.Fatalf("rows = %d, want 2", len(rm.rows))
+	}
+	if !strings.HasPrefix(rm.rows[0].label, "↓ ") {
+		t.Errorf("row 0 label = %q, want ↓ prefix", rm.rows[0].label)
+	}
+	// sortRepoRows orders rows; alpha must precede zeta.
+	if !strings.Contains(rm.rows[0].label, "alpha") {
+		t.Errorf("rows not sorted: row 0 = %q", rm.rows[0].label)
+	}
+}
+
+func TestUpdatePicker_R_FetchError_YieldsRemoteErr(t *testing.T) {
+	m := initialModel(Config{
+		FetchRemote: func(_ context.Context) ([]forge.RepoRef, error) {
+			return nil, errFake
+		},
+	})
+	m.pickerFocus = focusList
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatal("r should return a Cmd")
+	}
+	if _, ok := cmd().(remoteErrMsg); !ok {
+		t.Fatalf("cmd msg = %T, want remoteErrMsg", cmd())
+	}
+}
+
+func TestUpdatePicker_R_NilFetchRemote_FallsBackToCache(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	if err := forge.WriteRepoCache(cachePath, forge.RepoCache{
+		Repos: []forge.RepoRef{{Forge: "github", Owner: "acme", Name: "cached"}},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	m := initialModel(Config{RemoteCache: cachePath}) // FetchRemote nil
+	m.pickerFocus = focusList
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatal("r should return a Cmd even with nil FetchRemote")
+	}
+	rm, ok := cmd().(remoteMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want remoteMsg from cache", cmd())
+	}
+	if len(rm.rows) != 1 || !strings.Contains(rm.rows[0].label, "cached") {
+		t.Errorf("fallback did not read cache: %+v", rm.rows)
+	}
+}
+
+func TestUpdatePicker_R_FetchRemote_GetsDeadlineContext(t *testing.T) {
+	gotDeadline := false
+	m := initialModel(Config{
+		FetchRemote: func(ctx context.Context) ([]forge.RepoRef, error) {
+			_, gotDeadline = ctx.Deadline()
+			return nil, nil
+		},
+	})
+	m.pickerFocus = focusList
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatal("r should return a Cmd")
+	}
+	cmd() // invoke to run the fetch closure
+	if !gotDeadline {
+		t.Error("FetchRemote should receive a deadline-bounded context")
 	}
 }

@@ -306,7 +306,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.filter.Focus()
 	case "r":
 		m.remoteState = loadPending
-		return m, loadRemoteCmd(m.cfg.RemoteCache)
+		return m, m.refreshRemoteCmd()
 	case "enter":
 		if len(rows) == 0 {
 			return m, nil

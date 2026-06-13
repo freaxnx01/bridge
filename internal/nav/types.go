@@ -172,6 +172,10 @@ type Config struct {
 	// FetchIssues fetches open issues for a repo. Nil disables live fetching
 	// (cache-only). Injected by cmd/bridge so internal/nav is forge-token-free.
 	FetchIssues func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error)
+	// FetchRemote re-queries every configured forge and returns the owned
+	// repos, also refreshing the on-disk cache. Nil disables live refresh: the
+	// r key falls back to re-reading the cache.
+	FetchRemote func(ctx context.Context) ([]forge.RepoRef, error)
 	// IssueCacheDir is the directory for per-repo issue cache files.
 	// Empty disables caching (and, combined with nil FetchIssues, skips all issue loading).
 	IssueCacheDir string

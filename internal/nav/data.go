@@ -79,14 +79,19 @@ func loadRemoteCmd(cachePath string) tea.Cmd {
 		if err != nil {
 			return remoteErrMsg{err: err}
 		}
-		rows := make([]repoRow, 0, len(c.Repos))
-		for i := range c.Repos {
-			ref := c.Repos[i]
-			rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
-		}
-		sortRepoRows(rows)
-		return remoteMsg{rows: rows}
+		return remoteMsg{rows: remoteRows(c.Repos)}
 	}
+}
+
+// remoteRows builds sorted, ↓-prefixed picker rows from forge repo refs.
+func remoteRows(refs []forge.RepoRef) []repoRow {
+	rows := make([]repoRow, 0, len(refs))
+	for i := range refs {
+		ref := refs[i]
+		rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
+	}
+	sortRepoRows(rows)
+	return rows
 }
 
 // registerSlotCmd records a launched session in the slot registry so the
@@ -317,5 +322,24 @@ func loadIssueCountCmd(cfg Config, key, forgeName, owner, repo string) tea.Cmd {
 func loadRepoIssuesCmd(cfg Config, forgeName, owner, repo string) tea.Cmd {
 	return func() tea.Msg {
 		return repoIssuesMsg{issues: fetchIssuesCached(cfg, forgeName, owner, repo)}
+	}
+}
+
+// refreshRemoteCmd re-queries the forge via the injected FetchRemote callback
+// and rebuilds the ↓-prefixed remote rows. When FetchRemote is nil (callback
+// not wired), it falls back to re-reading the on-disk cache.
+func (m Model) refreshRemoteCmd() tea.Cmd {
+	if m.cfg.FetchRemote == nil {
+		return loadRemoteCmd(m.cfg.RemoteCache)
+	}
+	fetch := m.cfg.FetchRemote
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+		defer cancel()
+		refs, err := fetch(ctx)
+		if err != nil {
+			return remoteErrMsg{err: err}
+		}
+		return remoteMsg{rows: remoteRows(refs)}
 	}
 }

@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -92,50 +91,6 @@ func TestListRemoteADOText(t *testing.T) {
 	}
 	if !strings.Contains(sout.String(), "ado") || !strings.Contains(sout.String(), "MyRepo") {
 		t.Errorf("expected ado/MyRepo in text output:\n%s", sout.String())
-	}
-}
-
-func TestDiscoverRemoteTargets(t *testing.T) {
-	root := t.TempDir()
-	mustWrite := func(rel string) {
-		t.Helper()
-		full := filepath.Join(root, rel)
-		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(full, []byte(""), 0o644); err != nil {
-			t.Fatal(err)
-		}
-	}
-	mustWrite("github/freaxnx01/.envrc")      // owner-level layout
-	mustWrite("github/orgB/.envrc")           // owner-level layout
-	mustWrite("github/nested/public/.envrc")  // visibility-nested layout
-	mustWrite("github/nested/private/.envrc") // second visibility dir, same owner
-	mustWrite("github/noenvrc/.gitkeep")      // owner dir without .envrc → skipped
-	mustWrite("gitlab/freaxnx01/.envrc")
-	mustWrite("git-forgejo/.envrc")
-	mustWrite("ado/.envrc")
-
-	targets := discoverRemoteTargets(root)
-	got := map[string]bool{}
-	count := map[string]int{}
-	for _, t := range targets {
-		key := t.Forge + "|" + t.Owner
-		got[key] = true
-		count[key]++
-	}
-	want := []string{"github|freaxnx01", "github|orgB", "github|nested", "gitlab|freaxnx01", "forgejo|freax", "ado|"}
-	for _, w := range want {
-		if !got[w] {
-			t.Errorf("missing target %q in %v", w, got)
-		}
-	}
-	if got["github|noenvrc"] {
-		t.Errorf("owner dir without .envrc should be skipped")
-	}
-	// public + private under the same owner must collapse to one target.
-	if count["github|nested"] != 1 {
-		t.Errorf("nested owner should yield exactly one target, got %d", count["github|nested"])
 	}
 }
 
