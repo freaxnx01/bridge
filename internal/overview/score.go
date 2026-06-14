@@ -7,8 +7,10 @@ import (
 	"time"
 )
 
+// DefaultEffort is the effort assumed when an item has no manual effort set.
+const DefaultEffort = 3
+
 const (
-	defaultEffort       = 3
 	staleValueThreshold = 4
 	staleAfter          = 30 * 24 * time.Hour
 	urgentWithin        = 3 * 24 * time.Hour
@@ -16,11 +18,11 @@ const (
 )
 
 // scoreItem computes the W3 score and stale flag for a structured item.
-// score = round(value/effort + urgencyBoost, 2). effort 0 => defaultEffort.
+// score = round(value/effort + urgencyBoost, 2). effort 0 => DefaultEffort.
 // stale is a flag (not a score term): a high-value item untouched for a while.
 func scoreItem(value, effort int, due *time.Time, updated, now time.Time) (float64, bool) {
 	if effort <= 0 {
-		effort = defaultEffort
+		effort = DefaultEffort
 	}
 	s := float64(value)/float64(effort) + urgencyBoost(due, now)
 	s = math.Round(s*100) / 100

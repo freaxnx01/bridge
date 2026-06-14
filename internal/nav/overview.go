@@ -103,20 +103,20 @@ func (m Model) viewOverview() string {
 		rb.WriteString(stMuted.Render("  (nothing ranked yet)") + "\n")
 	}
 	for i, it := range m.overview.Ranked {
-		line := fmt.Sprintf("%-4.1f %-14s %s  %s", it.Score, truncate(it.Repo, 14), it.Title, weightBadge(it))
+		line := fmt.Sprintf("%-4.1f %-14s %s  %s", it.Score, trunc(it.Repo, 14), it.Title, weightBadge(it))
 		rb.WriteString(selectableLine(m.ovFocus == ovRankedPane && i == m.ovRankedSel, line) + "\n")
 	}
 	if len(m.overview.NeedsWeighting) > 0 {
 		rb.WriteString(stMuted.Render(fmt.Sprintf("⚖ needs weighting (%d)", len(m.overview.NeedsWeighting))) + "\n")
 		for _, it := range m.overview.NeedsWeighting {
-			rb.WriteString(stMuted.Render(fmt.Sprintf("   -    %-14s %s", truncate(it.Repo, 14), it.Title)) + "\n")
+			rb.WriteString(stMuted.Render(fmt.Sprintf("   -    %-14s %s", trunc(it.Repo, 14), it.Title)) + "\n")
 		}
 	}
 
 	var ib strings.Builder
 	ib.WriteString(stAccent.Render(fmt.Sprintf("Inbox (raw captures) · %d", len(m.overview.Inbox))) + "\n")
 	for i, c := range m.overview.Inbox {
-		line := fmt.Sprintf("• %-14s %s  %s", truncate(captureWhere(c), 14), c.Title, humanAge(c.Age))
+		line := fmt.Sprintf("• %-14s %s  %s", trunc(captureWhere(c), 14), c.Title, humanAge(c.Age))
 		ib.WriteString(selectableLine(m.ovFocus == ovInboxPane && i == m.ovInboxSel, line) + "\n")
 	}
 
@@ -145,7 +145,7 @@ func weightBadge(it overview.RankedItem) string {
 
 func effortOrDefault(e int) int {
 	if e <= 0 {
-		return 3
+		return overview.DefaultEffort
 	}
 	return e
 }
@@ -174,11 +174,4 @@ func humanAge(d time.Duration) string {
 		return "today"
 	}
 	return fmt.Sprintf("%dd", days)
-}
-
-func truncate(s string, n int) string {
-	if len(s) <= n {
-		return s
-	}
-	return s[:n-1] + "…"
 }
