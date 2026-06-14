@@ -154,6 +154,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if m.ovRankedSel >= len(m.overview.Ranked) {
 			m.ovRankedSel = 0
 		}
+		if m.ovInboxSel >= len(m.overview.Inbox) {
+			m.ovInboxSel = 0
+		}
 		return m, nil
 	case overviewErrMsg:
 		m.overviewState = loadErr

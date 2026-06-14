@@ -59,6 +59,7 @@ func (m Model) updateOverviewKeys(msg tea.KeyMsg) (Model, tea.Cmd) {
 	return m, nil
 }
 
+// ovMove shifts the selection by delta within the focused pane, clamped to range.
 func (m *Model) ovMove(delta int) {
 	if m.ovFocus == ovRankedPane {
 		m.ovRankedSel = clampInt(m.ovRankedSel+delta, 0, len(m.overview.Ranked)-1)
