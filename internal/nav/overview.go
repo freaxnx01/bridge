@@ -3,8 +3,13 @@ package nav
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/freaxnx01/bridge/internal/overview"
 )
 
 // ovPane identifies the focused pane on the Overview screen.
@@ -81,4 +86,99 @@ func (m Model) ovSelectedTarget() string {
 		return m.overview.Inbox[m.ovInboxSel].Path
 	}
 	return ""
+}
+
+// viewOverview renders the two-tier cross-repo overview: a ranked "what matters
+// now" list (plus a needs-weighting group) and the raw-capture inbox.
+func (m Model) viewOverview() string {
+	w := m.width
+	title := "bridge · " + envLabel(m.cfg.Environment) + " · Overview"
+	if m.overviewState == loadPending {
+		return panel(w, title, stMuted.Render("◐ building overview…"))
+	}
+
+	var rb strings.Builder
+	rb.WriteString(stAccent.Render("What matters now") + "\n")
+	if len(m.overview.Ranked) == 0 {
+		rb.WriteString(stMuted.Render("  (nothing ranked yet)") + "\n")
+	}
+	for i, it := range m.overview.Ranked {
+		line := fmt.Sprintf("%-4.1f %-14s %s  %s", it.Score, truncate(it.Repo, 14), it.Title, weightBadge(it))
+		rb.WriteString(selectableLine(m.ovFocus == ovRankedPane && i == m.ovRankedSel, line) + "\n")
+	}
+	if len(m.overview.NeedsWeighting) > 0 {
+		rb.WriteString(stMuted.Render(fmt.Sprintf("⚖ needs weighting (%d)", len(m.overview.NeedsWeighting))) + "\n")
+		for _, it := range m.overview.NeedsWeighting {
+			rb.WriteString(stMuted.Render(fmt.Sprintf("   -    %-14s %s", truncate(it.Repo, 14), it.Title)) + "\n")
+		}
+	}
+
+	var ib strings.Builder
+	ib.WriteString(stAccent.Render(fmt.Sprintf("Inbox (raw captures) · %d", len(m.overview.Inbox))) + "\n")
+	for i, c := range m.overview.Inbox {
+		line := fmt.Sprintf("• %-14s %s  %s", truncate(captureWhere(c), 14), c.Title, humanAge(c.Age))
+		ib.WriteString(selectableLine(m.ovFocus == ovInboxPane && i == m.ovInboxSel, line) + "\n")
+	}
+
+	sections := []string{
+		panel(w, title, strings.TrimRight(rb.String(), "\n")),
+		panel(w, "Inbox", strings.TrimRight(ib.String(), "\n")),
+		m.hintLine("↑↓ move · tab pane · ⏎ show link/path · esc back · q quit"),
+	}
+	return strings.Join(sections, "\n")
+}
+
+func selectableLine(selected bool, text string) string {
+	if selected {
+		return stSel.Render(stAccent.Render("▸ ") + text)
+	}
+	return "  " + stText.Render(text)
+}
+
+func weightBadge(it overview.RankedItem) string {
+	b := fmt.Sprintf("v%d/e%d", it.Value, effortOrDefault(it.Effort))
+	if it.Stale {
+		b += " ⚠"
+	}
+	return stMuted.Render(b)
+}
+
+func effortOrDefault(e int) int {
+	if e <= 0 {
+		return 3
+	}
+	return e
+}
+
+func envLabel(s string) string {
+	if s == "" {
+		return "bridge"
+	}
+	return s
+}
+
+func captureWhere(c overview.Capture) string {
+	switch c.Source {
+	case overview.CaptureIdeasLab:
+		return "ideas-lab"
+	case overview.CaptureRepoTodo:
+		return c.Repo + " todo"
+	default:
+		return c.Repo + " idea"
+	}
+}
+
+func humanAge(d time.Duration) string {
+	days := int(d.Hours()) / 24
+	if days <= 0 {
+		return "today"
+	}
+	return fmt.Sprintf("%dd", days)
+}
+
+func truncate(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n-1] + "…"
 }

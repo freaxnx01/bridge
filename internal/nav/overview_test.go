@@ -2,6 +2,7 @@ package nav
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -73,5 +74,25 @@ func TestUpdateOverview_EnterShowsURLInStatus(t *testing.T) {
 	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
 	if got := out.(Model).status; got != "https://x/1" {
 		t.Errorf("status = %q, want the item URL", got)
+	}
+}
+
+func TestViewOverview_RendersTiersAndScores(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenOverview
+	m.width, m.height = 100, 40
+	m.overviewState = loadOK
+	m.overview = overview.Snapshot{
+		Ranked: []overview.RankedItem{
+			{Repo: "bridge", Title: "wire api", Value: 4, Effort: 2, Score: 2.0},
+		},
+		NeedsWeighting: []overview.RankedItem{{Repo: "x", Title: "triage me"}},
+		Inbox:          []overview.Capture{{Source: overview.CaptureRepoTodo, Repo: "bridge", Title: "a todo"}},
+	}
+	out := m.viewOverview()
+	for _, want := range []string{"wire api", "2.0", "triage me", "a todo", "Inbox"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("viewOverview missing %q\n---\n%s", want, out)
+		}
 	}
 }

@@ -167,6 +167,9 @@ type Config struct {
 	NameArgs func(agent string, repo core.Repo, worktree, label string) []string
 	// Version is the vX.Y.Z string shown bottom-right (injected by cmd/bridge).
 	Version string
+	// Environment is the display label ("Personal" / "Business") shown in the
+	// Overview screen title. Empty falls back to "bridge".
+	Environment string
 	// DebugKeys, when non-empty, is a file path each key press is appended to
 	// (set via BRIDGE_NAV_DEBUG) for diagnosing key handling.
 	DebugKeys string
