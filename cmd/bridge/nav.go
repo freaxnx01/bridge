@@ -63,12 +63,13 @@ var navCmd = &cobra.Command{
 			IssueCacheDir: filepath.Join(cacheRoot(), "issues"),
 			Environment:   os.Getenv("BRIDGE_ENV"),
 			BuildOverview: func(ctx context.Context) (overview.Snapshot, error) {
+				repos := overviewRepos()
 				return overview.Build(ctx, overview.Config{
 					Environment: os.Getenv("BRIDGE_ENV"),
-					Repos:       overviewRepos(),
+					Repos:       repos,
 					IdeasLabDir: ideasLabDir(),
 					FetchIssues: func(ctx context.Context) ([]overview.Issue, error) {
-						return fetchAllOpenIssues(ctx, overviewRepos())
+						return fetchAllOpenIssues(ctx, repos)
 					},
 					FetchRoadmap: nil, // GitHub Projects v2 provider — Plan 1b
 				})
