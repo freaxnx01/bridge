@@ -23,6 +23,10 @@ func TestScoreItem_ValueEffortUrgencyStale(t *testing.T) {
 		{"overdue_plus2", 4, 2, due(-5 * 24 * time.Hour), now, 4.0, false},
 		{"stale_high_value", 4, 2, nil, now.Add(-40 * 24 * time.Hour), 2.0, true},
 		{"not_stale_low_value", 2, 2, nil, now.Add(-40 * 24 * time.Hour), 1.0, false},
+		{"due_exactly_3d_plus2", 4, 2, due(3 * 24 * time.Hour), now, 4.0, false},
+		{"due_exactly_14d_plus1", 4, 2, due(14 * 24 * time.Hour), now, 3.0, false},
+		{"stale_exactly_30d_not_stale", 4, 2, nil, now.Add(-30 * 24 * time.Hour), 2.0, false},
+		{"stale_just_over_30d", 4, 2, nil, now.Add(-31 * 24 * time.Hour), 2.0, true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
