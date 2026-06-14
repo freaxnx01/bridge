@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/overview"
 )
 
 type Model struct {
@@ -37,6 +38,12 @@ type Model struct {
 	notesState  loadState
 	modal       *newWorktreeModal
 	details     map[string]*worktreeDetails // per-worktree panel cache, keyed by path
+
+	overview      overview.Snapshot
+	overviewState loadState
+	ovFocus       ovPane // which overview pane has focus
+	ovRankedSel   int
+	ovInboxSel    int
 
 	status string
 }

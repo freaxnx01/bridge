@@ -8,6 +8,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/overview"
 )
 
 type screen int
@@ -15,6 +16,7 @@ type screen int
 const (
 	screenPicker screen = iota
 	screenDash
+	screenOverview
 )
 
 type focus int
@@ -176,6 +178,10 @@ type Config struct {
 	// repos, also refreshing the on-disk cache. Nil disables live refresh: the
 	// r key falls back to re-reading the cache.
 	FetchRemote func(ctx context.Context) ([]forge.RepoRef, error)
+	// BuildOverview aggregates this environment's cross-repo Snapshot (issues +
+	// roadmap + file captures). Nil disables the Overview screen. Injected by
+	// cmd/bridge so internal/nav stays forge-token-free.
+	BuildOverview func(ctx context.Context) (overview.Snapshot, error)
 	// IssueCacheDir is the directory for per-repo issue cache files.
 	// Empty disables caching (and, combined with nil FetchIssues, skips all issue loading).
 	IssueCacheDir string
@@ -192,6 +198,8 @@ type issueCountMsg struct {
 	count int
 }
 type repoIssuesMsg struct{ issues []forge.Issue }
+type overviewMsg struct{ snap overview.Snapshot }
+type overviewErrMsg struct{ err error }
 type notesMsg struct{ notes []noteFile }
 type dashRowsMsg struct{ rows []dashRow }
 type dirtyMsg struct {
