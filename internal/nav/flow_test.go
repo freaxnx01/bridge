@@ -141,3 +141,17 @@ func TestViewOverview_EmptyRoadmapOmitsTier(t *testing.T) {
 		t.Errorf("empty roadmap should omit the tier:\n%s", m.viewOverview())
 	}
 }
+
+func TestViewOverview_EmptyStatusGroupLabeled(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenOverview
+	m.width, m.height = 120, 40
+	m.overviewState = loadOK
+	m.overview = overview.Snapshot{
+		Roadmap: []overview.RoadmapItem{{Repo: "bridge", Title: "no status item", Status: ""}},
+	}
+	out := m.viewOverview()
+	if !strings.Contains(out, "No status") {
+		t.Errorf("empty-status group should be labeled 'No status':\n%s", out)
+	}
+}

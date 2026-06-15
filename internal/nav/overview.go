@@ -141,7 +141,11 @@ func (m Model) viewRoadmap(w int) string {
 			b.WriteString(stMuted.Render(fmt.Sprintf("Done · %d", len(group))) + "\n")
 			continue
 		}
-		b.WriteString(stText.Render(fmt.Sprintf("%s (%d)", status, len(group))) + "\n")
+		label := status
+		if label == "" {
+			label = "No status"
+		}
+		b.WriteString(stText.Render(fmt.Sprintf("%s (%d)", label, len(group))) + "\n")
 		for i, it := range group {
 			if i >= roadmapGroupCap {
 				b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(group)-roadmapGroupCap)) + "\n")
