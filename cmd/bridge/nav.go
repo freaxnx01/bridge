@@ -12,6 +12,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/nav"
+	"github.com/freaxnx01/bridge/internal/overview"
 	"github.com/freaxnx01/bridge/internal/remote"
 )
 
@@ -60,6 +61,19 @@ var navCmd = &cobra.Command{
 				return remote.Refresh(ctx, reposRoots(), filepath.Join(cacheRoot(), "remote.list"))
 			},
 			IssueCacheDir: filepath.Join(cacheRoot(), "issues"),
+			Environment:   os.Getenv("BRIDGE_ENV"),
+			BuildOverview: func(ctx context.Context) (overview.Snapshot, error) {
+				repos := overviewRepos()
+				return overview.Build(ctx, overview.Config{
+					Environment: os.Getenv("BRIDGE_ENV"),
+					Repos:       repos,
+					IdeasLabDir: ideasLabDir(),
+					FetchIssues: func(ctx context.Context) ([]overview.Issue, error) {
+						return fetchAllOpenIssues(ctx, repos)
+					},
+					FetchRoadmap: nil, // GitHub Projects v2 provider — Plan 1b
+				})
+			},
 		}
 		return nav.Run(cfg)
 	},
@@ -81,4 +95,44 @@ func navDebugPath() string {
 	default:
 		return v
 	}
+}
+
+// overviewRepos returns the repos discovered across all configured roots, the
+// set the cross-repo overview aggregates.
+func overviewRepos() []core.Repo {
+	repos, _ := discoverAllRoots()
+	return repos
+}
+
+// ideasLabDir resolves the ideas-lab idea directory from BRIDGE_IDEAS_LAB
+// (pointing at the ideas-lab repo's ideas/ folder). Empty disables that source.
+func ideasLabDir() string {
+	return os.Getenv("BRIDGE_IDEAS_LAB")
+}
+
+// fetchAllOpenIssues pulls open issues for every repo via the per-forge client,
+// adapting forge.Issue to overview.Issue. A repo whose client/listing fails is
+// skipped (best-effort, like the rest of nav's forge reads).
+func fetchAllOpenIssues(ctx context.Context, repos []core.Repo) ([]overview.Issue, error) {
+	var out []overview.Issue
+	for _, r := range repos {
+		c := clientFor(r.Forge)
+		if c == nil {
+			continue
+		}
+		issues, err := c.ListOpenIssues(ctx, r.Owner, r.Name)
+		if err != nil {
+			continue
+		}
+		for _, is := range issues {
+			out = append(out, overview.Issue{
+				Repo:    r.Owner + "/" + r.Name,
+				Title:   is.Title,
+				URL:     is.URL,
+				Labels:  is.Labels,
+				Updated: is.Updated,
+			})
+		}
+	}
+	return out, nil
 }

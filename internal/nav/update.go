@@ -148,9 +148,30 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.todosScroll = 0
 		return m, nil
 
+	case overviewMsg:
+		m.overview = msg.snap
+		m.overviewState = loadOK
+		if m.ovRankedSel >= len(m.overview.Ranked) {
+			m.ovRankedSel = 0
+		}
+		if m.ovInboxSel >= len(m.overview.Inbox) {
+			m.ovInboxSel = 0
+		}
+		return m, nil
+	case overviewErrMsg:
+		m.overviewState = loadErr
+		m.status = "overview unavailable: " + msg.err.Error()
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.cfg.DebugKeys != "" {
 			logKey(m.cfg.DebugKeys, msg)
+		}
+		if m.screen == screenOverview {
+			if msg.String() == "q" || msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m.updateOverviewKeys(msg)
 		}
 		if m.screen == screenPicker {
 			return m.updatePicker(msg)
@@ -307,6 +328,16 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.remoteState = loadPending
 		return m, m.refreshRemoteCmd()
+	case "o":
+		if m.cfg.BuildOverview == nil {
+			return m, nil
+		}
+		m.screen = screenOverview
+		m.overviewState = loadPending
+		m.ovFocus = ovRankedPane
+		m.ovRankedSel = 0
+		m.ovInboxSel = 0
+		return m, m.buildOverviewCmd()
 	case "enter":
 		if len(rows) == 0 {
 			return m, nil

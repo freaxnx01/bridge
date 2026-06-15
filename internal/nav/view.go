@@ -61,6 +61,9 @@ func (m Model) View() string {
 	if m.screen == screenPicker {
 		return m.viewPicker()
 	}
+	if m.screen == screenOverview {
+		return m.viewOverview()
+	}
 	return m.viewDash()
 }
 
