@@ -54,3 +54,35 @@ func TestBuild_NilFetchIssues_NoError(t *testing.T) {
 		t.Errorf("empty config should yield empty snapshot, got %+v", snap)
 	}
 }
+
+func TestBuild_Roadmap_StatusOrderedNoScoring(t *testing.T) {
+	cfg := Config{
+		Now: func() time.Time { return time.Now() },
+		FetchRoadmap: func(_ context.Context) ([]RoadmapItem, error) {
+			return []RoadmapItem{
+				{Repo: "bridge", Title: "done thing", Status: "Done"},
+				{Repo: "bridge", Title: "todo thing", Status: "Todo"},
+				{Repo: "bridge", Title: "wip thing", Status: "In Progress"},
+				{Repo: "bridge", Title: "weird", Status: "Backlog"}, // unknown -> last
+			}, nil
+		},
+	}
+	snap, err := Build(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Build: %v", err)
+	}
+	if len(snap.Roadmap) != 4 {
+		t.Fatalf("roadmap = %d, want 4", len(snap.Roadmap))
+	}
+	gotOrder := []string{snap.Roadmap[0].Status, snap.Roadmap[1].Status, snap.Roadmap[2].Status, snap.Roadmap[3].Status}
+	want := []string{"Todo", "In Progress", "Done", "Backlog"}
+	for i := range want {
+		if gotOrder[i] != want[i] {
+			t.Errorf("status order[%d] = %q, want %q", i, gotOrder[i], want[i])
+		}
+	}
+	// roadmap items must NOT leak into the weighted/ranked tiers
+	if len(snap.Ranked) != 0 || len(snap.NeedsWeighting) != 0 {
+		t.Errorf("roadmap leaked into ranked/needs-weighting: %+v %+v", snap.Ranked, snap.NeedsWeighting)
+	}
+}

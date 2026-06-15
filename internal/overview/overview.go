@@ -41,6 +41,28 @@ type RankedItem struct {
 	Stale  bool
 }
 
+// RoadmapItem is one GitHub Projects v2 board item, grouped by Status (not
+// weighted — the roadmap tier is distinct from the ranked "what matters now").
+type RoadmapItem struct {
+	Repo   string
+	Title  string
+	URL    string
+	Status string
+}
+
+// statusOrder is the canonical board column order; unknown statuses sort after,
+// preserving board order among themselves (stable sort).
+var statusOrder = []string{"Todo", "In Progress", "Done"}
+
+func statusRank(s string) int {
+	for i, v := range statusOrder {
+		if v == s {
+			return i
+		}
+	}
+	return len(statusOrder)
+}
+
 // Capture is one raw, unranked capture from a markdown source file.
 type Capture struct {
 	Source CaptureSource
@@ -52,9 +74,10 @@ type Capture struct {
 
 // Snapshot is the full cross-repo overview for one environment.
 type Snapshot struct {
-	Ranked         []RankedItem // weighted, sorted desc by Score
-	NeedsWeighting []RankedItem // structured items with Value == 0
-	Inbox          []Capture    // raw captures, grouped by Source+Repo in the view
+	Ranked         []RankedItem  // weighted, sorted desc by Score
+	NeedsWeighting []RankedItem  // structured items with Value == 0
+	Inbox          []Capture     // raw captures, grouped by Source+Repo in the view
+	Roadmap        []RoadmapItem // board items, Status-grouped (unscored)
 }
 
 // Build aggregates the environment's structured items (issues + roadmap cards)
@@ -90,18 +113,14 @@ func Build(ctx context.Context, cfg Config) (Snapshot, error) {
 	}
 
 	if cfg.FetchRoadmap != nil {
-		cards, err := cfg.FetchRoadmap(ctx)
+		items, err := cfg.FetchRoadmap(ctx)
 		if err != nil {
 			return snap, fmt.Errorf("fetch roadmap: %w", err)
 		}
-		for _, c := range cards {
-			if c.Value == 0 {
-				snap.NeedsWeighting = append(snap.NeedsWeighting, c)
-				continue
-			}
-			c.Score, c.Stale = scoreItem(c.Value, c.Effort, c.Due, now, now)
-			snap.Ranked = append(snap.Ranked, c)
-		}
+		sort.SliceStable(items, func(i, j int) bool {
+			return statusRank(items[i].Status) < statusRank(items[j].Status)
+		})
+		snap.Roadmap = items
 	}
 
 	sort.SliceStable(snap.Ranked, func(i, j int) bool {

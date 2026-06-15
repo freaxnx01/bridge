@@ -19,7 +19,7 @@ type Config struct {
 	Repos        []core.Repo // discovered repos in this environment
 	IdeasLabDir  string      // path to ideas-lab idea files; "" disables
 	FetchIssues  func(ctx context.Context) ([]Issue, error)
-	FetchRoadmap func(ctx context.Context) ([]RankedItem, error) // nil => no board (1a)
+	FetchRoadmap func(ctx context.Context) ([]RoadmapItem, error) // nil => no roadmap tier
 	Now          func() time.Time
 }
 
