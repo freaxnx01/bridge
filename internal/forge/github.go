@@ -1,6 +1,7 @@
 package forge
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
@@ -108,6 +109,150 @@ type ghIssue struct {
 	PullRequest *struct {
 		URL string `json:"url"`
 	} `json:"pull_request"`
+}
+
+// ProjectItem is one GitHub Projects v2 board item, flattened for the roadmap.
+type ProjectItem struct {
+	Type   string // "Issue" | "DraftIssue" | "PullRequest"
+	Repo   string // owner/name; "" for DraftIssue
+	Title  string
+	URL    string // "" for DraftIssue
+	Status string // the board's Status single-select value; "" if unset
+}
+
+// graphqlPost issues a GraphQL query against <baseURL>/graphql and unmarshals
+// the "data" object into out. A non-empty "errors" array is returned as an
+// error (so INSUFFICIENT_SCOPES and similar surface clearly).
+func (c *GithubClient) graphqlPost(ctx context.Context, query string, vars map[string]any, out any) error {
+	payload, err := json.Marshal(map[string]any{"query": query, "variables": vars})
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "POST", c.baseURL+"/graphql", bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github graphql: %s: %s", resp.Status, string(body))
+	}
+	var env struct {
+		Data   json.RawMessage `json:"data"`
+		Errors []struct {
+			Message string `json:"message"`
+		} `json:"errors"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&env); err != nil {
+		return err
+	}
+	if len(env.Errors) > 0 {
+		return fmt.Errorf("github graphql: %s", env.Errors[0].Message)
+	}
+	if out != nil && len(env.Data) > 0 {
+		return json.Unmarshal(env.Data, out)
+	}
+	return nil
+}
+
+const projectV2ItemsQuery = `query($owner:String!, $number:Int!, $cursor:String){
+  user(login:$owner){
+    projectV2(number:$number){
+      items(first:100, after:$cursor){
+        pageInfo{ hasNextPage endCursor }
+        nodes{
+          content{
+            __typename
+            ... on Issue{ title url repository{ nameWithOwner } }
+            ... on PullRequest{ title url repository{ nameWithOwner } }
+            ... on DraftIssue{ title }
+          }
+          fieldValues(first:20){
+            nodes{
+              __typename
+              ... on ProjectV2ItemFieldSingleSelectValue{ name field{ ... on ProjectV2FieldCommon{ name } } }
+            }
+          }
+        }
+      }
+    }
+  }
+}`
+
+// ListProjectV2Items returns every item on the user-level Projects v2 board
+// (owner, number), flattened to ProjectItem with its Status single-select
+// value. It paginates 100 at a time.
+func (c *GithubClient) ListProjectV2Items(ctx context.Context, owner string, number int) ([]ProjectItem, error) {
+	var out []ProjectItem
+	cursor := ""
+	for {
+		vars := map[string]any{"owner": owner, "number": number, "cursor": nil}
+		if cursor != "" {
+			vars["cursor"] = cursor
+		}
+		var data struct {
+			User struct {
+				ProjectV2 struct {
+					Items struct {
+						PageInfo struct {
+							HasNextPage bool   `json:"hasNextPage"`
+							EndCursor   string `json:"endCursor"`
+						} `json:"pageInfo"`
+						Nodes []struct {
+							Content struct {
+								Typename   string `json:"__typename"`
+								Title      string `json:"title"`
+								URL        string `json:"url"`
+								Repository struct {
+									NameWithOwner string `json:"nameWithOwner"`
+								} `json:"repository"`
+							} `json:"content"`
+							FieldValues struct {
+								Nodes []struct {
+									Typename string `json:"__typename"`
+									Name     string `json:"name"`
+									Field    struct {
+										Name string `json:"name"`
+									} `json:"field"`
+								} `json:"nodes"`
+							} `json:"fieldValues"`
+						} `json:"nodes"`
+					} `json:"items"`
+				} `json:"projectV2"`
+			} `json:"user"`
+		}
+		if err := c.graphqlPost(ctx, projectV2ItemsQuery, vars, &data); err != nil {
+			return nil, fmt.Errorf("list project v2 items %s/%d: %w", owner, number, err)
+		}
+		for _, n := range data.User.ProjectV2.Items.Nodes {
+			item := ProjectItem{
+				Type:  n.Content.Typename,
+				Title: n.Content.Title,
+				URL:   n.Content.URL,
+				Repo:  n.Content.Repository.NameWithOwner,
+			}
+			for _, fv := range n.FieldValues.Nodes {
+				if fv.Typename == "ProjectV2ItemFieldSingleSelectValue" && fv.Field.Name == "Status" {
+					item.Status = fv.Name
+					break
+				}
+			}
+			out = append(out, item)
+		}
+		if !data.User.ProjectV2.Items.PageInfo.HasNextPage {
+			break
+		}
+		cursor = data.User.ProjectV2.Items.PageInfo.EndCursor
+	}
+	return out, nil
 }
 
 func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
