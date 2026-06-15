@@ -70,8 +70,8 @@ func TestFlow_PickerToDash(t *testing.T) {
 	s := newSession(t, Config{})
 	// a local repo row (no remote) so enter goes to the dashboard
 	s.send(reposMsg{rows: []repoRow{{
-		label: "github/public/bridge",
-		repo:  coreRepo("bridge", t.TempDir()),
+		label: "github/public/dashonly",
+		repo:  coreRepo("dashonly", t.TempDir()),
 	}}})
 	s.m.pickerFocus = focusList
 	s.key("enter")
@@ -80,7 +80,7 @@ func TestFlow_PickerToDash(t *testing.T) {
 	}
 	// m.repo is set synchronously by openRepoRow, so the dash header renders
 	// before any git Cmd is resolved — assert on that, don't resolve git cmds.
-	if !strings.Contains(s.frame(), "bridge") {
+	if !strings.Contains(s.frame(), "dashonly") {
 		t.Errorf("dash frame missing repo name:\n%s", s.frame())
 	}
 }
