@@ -64,6 +64,39 @@ func statusRank(s string) int {
 	return len(statusOrder)
 }
 
+// RoadmapStatuses returns the distinct statuses present in items, in board
+// order (statusOrder first, then any others in first-seen order).
+func RoadmapStatuses(items []RoadmapItem) []string {
+	seen := map[string]bool{}
+	var known, other []string
+	for _, s := range statusOrder {
+		for _, it := range items {
+			if it.Status == s && !seen[s] {
+				seen[s] = true
+				known = append(known, s)
+			}
+		}
+	}
+	for _, it := range items {
+		if !seen[it.Status] {
+			seen[it.Status] = true
+			other = append(other, it.Status)
+		}
+	}
+	return append(known, other...)
+}
+
+// RoadmapByStatus returns the items with the given Status, preserving order.
+func RoadmapByStatus(items []RoadmapItem, status string) []RoadmapItem {
+	var out []RoadmapItem
+	for _, it := range items {
+		if it.Status == status {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // Capture is one raw, unranked capture from a markdown source file.
 type Capture struct {
 	Source CaptureSource

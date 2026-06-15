@@ -106,3 +106,38 @@ func TestFlow_FilterTyping(t *testing.T) {
 func coreRepo(name, path string) core.Repo {
 	return core.Repo{Name: name, Path: path, Forge: "github", Owner: "freaxnx01"}
 }
+
+func overviewWithRoadmap() overview.Snapshot {
+	s := fixedOverview()
+	s.Roadmap = []overview.RoadmapItem{
+		{Repo: "bridge", Title: "todo one", Status: "Todo"},
+		{Repo: "bridge", Title: "todo two", Status: "Todo"},
+		{Repo: "agent-pipeline", Title: "wip one", Status: "In Progress"},
+		{Repo: "bridge", Title: "done one", Status: "Done"},
+	}
+	return s
+}
+
+func TestFlow_OverviewWithRoadmap_Golden(t *testing.T) {
+	s := newSession(t, Config{
+		BuildOverview: func(_ context.Context) (overview.Snapshot, error) {
+			return overviewWithRoadmap(), nil
+		},
+	})
+	s.send(reposMsg{rows: []repoRow{{label: "github/public/bridge"}}})
+	s.m.pickerFocus = focusList
+	s.key("o")
+	s.resolve()
+	assertGolden(t, "overview_with_roadmap", s.frame())
+}
+
+func TestViewOverview_EmptyRoadmapOmitsTier(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenOverview
+	m.width, m.height = 120, 40
+	m.overviewState = loadOK
+	m.overview = fixedOverview() // no Roadmap
+	if strings.Contains(m.viewOverview(), "Roadmap") {
+		t.Errorf("empty roadmap should omit the tier:\n%s", m.viewOverview())
+	}
+}
