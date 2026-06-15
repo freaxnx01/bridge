@@ -1,5 +1,6 @@
 // Package overview aggregates a single environment's ideas, roadmap items, and
-// todos across all repos into one weighted Snapshot. It is client-agnostic:
+// todos across all repos into one Snapshot: structured issues ranked by W3
+// score plus an unscored, Status-grouped roadmap tier. It is client-agnostic:
 // forge access and file roots are injected via Config callbacks, so the same
 // Snapshot drives the TUI today and the REST API / WebUI later.
 package overview
@@ -80,10 +81,10 @@ type Snapshot struct {
 	Roadmap        []RoadmapItem // board items, Status-grouped (unscored)
 }
 
-// Build aggregates the environment's structured items (issues + roadmap cards)
-// and raw file captures into one Snapshot. Ranked items are sorted by Score
-// desc; Value==0 structured items go to NeedsWeighting. Forge errors abort;
-// missing files are skipped.
+// Build aggregates the environment's structured issues (ranked by W3 Score
+// desc, Value==0 -> NeedsWeighting), raw file captures (Inbox), and roadmap
+// board items grouped by Status (Snapshot.Roadmap, not scored) into one
+// Snapshot. Forge errors abort; missing files are skipped.
 func Build(ctx context.Context, cfg Config) (Snapshot, error) {
 	now := cfg.now()
 	var snap Snapshot
