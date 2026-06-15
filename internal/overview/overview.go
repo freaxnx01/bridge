@@ -113,6 +113,9 @@ type Snapshot struct {
 	NeedsWeighting []RankedItem  // structured items with Value == 0
 	Inbox          []Capture     // raw captures, grouped by Source+Repo in the view
 	Roadmap        []RoadmapItem // board items, Status-grouped (unscored)
+	// RoadmapErr holds a roadmap-fetch error message when the roadmap tier could
+	// not load; the other tiers still render.
+	RoadmapErr string
 }
 
 // Build aggregates the environment's structured issues (ranked by W3 Score
@@ -150,12 +153,13 @@ func Build(ctx context.Context, cfg Config) (Snapshot, error) {
 	if cfg.FetchRoadmap != nil {
 		items, err := cfg.FetchRoadmap(ctx)
 		if err != nil {
-			return snap, fmt.Errorf("fetch roadmap: %w", err)
+			snap.RoadmapErr = err.Error() // non-fatal: roadmap degrades, other tiers still render
+		} else {
+			sort.SliceStable(items, func(i, j int) bool {
+				return statusRank(items[i].Status) < statusRank(items[j].Status)
+			})
+			snap.Roadmap = items
 		}
-		sort.SliceStable(items, func(i, j int) bool {
-			return statusRank(items[i].Status) < statusRank(items[j].Status)
-		})
-		snap.Roadmap = items
 	}
 
 	sort.SliceStable(snap.Ranked, func(i, j int) bool {

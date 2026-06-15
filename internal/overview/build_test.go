@@ -2,7 +2,9 @@ package overview
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -52,6 +54,47 @@ func TestBuild_NilFetchIssues_NoError(t *testing.T) {
 	}
 	if len(snap.Ranked) != 0 || len(snap.Inbox) != 0 {
 		t.Errorf("empty config should yield empty snapshot, got %+v", snap)
+	}
+}
+
+func TestBuild_RoadmapFetchError_DegradesOtherTiersSurvive(t *testing.T) {
+	now := time.Date(2026, 6, 14, 12, 0, 0, 0, time.UTC)
+	root := t.TempDir()
+	repoPath := filepath.Join(root, "bridge")
+	mustWrite(t, filepath.Join(repoPath, "TODO.md"), "- [ ] a todo\n")
+
+	roadmapErr := errors.New("github graphql: token needs project scope")
+	cfg := Config{
+		Repos: []core.Repo{{Name: "bridge", Path: repoPath}},
+		Now:   func() time.Time { return now },
+		FetchIssues: func(_ context.Context) ([]Issue, error) {
+			return []Issue{
+				{Repo: "bridge", Title: "high bang", URL: "u1", Labels: []string{"value/4", "effort/2"}, Updated: now},
+			}, nil
+		},
+		FetchRoadmap: func(_ context.Context) ([]RoadmapItem, error) {
+			return nil, roadmapErr
+		},
+	}
+
+	snap, err := Build(context.Background(), cfg)
+	if err != nil {
+		t.Fatalf("Build returned error, want nil (roadmap should degrade): %v", err)
+	}
+	if snap.RoadmapErr == "" {
+		t.Errorf("RoadmapErr = empty, want the fetch error message")
+	}
+	if !strings.Contains(snap.RoadmapErr, "project scope") {
+		t.Errorf("RoadmapErr = %q, want it to contain the fetch error text", snap.RoadmapErr)
+	}
+	if len(snap.Roadmap) != 0 {
+		t.Errorf("Roadmap = %d items, want 0 on fetch error", len(snap.Roadmap))
+	}
+	if len(snap.Ranked) != 1 {
+		t.Errorf("Ranked = %d, want 1 (other tiers must still render)", len(snap.Ranked))
+	}
+	if len(snap.Inbox) != 1 {
+		t.Errorf("Inbox = %d, want 1 (other tiers must still render)", len(snap.Inbox))
 	}
 }
 

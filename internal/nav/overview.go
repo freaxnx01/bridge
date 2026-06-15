@@ -121,7 +121,7 @@ func (m Model) viewOverview() string {
 	}
 
 	sections := []string{panel(w, title, strings.TrimRight(rb.String(), "\n"))}
-	if len(m.overview.Roadmap) > 0 {
+	if len(m.overview.Roadmap) > 0 || m.overview.RoadmapErr != "" {
 		sections = append(sections, m.viewRoadmap(w))
 	}
 	sections = append(sections, panel(w, "Inbox", strings.TrimRight(ib.String(), "\n")))
@@ -134,6 +134,10 @@ const roadmapGroupCap = 6 // max items listed per Status group before "↓ N mor
 // viewRoadmap renders the board's items grouped by Status (board order). Done
 // collapses to a count; other groups list up to roadmapGroupCap items.
 func (m Model) viewRoadmap(w int) string {
+	if m.overview.RoadmapErr != "" {
+		body := stWarn.Render("⚠ unavailable") + " " + stMuted.Render(trunc(m.overview.RoadmapErr, w-16))
+		return panel(w, "Roadmap", body)
+	}
 	var b strings.Builder
 	for _, status := range overview.RoadmapStatuses(m.overview.Roadmap) {
 		group := overview.RoadmapByStatus(m.overview.Roadmap, status)

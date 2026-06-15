@@ -96,3 +96,22 @@ func TestViewOverview_RendersTiersAndScores(t *testing.T) {
 		}
 	}
 }
+
+func TestViewOverview_RoadmapFetchError_ShowsNoticeAndKeepsRankedTier(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenOverview
+	m.width, m.height = 120, 40
+	m.overviewState = loadOK
+	m.overview = overview.Snapshot{
+		Ranked: []overview.RankedItem{
+			{Repo: "bridge", Title: "x", Value: 4, Effort: 2, Score: 2.0},
+		},
+		RoadmapErr: "github graphql: token needs project scope",
+	}
+	out := m.viewOverview()
+	for _, want := range []string{"⚠ unavailable", "What matters now"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("viewOverview missing %q (graceful degrade)\n---\n%s", want, out)
+		}
+	}
+}
