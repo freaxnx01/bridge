@@ -135,7 +135,6 @@ const roadmapGroupCap = 6 // max items listed per Status group before "↓ N mor
 // collapses to a count; other groups list up to roadmapGroupCap items.
 func (m Model) viewRoadmap(w int) string {
 	var b strings.Builder
-	b.WriteString(stAccent.Render("Roadmap") + "\n")
 	for _, status := range overview.RoadmapStatuses(m.overview.Roadmap) {
 		group := overview.RoadmapByStatus(m.overview.Roadmap, status)
 		if status == "Done" {

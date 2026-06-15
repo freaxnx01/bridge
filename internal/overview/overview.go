@@ -71,9 +71,10 @@ func RoadmapStatuses(items []RoadmapItem) []string {
 	var known, other []string
 	for _, s := range statusOrder {
 		for _, it := range items {
-			if it.Status == s && !seen[s] {
+			if it.Status == s {
 				seen[s] = true
 				known = append(known, s)
+				break
 			}
 		}
 	}
