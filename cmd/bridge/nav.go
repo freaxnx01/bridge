@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/spf13/cobra"
@@ -71,7 +72,7 @@ var navCmd = &cobra.Command{
 					FetchIssues: func(ctx context.Context) ([]overview.Issue, error) {
 						return fetchAllOpenIssues(ctx, repos)
 					},
-					FetchRoadmap: nil, // GitHub Projects v2 provider — Plan 1b
+					FetchRoadmap: roadmapFetcher(),
 				})
 			},
 		}
@@ -135,4 +136,49 @@ func fetchAllOpenIssues(ctx context.Context, repos []core.Repo) ([]overview.Issu
 		}
 	}
 	return out, nil
+}
+
+// roadmapFetcher returns a FetchRoadmap callback for the board named by
+// BRIDGE_PROJECT ("owner/number"), or nil when unset/malformed (roadmap tier
+// disabled). The token comes from BRIDGE_PROJECT_TOKEN, falling back to
+// GH_TOKEN — it must carry the `project` scope.
+func roadmapFetcher() func(ctx context.Context) ([]overview.RoadmapItem, error) {
+	owner, number, ok := parseProjectRef(os.Getenv("BRIDGE_PROJECT"))
+	if !ok {
+		return nil
+	}
+	tok := os.Getenv("BRIDGE_PROJECT_TOKEN")
+	if tok == "" {
+		tok = os.Getenv("GH_TOKEN")
+	}
+	return func(ctx context.Context) ([]overview.RoadmapItem, error) {
+		c := forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API"))
+		items, err := c.ListProjectV2Items(ctx, owner, number)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]overview.RoadmapItem, 0, len(items))
+		for _, it := range items {
+			out = append(out, overview.RoadmapItem{
+				Repo:   it.Repo,
+				Title:  it.Title,
+				URL:    it.URL,
+				Status: it.Status,
+			})
+		}
+		return out, nil
+	}
+}
+
+// parseProjectRef parses "owner/number" (e.g. "freaxnx01/5").
+func parseProjectRef(s string) (owner string, number int, ok bool) {
+	owner, num, found := strings.Cut(s, "/")
+	if !found || owner == "" {
+		return "", 0, false
+	}
+	n, err := strconv.Atoi(num)
+	if err != nil || n <= 0 {
+		return "", 0, false
+	}
+	return owner, n, true
 }

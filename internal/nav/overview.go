@@ -120,12 +120,45 @@ func (m Model) viewOverview() string {
 		ib.WriteString(selectableLine(m.ovFocus == ovInboxPane && i == m.ovInboxSel, line) + "\n")
 	}
 
-	sections := []string{
-		panel(w, title, strings.TrimRight(rb.String(), "\n")),
-		panel(w, "Inbox", strings.TrimRight(ib.String(), "\n")),
-		m.hintLine("↑↓ move · tab pane · ⏎ show link/path · esc back · q quit"),
+	sections := []string{panel(w, title, strings.TrimRight(rb.String(), "\n"))}
+	if len(m.overview.Roadmap) > 0 || m.overview.RoadmapErr != "" {
+		sections = append(sections, m.viewRoadmap(w))
 	}
+	sections = append(sections, panel(w, "Inbox", strings.TrimRight(ib.String(), "\n")))
+	sections = append(sections, m.hintLine("↑↓ move · tab pane · ⏎ show link/path · esc back · q quit"))
 	return strings.Join(sections, "\n")
+}
+
+const roadmapGroupCap = 6 // max items listed per Status group before "↓ N more"
+
+// viewRoadmap renders the board's items grouped by Status (board order). Done
+// collapses to a count; other groups list up to roadmapGroupCap items.
+func (m Model) viewRoadmap(w int) string {
+	if m.overview.RoadmapErr != "" {
+		body := stWarn.Render("⚠ unavailable") + " " + stMuted.Render(trunc(m.overview.RoadmapErr, w-16))
+		return panel(w, "Roadmap", body)
+	}
+	var b strings.Builder
+	for _, status := range overview.RoadmapStatuses(m.overview.Roadmap) {
+		group := overview.RoadmapByStatus(m.overview.Roadmap, status)
+		if status == "Done" {
+			b.WriteString(stMuted.Render(fmt.Sprintf("Done · %d", len(group))) + "\n")
+			continue
+		}
+		label := status
+		if label == "" {
+			label = "No status"
+		}
+		b.WriteString(stText.Render(fmt.Sprintf("%s (%d)", label, len(group))) + "\n")
+		for i, it := range group {
+			if i >= roadmapGroupCap {
+				b.WriteString(stMuted.Render(fmt.Sprintf("  ↓ %d more", len(group)-roadmapGroupCap)) + "\n")
+				break
+			}
+			b.WriteString("  " + stText.Render(fmt.Sprintf("• %-14s %s", trunc(it.Repo, 14), it.Title)) + "\n")
+		}
+	}
+	return panel(w, "Roadmap", strings.TrimRight(b.String(), "\n"))
 }
 
 func selectableLine(selected bool, text string) string {

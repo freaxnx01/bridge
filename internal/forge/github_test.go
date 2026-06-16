@@ -4,6 +4,7 @@ import (
 	"context"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -80,4 +81,69 @@ func TestGithubAuthHeader(t *testing.T) {
 	defer srv.Close()
 	c := NewGithubClient("tok", srv.URL)
 	_, _ = c.ListRepos(context.Background(), "x")
+}
+
+func TestGithubListProjectV2Items_PaginatesAndMaps(t *testing.T) {
+	page := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/graphql" {
+			t.Errorf("path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		page++
+		if page == 1 {
+			w.Write([]byte(`{"data":{"user":{"projectV2":{"items":{
+              "pageInfo":{"hasNextPage":true,"endCursor":"C1"},
+              "nodes":[
+                {"content":{"__typename":"Issue","title":"an issue","url":"https://x/1","repository":{"nameWithOwner":"freaxnx01/bridge"}},
+                 "fieldValues":{"nodes":[{"__typename":"ProjectV2ItemFieldSingleSelectValue","name":"In Progress","field":{"name":"Status"}}]}},
+                {"content":{"__typename":"DraftIssue","title":"a draft idea"},
+                 "fieldValues":{"nodes":[{"__typename":"ProjectV2ItemFieldSingleSelectValue","name":"Todo","field":{"name":"Status"}}]}}
+              ]}}}}}`))
+			return
+		}
+		w.Write([]byte(`{"data":{"user":{"projectV2":{"items":{
+          "pageInfo":{"hasNextPage":false,"endCursor":"C2"},
+          "nodes":[
+            {"content":{"__typename":"PullRequest","title":"a pr","url":"https://x/2","repository":{"nameWithOwner":"freaxnx01/agent-os"}},
+             "fieldValues":{"nodes":[]}}
+          ]}}}}}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	items, err := c.ListProjectV2Items(context.Background(), "freaxnx01", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page != 2 {
+		t.Errorf("expected 2 pages fetched, got %d", page)
+	}
+	if len(items) != 3 {
+		t.Fatalf("got %d items, want 3", len(items))
+	}
+	if items[0].Type != "Issue" || items[0].Repo != "freaxnx01/bridge" || items[0].URL != "https://x/1" || items[0].Status != "In Progress" {
+		t.Errorf("item[0]: %+v", items[0])
+	}
+	if items[1].Type != "DraftIssue" || items[1].Title != "a draft idea" || items[1].Status != "Todo" || items[1].Repo != "" {
+		t.Errorf("item[1]: %+v", items[1])
+	}
+	if items[2].Type != "PullRequest" || items[2].Repo != "freaxnx01/agent-os" || items[2].Status != "" {
+		t.Errorf("item[2]: %+v", items[2])
+	}
+}
+
+func TestGithubGraphQL_SurfacesErrors(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"errors":[{"message":"Your token has not been granted the required scopes"}]}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+	_, err := c.ListProjectV2Items(context.Background(), "freaxnx01", 5)
+	if err == nil {
+		t.Fatal("expected error from graphql errors array")
+	}
+	if !strings.Contains(err.Error(), "scopes") {
+		t.Errorf("error should surface the graphql message, got: %v", err)
+	}
 }

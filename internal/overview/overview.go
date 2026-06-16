@@ -1,5 +1,6 @@
 // Package overview aggregates a single environment's ideas, roadmap items, and
-// todos across all repos into one weighted Snapshot. It is client-agnostic:
+// todos across all repos into one Snapshot: structured issues ranked by W3
+// score plus an unscored, Status-grouped roadmap tier. It is client-agnostic:
 // forge access and file roots are injected via Config callbacks, so the same
 // Snapshot drives the TUI today and the REST API / WebUI later.
 package overview
@@ -41,6 +42,62 @@ type RankedItem struct {
 	Stale  bool
 }
 
+// RoadmapItem is one GitHub Projects v2 board item, grouped by Status (not
+// weighted — the roadmap tier is distinct from the ranked "what matters now").
+type RoadmapItem struct {
+	Repo   string
+	Title  string
+	URL    string
+	Status string
+}
+
+// statusOrder is the canonical board column order; unknown statuses sort after,
+// preserving board order among themselves (stable sort).
+var statusOrder = []string{"Todo", "In Progress", "Done"}
+
+func statusRank(s string) int {
+	for i, v := range statusOrder {
+		if v == s {
+			return i
+		}
+	}
+	return len(statusOrder)
+}
+
+// RoadmapStatuses returns the distinct statuses present in items, in board
+// order (statusOrder first, then any others in first-seen order).
+func RoadmapStatuses(items []RoadmapItem) []string {
+	seen := map[string]bool{}
+	var known, other []string
+	for _, s := range statusOrder {
+		for _, it := range items {
+			if it.Status == s {
+				seen[s] = true
+				known = append(known, s)
+				break
+			}
+		}
+	}
+	for _, it := range items {
+		if !seen[it.Status] {
+			seen[it.Status] = true
+			other = append(other, it.Status)
+		}
+	}
+	return append(known, other...)
+}
+
+// RoadmapByStatus returns the items with the given Status, preserving order.
+func RoadmapByStatus(items []RoadmapItem, status string) []RoadmapItem {
+	var out []RoadmapItem
+	for _, it := range items {
+		if it.Status == status {
+			out = append(out, it)
+		}
+	}
+	return out
+}
+
 // Capture is one raw, unranked capture from a markdown source file.
 type Capture struct {
 	Source CaptureSource
@@ -52,15 +109,19 @@ type Capture struct {
 
 // Snapshot is the full cross-repo overview for one environment.
 type Snapshot struct {
-	Ranked         []RankedItem // weighted, sorted desc by Score
-	NeedsWeighting []RankedItem // structured items with Value == 0
-	Inbox          []Capture    // raw captures, grouped by Source+Repo in the view
+	Ranked         []RankedItem  // weighted, sorted desc by Score
+	NeedsWeighting []RankedItem  // structured items with Value == 0
+	Inbox          []Capture     // raw captures, grouped by Source+Repo in the view
+	Roadmap        []RoadmapItem // board items, Status-grouped (unscored)
+	// RoadmapErr holds a roadmap-fetch error message when the roadmap tier could
+	// not load; the other tiers still render.
+	RoadmapErr string
 }
 
-// Build aggregates the environment's structured items (issues + roadmap cards)
-// and raw file captures into one Snapshot. Ranked items are sorted by Score
-// desc; Value==0 structured items go to NeedsWeighting. Forge errors abort;
-// missing files are skipped.
+// Build aggregates the environment's structured issues (ranked by W3 Score
+// desc, Value==0 -> NeedsWeighting), raw file captures (Inbox), and roadmap
+// board items grouped by Status (Snapshot.Roadmap, not scored) into one
+// Snapshot. Forge errors abort; missing files are skipped.
 func Build(ctx context.Context, cfg Config) (Snapshot, error) {
 	now := cfg.now()
 	var snap Snapshot
@@ -90,17 +151,14 @@ func Build(ctx context.Context, cfg Config) (Snapshot, error) {
 	}
 
 	if cfg.FetchRoadmap != nil {
-		cards, err := cfg.FetchRoadmap(ctx)
+		items, err := cfg.FetchRoadmap(ctx)
 		if err != nil {
-			return snap, fmt.Errorf("fetch roadmap: %w", err)
-		}
-		for _, c := range cards {
-			if c.Value == 0 {
-				snap.NeedsWeighting = append(snap.NeedsWeighting, c)
-				continue
-			}
-			c.Score, c.Stale = scoreItem(c.Value, c.Effort, c.Due, now, now)
-			snap.Ranked = append(snap.Ranked, c)
+			snap.RoadmapErr = err.Error() // non-fatal: roadmap degrades, other tiers still render
+		} else {
+			sort.SliceStable(items, func(i, j int) bool {
+				return statusRank(items[i].Status) < statusRank(items[j].Status)
+			})
+			snap.Roadmap = items
 		}
 	}
 
