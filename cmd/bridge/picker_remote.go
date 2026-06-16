@@ -264,7 +264,7 @@ func readRemoteCache() []forge.RepoRef {
 // blocked (not yet approved). direnv exits 0 for a blocked-but-ran command,
 // so the stderr text is the reliable signal.
 func isDirenvBlocked(stderr string) bool {
-	return strings.Contains(stderr, "is blocked")
+	return strings.Contains(stderr, ".envrc is blocked")
 }
 
 // direnvBlocked probes whether direnv considers execDir's rc file blocked by
