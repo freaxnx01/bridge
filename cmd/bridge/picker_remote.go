@@ -267,6 +267,14 @@ func isDirenvBlocked(stderr string) bool {
 	return strings.Contains(stderr, "is blocked")
 }
 
+// resolveDirenvDir returns the real (symlink-resolved) path of dir. direnv exec
+// hashes the literal path argument while direnv allow records the canonical
+// path, so passing the resolved path keeps the two in agreement. dir must
+// already exist.
+func resolveDirenvDir(dir string) (string, error) {
+	return filepath.EvalSymlinks(dir)
+}
+
 // cloneRemoteRepo runs `direnv exec <parent_dir> git clone <url> <target>`
 // where parent_dir is the closest dir under reposRoot containing an .envrc
 // (so direnv loads the right forge token). Returns the cloned repo's path.
@@ -298,6 +306,13 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	if err := os.MkdirAll(parentDir, 0o755); err != nil {
 		return "", fmt.Errorf("clone: mkdir parent: %w", err)
 	}
+	// direnv exec does not resolve symlinks but direnv allow does; pass the
+	// real path so the rc's allow state is found (e.g. reposRoot reached via a
+	// symlink). parentDir exists now (MkdirAll above).
+	execDir, err := resolveDirenvDir(parentDir)
+	if err != nil {
+		return "", fmt.Errorf("clone: resolve parent dir: %w", err)
+	}
 	url := cloneURLFor(ref)
 	if url == "" {
 		return "", fmt.Errorf("clone: no usable URL for %s/%s/%s (HTMLURL+SSHURL both empty)", ref.Forge, ref.Owner, ref.Name)
@@ -312,7 +327,7 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 		gitArgs = append(gitArgs, "-c", helper)
 	}
 	gitArgs = append(gitArgs, "clone", url, targetDir)
-	cmd := exec.Command("direnv", append([]string{"exec", parentDir, "git"}, gitArgs...)...)
+	cmd := exec.Command("direnv", append([]string{"exec", execDir, "git"}, gitArgs...)...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr
 	if err := cmd.Run(); err != nil {

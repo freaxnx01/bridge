@@ -230,6 +230,25 @@ func TestIsDirenvBlocked(t *testing.T) {
 	}
 }
 
+func TestResolveDirenvDir_Symlink_ReturnsRealPath(t *testing.T) {
+	real := t.TempDir()
+	link := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink: %v", err)
+	}
+	got, err := resolveDirenvDir(link)
+	if err != nil {
+		t.Fatalf("resolveDirenvDir(%q): %v", link, err)
+	}
+	want, err := filepath.EvalSymlinks(real)
+	if err != nil {
+		t.Fatalf("EvalSymlinks(%q): %v", real, err)
+	}
+	if got != want {
+		t.Errorf("resolveDirenvDir(%q) = %q, want %q", link, got, want)
+	}
+}
+
 func TestRepoFromClonedRef(t *testing.T) {
 	ref := forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"}
 	got := repoFromClonedRef("/r", ref, "/r/github/me/public/bridge")
