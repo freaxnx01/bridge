@@ -210,6 +210,26 @@ func TestPickerLabel_SameNameDifferentOwners_OwnerQualified(t *testing.T) {
 	}
 }
 
+func TestIsDirenvBlocked(t *testing.T) {
+	tests := []struct {
+		name   string
+		stderr string
+		want   bool
+	}{
+		{"blocked message", "direnv: error /x/.envrc is blocked. Run `direnv allow` to approve its content", true},
+		{"normal loading", "direnv: loading ~/x/.envrc", false},
+		{"empty", "", false},
+		{"unrelated error", "direnv: error: command not found", false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := isDirenvBlocked(tt.stderr); got != tt.want {
+				t.Errorf("isDirenvBlocked(%q) = %v, want %v", tt.stderr, got, tt.want)
+			}
+		})
+	}
+}
+
 func TestRepoFromClonedRef(t *testing.T) {
 	ref := forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"}
 	got := repoFromClonedRef("/r", ref, "/r/github/me/public/bridge")

@@ -260,6 +260,13 @@ func readRemoteCache() []forge.RepoRef {
 	return c.Repos
 }
 
+// isDirenvBlocked reports whether direnv's stderr indicates the rc file is
+// blocked (not yet approved). direnv exits 0 for a blocked-but-ran command,
+// so the stderr text is the reliable signal.
+func isDirenvBlocked(stderr string) bool {
+	return strings.Contains(stderr, "is blocked")
+}
+
 // cloneRemoteRepo runs `direnv exec <parent_dir> git clone <url> <target>`
 // where parent_dir is the closest dir under reposRoot containing an .envrc
 // (so direnv loads the right forge token). Returns the cloned repo's path.
