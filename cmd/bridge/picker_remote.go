@@ -267,6 +267,16 @@ func isDirenvBlocked(stderr string) bool {
 	return strings.Contains(stderr, "is blocked")
 }
 
+// direnvBlocked probes whether direnv considers execDir's rc file blocked by
+// running a no-op through `direnv exec` and inspecting its stderr.
+func direnvBlocked(execDir string) bool {
+	cmd := exec.Command("direnv", "exec", execDir, "true")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	_ = cmd.Run() // exit code is 0 even when blocked; stderr is the signal
+	return isDirenvBlocked(stderr.String())
+}
+
 // resolveDirenvDir returns the real (symlink-resolved) path of dir. direnv exec
 // hashes the literal path argument while direnv allow records the canonical
 // path, so passing the resolved path keeps the two in agreement. dir must
@@ -312,6 +322,16 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	execDir, err := resolveDirenvDir(parentDir)
 	if err != nil {
 		return "", fmt.Errorf("clone: resolve parent dir: %w", err)
+	}
+	// If the token .envrc is still blocked (e.g. first clone on this machine),
+	// approve it once so direnv exec can inject the forge token. execDir is
+	// always a bridge-managed reposRoot subtree (the user's own .envrc), never
+	// cloned repo content.
+	if direnvBlocked(execDir) {
+		if out, aerr := exec.Command("direnv", "allow", execDir).CombinedOutput(); aerr != nil {
+			return "", fmt.Errorf("clone: direnv allow %s: %v: %s", execDir, aerr, strings.TrimSpace(string(out)))
+		}
+		fmt.Fprintf(os.Stderr, "bridge: approved direnv .envrc at %s\n", execDir)
 	}
 	url := cloneURLFor(ref)
 	if url == "" {
