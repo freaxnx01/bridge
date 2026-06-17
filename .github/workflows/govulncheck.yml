@@ -1,0 +1,27 @@
+name: govulncheck
+
+# Required status check for the agent-pipeline auto-merge envelope (ADR-002
+# gate 5): a vulnerable-dependency scan must be green before a PR can squash
+# into main. govulncheck exits non-zero when a known vulnerability affects
+# code that is actually reachable, which fails this job.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+      - name: Scan
+        run: govulncheck ./...

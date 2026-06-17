@@ -14,8 +14,15 @@ jobs:
     uses: freaxnx01/agent-pipeline/.github/workflows/claude-implement.yml@v1
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # App identity for PR creation — required for auto-merge: GITHUB_TOKEN-opened
+      # PRs don't trigger required checks, so auto-merge would hang. Absent secrets
+      # fall back to GITHUB_TOKEN (draft-PR-only), so this is a no-op until set.
+      PIPELINE_APP_ID: ${{ secrets.PIPELINE_APP_ID }}
+      PIPELINE_APP_PRIVATE_KEY: ${{ secrets.PIPELINE_APP_PRIVATE_KEY }}
     with:
       issue-number: ${{ github.event.issue.number }}
       runner-labels: '["ubuntu-latest"]'
       default-model: claude-opus-4-7
       pipeline-ref: v1
+      auto-review: true                            # ADR-002 gate 3 opt-in
+      pipeline-author-allowlist: agent-pipeline-bot[bot]
