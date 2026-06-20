@@ -79,6 +79,22 @@ func TestCaptureIdea_Repo_AppendsToExistingIdeas(t *testing.T) {
 	}
 }
 
+func TestCaptureIdea_Repo_AppendsWhenNoTrailingNewline(t *testing.T) {
+	w := &fakeWriter{files: map[string]struct {
+		content []byte
+		sha     string
+	}{
+		"freaxnx01/bridge/ideas.md": {content: []byte("# Ideas\n\n- one"), sha: "s9"}, // NO trailing newline
+	}}
+	_, err := CaptureIdea(context.Background(), w, Target{Owner: "freaxnx01", Repo: "bridge"}, "two", fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(w.puts[0].content); got != "# Ideas\n\n- one\n- two\n" {
+		t.Errorf("append-without-trailing-newline wrong:\n%q", got)
+	}
+}
+
 func TestCaptureIdea_Repo_CreatesWhenAbsent(t *testing.T) {
 	w := &fakeWriter{}
 	_, err := CaptureIdea(context.Background(), w, Target{Owner: "freaxnx01", Repo: "bridge"}, "first", fixedNow)
