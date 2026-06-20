@@ -31,9 +31,24 @@ func CaptureIdea(ctx context.Context, w FileWriter, t Target, text string, now t
 		return "", fmt.Errorf("empty idea text")
 	}
 	if t.IdeasLab {
-		path := fmt.Sprintf("ideas/%s-%s.md", now.Format("2006-01-02"), slug(text))
-		body := fmt.Sprintf("Status: seed\nCaptured: %s (Telegram capture)\n\n%s\n", now.Format("2006-01-02"), text)
-		return w.PutFile(ctx, t.Owner, t.Repo, path, []byte(body), "capture: "+slug(text), "")
+		base := slug(text)
+		date := now.Format("2006-01-02")
+		path := fmt.Sprintf("ideas/%s-%s.md", date, base)
+		for n := 2; ; n++ {
+			_, _, found, err := w.GetFile(ctx, t.Owner, t.Repo, path)
+			if err != nil {
+				return "", err
+			}
+			if !found {
+				break
+			}
+			if n > 50 {
+				return "", fmt.Errorf("too many same-day captures for %q", base)
+			}
+			path = fmt.Sprintf("ideas/%s-%s-%d.md", date, base, n)
+		}
+		body := fmt.Sprintf("Status: seed\nCaptured: %s (Telegram capture)\n\n%s\n", date, text)
+		return w.PutFile(ctx, t.Owner, t.Repo, path, []byte(body), "capture: "+base, "")
 	}
 	const path = "ideas.md"
 	existing, sha, found, err := w.GetFile(ctx, t.Owner, t.Repo, path)

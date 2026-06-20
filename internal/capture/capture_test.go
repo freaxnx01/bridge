@@ -59,6 +59,22 @@ func TestCaptureIdea_IdeasLab_NewDatedFile(t *testing.T) {
 	}
 }
 
+func TestCaptureIdea_IdeasLab_SuffixesOnCollision(t *testing.T) {
+	w := &fakeWriter{files: map[string]struct {
+		content []byte
+		sha     string
+	}{
+		"freaxnx01/ideas-lab/ideas/2026-06-16-kanban-for-issues.md": {content: []byte("x"), sha: "s"},
+	}}
+	_, err := CaptureIdea(context.Background(), w, Target{IdeasLab: true, Owner: "freaxnx01", Repo: "ideas-lab"}, "Kanban for issues!", fixedNow)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.puts[0].path != "ideas/2026-06-16-kanban-for-issues-2.md" {
+		t.Errorf("collision suffix wrong: %q", w.puts[0].path)
+	}
+}
+
 func TestCaptureIdea_Repo_AppendsToExistingIdeas(t *testing.T) {
 	w := &fakeWriter{files: map[string]struct {
 		content []byte
