@@ -203,7 +203,7 @@ class IdeaTests(unittest.TestCase):
     def test_idea_target_callback_captures(self):
         ctx = make_ctx()
         handlers.cmd_idea(ctx, 1, "an idea")
-        msg_id = ctx.idea_pending[1]["message_id"]
+        msg_id = ctx.bot.sent[-1]["message_id"]
         # tap the ideas-lab button (data "idea:ideas-lab")
         handlers.on_callback(ctx, 1, "cb1", "idea:ideas-lab", msg_id)
         self.assertNotIn(1, ctx.idea_pending)  # cleared

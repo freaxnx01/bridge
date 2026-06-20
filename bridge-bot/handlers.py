@@ -23,7 +23,7 @@ class Context:
     spawner: Callable[[str, list[str] | None], dict | None]  # (name, extra_args) -> {slot, session} or None
     kill_session: Callable[[str], bool]
     status_provider: Callable[[], str]
-    idea_pending: dict  # chat_id -> {"text": str, "message_id": int}
+    idea_pending: dict  # chat_id -> {"text": str}
     capture_idea: Callable[[str, str], str]  # (target, text) -> link; raises on failure
     ideas_lab_enabled: bool  # whether the "ideas-lab" target is offered
 
@@ -144,11 +144,11 @@ def cmd_idea(ctx: Context, chat_id: int, args: str) -> None:
         label = "📋 ideas-lab (no project)" if tgt == IDEA_LAB_TARGET else _basename(tgt)
         rows.append([{"text": label, "callback_data": f"idea:{tgt}"}])
     rows.append([{"text": "✖ cancel", "callback_data": "idea_cancel"}])
-    sent = ctx.bot.send_message(
+    ctx.bot.send_message(
         chat_id, f"Capture idea — pick a target:\n<i>{html.escape(text)}</i>",
         reply_markup={"inline_keyboard": rows}, parse_mode="HTML",
     )
-    ctx.idea_pending[chat_id] = {"text": text, "message_id": sent["message_id"]}
+    ctx.idea_pending[chat_id] = {"text": text}
 
 
 def cmd_cancel(ctx: Context, chat_id: int) -> None:
