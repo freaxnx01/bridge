@@ -22,6 +22,9 @@ class Context:
     spawner: Callable[[str, list[str] | None], dict | None]  # (name, extra_args) -> {slot, session} or None
     kill_session: Callable[[str], bool]
     status_provider: Callable[[], str]
+    idea_pending: dict  # chat_id -> {"text": str, "message_id": int, "targets": list[str]}
+    capture_idea: Callable[[str, str], str]  # (target, text) -> link; raises on failure
+    ideas_lab_enabled: bool  # whether the "ideas-lab" target is offered
 
 
 HELP_TEXT = (
@@ -31,6 +34,7 @@ HELP_TEXT = (
     "  /new <name>     Launch directly if exactly one match\n"
     "  /status         Show bridge slot status\n"
     "  /kill <slot>    Kill a slot's tmux session (confirms)\n"
+    "  /idea <text>    Capture an idea (then pick a target)\n"
     "  /cancel         Drop the current picker\n"
     "  /help           This message"
 )
@@ -122,6 +126,30 @@ def cmd_kill(ctx: Context, chat_id: int, args: str) -> None:
     )
 
 
+IDEA_LAB_TARGET = "ideas-lab"
+
+
+def cmd_idea(ctx: Context, chat_id: int, args: str) -> None:
+    text = args.strip()
+    if not text:
+        ctx.bot.send_message(chat_id, "Usage: /idea <your idea text>")
+        return
+    targets: list[str] = []
+    if ctx.ideas_lab_enabled:
+        targets.append(IDEA_LAB_TARGET)
+    targets.extend(ctx.mru_provider())
+    rows = []
+    for tgt in targets:
+        label = "📋 ideas-lab (no project)" if tgt == IDEA_LAB_TARGET else _basename(tgt)
+        rows.append([{"text": label, "callback_data": f"idea:{tgt}"}])
+    rows.append([{"text": "✖ cancel", "callback_data": "idea_cancel"}])
+    sent = ctx.bot.send_message(
+        chat_id, f"Capture idea — pick a target:\n<i>{text}</i>",
+        reply_markup={"inline_keyboard": rows}, parse_mode="HTML",
+    )
+    ctx.idea_pending[chat_id] = {"text": text, "message_id": sent["message_id"], "targets": targets}
+
+
 def cmd_cancel(ctx: Context, chat_id: int) -> None:
     if chat_id in ctx.pickers:
         del ctx.pickers[chat_id]
@@ -157,6 +185,26 @@ def on_callback(ctx: Context, chat_id: int, callback_id: str, data: str, message
     elif data.startswith("kill_cancel:"):
         ctx.bot.answer_callback_query(callback_id, "Cancelled")
         ctx.bot.edit_message_text(chat_id, message_id, "Cancelled.", reply_markup={"inline_keyboard": []})
+        return
+
+    if data == "idea_cancel":
+        ctx.idea_pending.pop(chat_id, None)
+        ctx.bot.answer_callback_query(callback_id, "Cancelled")
+        ctx.bot.edit_message_text(chat_id, message_id, "Cancelled.", reply_markup={"inline_keyboard": []})
+        return
+    if data.startswith("idea:"):
+        pending = ctx.idea_pending.pop(chat_id, None)
+        if not pending:
+            ctx.bot.answer_callback_query(callback_id, "Idea expired — /idea to restart")
+            return
+        target = data.split(":", 1)[1]
+        ctx.bot.answer_callback_query(callback_id, "Capturing…")
+        try:
+            link = ctx.capture_idea(target, pending["text"])
+            msg = f"✅ captured → {link}"
+        except Exception as e:  # surfaced to the user, not swallowed
+            msg = f"❌ capture failed: {e}"
+        ctx.bot.edit_message_text(chat_id, message_id, msg, reply_markup={"inline_keyboard": []})
         return
 
     state = ctx.pickers.get(chat_id)

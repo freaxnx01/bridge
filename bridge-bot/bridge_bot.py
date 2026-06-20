@@ -74,6 +74,18 @@ def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
     return hit
 
 
+def _capture_idea(target: str, text: str) -> str:
+    """Shell out to `bridge capture idea --target <target>`, piping text via stdin."""
+    proc = subprocess.run(
+        ["bash", "-lc", f"bridge capture idea --target {shlex.quote(target)}"],
+        input=text, capture_output=True, text=True, timeout=30,
+        env=spawn.clean_env(),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout).strip() or "capture failed")
+    return proc.stdout.strip()
+
+
 def build_context(bot: tg.Bot) -> handlers.Context:
     return handlers.Context(
         bot=bot,
@@ -84,6 +96,9 @@ def build_context(bot: tg.Bot) -> handlers.Context:
         spawner=_spawn_and_confirm,
         kill_session=_kill_slot,
         status_provider=_status,
+        idea_pending={},
+        capture_idea=_capture_idea,
+        ideas_lab_enabled=bool(os.environ.get("BRIDGE_IDEAS_LAB_REPO")),
     )
 
 
@@ -123,6 +138,8 @@ def _handle_message(ctx: handlers.Context, msg: dict) -> None:
         handlers.cmd_status(ctx, chat_id)
     elif cmd == "kill":
         handlers.cmd_kill(ctx, chat_id, rest.strip())
+    elif cmd == "idea":
+        handlers.cmd_idea(ctx, chat_id, rest.strip())
     elif cmd == "cancel":
         handlers.cmd_cancel(ctx, chat_id)
     else:
