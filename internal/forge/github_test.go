@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -145,5 +146,67 @@ func TestGithubGraphQL_SurfacesErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "scopes") {
 		t.Errorf("error should surface the graphql message, got: %v", err)
+	}
+}
+
+func TestGithubGetFile_FoundAndAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/repos/freaxnx01/bridge/contents/ideas.md" {
+			w.Header().Set("Content-Type", "application/json")
+			// base64 of "# Ideas\n\n- one\n" (with a newline in the b64, as GitHub returns)
+			w.Write([]byte(`{"sha":"abc123","html_url":"https://x/ideas.md","content":"IyBJZGVhcwoKLSBvbmUK\n"}`))
+			return
+		}
+		w.WriteHeader(404)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	content, sha, found, err := c.GetFile(context.Background(), "freaxnx01", "bridge", "ideas.md")
+	if err != nil || !found {
+		t.Fatalf("GetFile: found=%v err=%v", found, err)
+	}
+	if sha != "abc123" || string(content) != "# Ideas\n\n- one\n" {
+		t.Errorf("got sha=%q content=%q", sha, string(content))
+	}
+
+	_, _, found, err = c.GetFile(context.Background(), "freaxnx01", "bridge", "missing.md")
+	if err != nil || found {
+		t.Errorf("absent file: found=%v err=%v (want found=false, nil err)", found, err)
+	}
+}
+
+func TestGithubPutFile_CreateAndUpdate(t *testing.T) {
+	var gotBodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PUT" {
+			t.Errorf("method: %s", r.Method)
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		gotBodies = append(gotBodies, body)
+		w.Write([]byte(`{"content":{"html_url":"https://x/created.md"}}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	url, err := c.PutFile(context.Background(), "freaxnx01", "ideas-lab", "ideas/2026-06-16-x.md", []byte("hi"), "capture: x", "")
+	if err != nil || url != "https://x/created.md" {
+		t.Fatalf("PutFile create: url=%q err=%v", url, err)
+	}
+	if _, hasSHA := gotBodies[0]["sha"]; hasSHA {
+		t.Errorf("create must not send sha: %v", gotBodies[0])
+	}
+	if gotBodies[0]["content"] != "aGk=" { // base64("hi")
+		t.Errorf("content not base64: %v", gotBodies[0]["content"])
+	}
+
+	_, err = c.PutFile(context.Background(), "freaxnx01", "bridge", "ideas.md", []byte("x"), "capture: idea", "abc123")
+	if err != nil {
+		t.Fatalf("PutFile update: %v", err)
+	}
+	if gotBodies[1]["sha"] != "abc123" {
+		t.Errorf("update must send sha, got: %v", gotBodies[1])
 	}
 }

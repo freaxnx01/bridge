@@ -3,10 +3,12 @@ package forge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -280,4 +282,86 @@ func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) (
 		})
 	}
 	return out, nil
+}
+
+// GetFile fetches a file's decoded content and blob sha via the Contents API.
+// found is false (with nil error) when the file does not exist (404).
+func (c *GithubClient) GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.baseURL, owner, repo, path)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, "", false, nil
+	}
+	if resp.StatusCode >= 400 {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, "", false, fmt.Errorf("github get %s: %s: %s", path, resp.Status, string(body))
+	}
+	var gc struct {
+		Content string `json:"content"`
+		SHA     string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&gc); err != nil {
+		return nil, "", false, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(gc.Content, "\n", ""))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return raw, gc.SHA, true, nil
+}
+
+// PutFile creates or updates a file via the Contents API. Empty sha creates;
+// a blob sha updates. Returns the file's html_url.
+func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, content []byte, message, sha string) (string, error) {
+	body := map[string]any{
+		"message": message,
+		"content": base64.StdEncoding.EncodeToString(content),
+	}
+	if sha != "" {
+		body["sha"] = sha
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.baseURL, owner, repo, path)
+	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(payload))
+	if err != nil {
+		return "", err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("github put %s: %s: %s", path, resp.Status, string(b))
+	}
+	var out struct {
+		Content struct {
+			HTMLURL string `json:"html_url"`
+		} `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Content.HTMLURL, nil
 }
