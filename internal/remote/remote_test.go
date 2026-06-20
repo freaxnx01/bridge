@@ -68,6 +68,21 @@ func TestRefresh_NoToken_WritesCacheNoNetwork(t *testing.T) {
 	}
 }
 
+func TestGitHubToken_ResolvesOwnerScope(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "freaxnx01"))
+	t.Setenv("GH_TOKEN", "tok-abc")
+
+	tok, ok := GitHubToken([]string{root}, "freaxnx01")
+	if !ok || tok != "tok-abc" {
+		t.Errorf("GitHubToken = %q,%v, want tok-abc,true", tok, ok)
+	}
+
+	if _, ok := GitHubToken([]string{root}, "nobody"); ok {
+		t.Errorf("unknown owner should not resolve")
+	}
+}
+
 func mustMkdirEnvrc(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
