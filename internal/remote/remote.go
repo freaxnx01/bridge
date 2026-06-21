@@ -145,6 +145,28 @@ func envFromDirenv(dir string, vars []string) map[string]string {
 	return result
 }
 
+// GitHubToken resolves the GitHub token for owner from its .envrc scope across
+// roots (the same per-owner discovery Refresh uses). Returns ok=false when no
+// github target for that owner is found or the token is empty.
+func GitHubToken(roots []string, owner string) (string, bool) {
+	for _, root := range roots {
+		for _, t := range discoverRemoteTargets(root) {
+			if t.Forge != "github" || t.Owner != owner {
+				continue
+			}
+			env := envFromDirenv(t.Dir, []string{"GH_TOKEN", "GITHUB_TOKEN"})
+			tok := env["GH_TOKEN"]
+			if tok == "" {
+				tok = env["GITHUB_TOKEN"]
+			}
+			if tok != "" {
+				return tok, true
+			}
+		}
+	}
+	return "", false
+}
+
 func fetchTargetRepos(ctx context.Context, t remoteTarget) ([]forge.RepoRef, error) {
 	switch t.Forge {
 	case "github":

@@ -35,10 +35,13 @@ def make_ctx(items=("foo", "bar", "baz")):
         pickers={},
         local_provider=lambda: list(items),
         remote_provider=lambda: [],
-        mru_provider=lambda: [],
+        mru_provider=lambda: list(items),
         spawner=lambda name, extra: {"slot": "2", "session": name},
         kill_session=lambda s: True,
         status_provider=lambda: "status output",
+        idea_pending={},
+        capture_idea=lambda target, text: f"https://example/{target}",
+        ideas_lab_enabled=True,
     )
 
 
@@ -178,6 +181,42 @@ class CallbackTests(unittest.TestCase):
         handlers.on_callback(ctx, chat_id=1, callback_id="cb5", data="search",
                              message_id=st.message_id)
         self.assertTrue(ctx.pickers[1].awaiting_query)
+
+
+class IdeaTests(unittest.TestCase):
+    def test_idea_no_text_shows_usage(self):
+        ctx = make_ctx()
+        handlers.cmd_idea(ctx, 1, "")
+        self.assertIn("Usage", ctx.bot.sent[-1]["text"])
+        self.assertEqual(ctx.idea_pending, {})
+
+    def test_idea_text_shows_target_picker_with_ideas_lab(self):
+        ctx = make_ctx()
+        handlers.cmd_idea(ctx, 1, "kanban for issues")
+        self.assertIn(1, ctx.idea_pending)
+        self.assertEqual(ctx.idea_pending[1]["text"], "kanban for issues")
+        kb = ctx.bot.sent[-1]["reply_markup"]["inline_keyboard"]
+        labels = [btn["text"] for row in kb for btn in row]
+        self.assertTrue(any("ideas-lab" in l for l in labels))
+        self.assertTrue(any("foo" in l for l in labels))
+
+    def test_idea_target_callback_captures(self):
+        ctx = make_ctx()
+        handlers.cmd_idea(ctx, 1, "an idea")
+        msg_id = ctx.bot.sent[-1]["message_id"]
+        # tap the ideas-lab button (data "idea:ideas-lab")
+        handlers.on_callback(ctx, 1, "cb1", "idea:ideas-lab", msg_id)
+        self.assertNotIn(1, ctx.idea_pending)  # cleared
+        self.assertIn("captured", ctx.bot.edited[-1]["text"].lower())
+        self.assertIn("https://example/ideas-lab", ctx.bot.edited[-1]["text"])
+
+    def test_idea_callback_unconfigured_lab_button_absent(self):
+        ctx = make_ctx()
+        ctx.ideas_lab_enabled = False
+        handlers.cmd_idea(ctx, 1, "x")
+        kb = ctx.bot.sent[-1]["reply_markup"]["inline_keyboard"]
+        labels = [btn["text"] for row in kb for btn in row]
+        self.assertFalse(any("ideas-lab" in l for l in labels))
 
 
 if __name__ == "__main__":
