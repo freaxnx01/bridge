@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
@@ -341,5 +342,17 @@ func (m Model) refreshRemoteCmd() tea.Cmd {
 			return remoteErrMsg{err: err}
 		}
 		return remoteMsg{rows: remoteRows(refs)}
+	}
+}
+
+// createRepoCmd runs the injected CreateRepo callback off the Update loop for
+// the modal's selected name + forge×visibility choice.
+func (m Model) createRepoCmd() tea.Cmd {
+	create := m.cfg.CreateRepo
+	ch := repoForgeChoices[m.repoModal.sel]
+	name := strings.TrimSpace(m.repoModal.name)
+	return func() tea.Msg {
+		repo, err := create(name, ch.forge, ch.private)
+		return repoCreatedMsg{repo: repo, err: err}
 	}
 }

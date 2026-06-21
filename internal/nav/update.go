@@ -108,6 +108,16 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.modal = nil
 		return m.launchRow(msg.row)
+	case repoCreatedMsg:
+		if msg.err != nil {
+			if m.repoModal != nil {
+				m.repoModal.creating = false
+				m.repoModal.err = msg.err.Error()
+			}
+			return m, nil
+		}
+		m.repoModal = nil
+		return m.enterDash(msg.repo)
 	case execDoneMsg:
 		// Returned from a detached tmux attach/launch: refresh the screen we're on.
 		if m.screen == screenDash {
@@ -205,6 +215,9 @@ func (m Model) visibleRepos() []repoRow {
 }
 
 func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.repoModal != nil {
+		return m.updateRepoModal(msg)
+	}
 	switch msg.String() {
 	case "ctrl+c", "q":
 		if m.pickerFocus != focusFilter {
@@ -328,6 +341,10 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		m.remoteState = loadPending
 		return m, m.refreshRemoteCmd()
+	case "ctrl+n":
+		if m.cfg.CreateRepo != nil {
+			m.repoModal = &newRepoModal{}
+		}
 	case "o":
 		if m.cfg.BuildOverview == nil {
 			return m, nil
@@ -532,6 +549,46 @@ func (m Model) updateModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case tea.KeyRunes:
 		m.modal.name += string(msg.Runes)
 		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) updateRepoModal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if m.repoModal.creating {
+		return m, nil // ignore keys while the create is in flight
+	}
+	if m.repoModal.step == repoModalName {
+		switch msg.Type {
+		case tea.KeyEsc:
+			m.repoModal = nil
+		case tea.KeyEnter:
+			if strings.TrimSpace(m.repoModal.name) == "" {
+				m.repoModal.err = "name required"
+			} else {
+				m.repoModal.err = ""
+				m.repoModal.step = repoModalForge
+			}
+		case tea.KeyBackspace:
+			if r := []rune(m.repoModal.name); len(r) > 0 {
+				m.repoModal.name = string(r[:len(r)-1])
+			}
+		case tea.KeyRunes:
+			m.repoModal.name += string(msg.Runes)
+		}
+		return m, nil
+	}
+	// repoModalForge
+	switch msg.String() {
+	case "esc":
+		m.repoModal.step = repoModalName
+	case "up", "k":
+		m.repoModal.sel = clampInt(m.repoModal.sel-1, 0, len(repoForgeChoices)-1)
+	case "down", "j":
+		m.repoModal.sel = clampInt(m.repoModal.sel+1, 0, len(repoForgeChoices)-1)
+	case "enter":
+		m.repoModal.creating = true
+		m.repoModal.err = ""
+		return m, m.createRepoCmd()
 	}
 	return m, nil
 }
