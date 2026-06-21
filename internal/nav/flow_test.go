@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	tea "github.com/charmbracelet/bubbletea"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/overview"
 )
@@ -154,4 +155,38 @@ func TestViewOverview_EmptyStatusGroupLabeled(t *testing.T) {
 	if !strings.Contains(out, "No status") {
 		t.Errorf("empty-status group should be labeled 'No status':\n%s", out)
 	}
+}
+
+func TestViewRepoModal_NameAndForgeSteps(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.repoModal = &newRepoModal{name: "proj"}
+	nameFrame := m.viewPicker()
+	if !strings.Contains(nameFrame, "New repo") || !strings.Contains(nameFrame, "name: proj") {
+		t.Errorf("name step frame wrong:\n%s", nameFrame)
+	}
+	m.repoModal.step = repoModalForge
+	m.repoModal.sel = 2 // GitHub · Private
+	forgeFrame := m.viewPicker()
+	for _, want := range []string{"New repo · proj", "Forgejo · Private", "GitHub · Private", "GitHub · Public"} {
+		if !strings.Contains(forgeFrame, want) {
+			t.Errorf("forge step missing %q:\n%s", want, forgeFrame)
+		}
+	}
+}
+
+func TestFlow_CtrlN_RepoModal_Golden(t *testing.T) {
+	s := newSession(t, Config{
+		CreateRepo: func(name, forge string, private bool) (core.Repo, error) {
+			return core.Repo{Name: name, Path: "/r/" + name, Forge: forge}, nil
+		},
+	})
+	s.send(reposMsg{rows: []repoRow{{label: "github/public/bridge"}}})
+	s.m.pickerFocus = focusList
+	s.send(tea.KeyMsg{Type: tea.KeyCtrlN})
+	for _, r := range "proj" {
+		s.send(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+	}
+	s.send(tea.KeyMsg{Type: tea.KeyEnter}) // -> forge step
+	assertGolden(t, "ctrln_repo_modal_forge", s.frame())
 }
