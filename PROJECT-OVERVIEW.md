@@ -29,4 +29,5 @@ Active; v2.1.0 cutover to pure-Go complete (Phase 4, #35).
 
 - [`README.md`](README.md) — layout, CLI surface, cache files, package map.
 - [`go-migrate.md`](go-migrate.md) — install / update.
+- [`docs/history.md`](docs/history.md) — evolution (clrepo → bridge → Go → nav TUI) + roadmap (next: WebUI with visualization; PoC at `docs/design/bridge-poc2.html`).
 - Bridge's own design docs: `docs/specs/` and `docs/plans/`.
