@@ -51,6 +51,10 @@ var navCmd = &cobra.Command{
 				}
 				return repoFromClonedRef(reposRoot(), ref, dir), nil
 			},
+			CreateRepo: func(name, forgeName string, private bool) (core.Repo, error) {
+				repo, _, err := createAndClone(context.Background(), name, forgeName, private)
+				return repo, err
+			},
 			FetchIssues: func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
 				c := clientFor(forgeName)
 				if c == nil {
