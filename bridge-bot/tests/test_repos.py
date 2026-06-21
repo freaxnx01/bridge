@@ -34,10 +34,10 @@ class LocalReposTests(unittest.TestCase):
         )
 
     def test_filter_query_matches_basename_case_insensitive(self):
-        items = ["github/me/public/bridge", "github/me/public/dotfiles", "gitlab/me/CLRepo-x"]
+        items = ["github/me/public/bridge", "github/me/public/dotfiles", "gitlab/me/Bridge-X"]
         self.assertEqual(
             sorted(repos.filter_query(items, "bridge")),
-            ["github/me/public/bridge", "gitlab/me/CLRepo-x"],
+            ["github/me/public/bridge", "gitlab/me/Bridge-X"],
         )
 
     def test_filter_query_empty_returns_all(self):

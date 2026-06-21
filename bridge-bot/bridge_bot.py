@@ -4,7 +4,7 @@
 import json
 import logging
 import os
-import shlex
+import shutil
 import signal
 import subprocess
 import sys
@@ -25,6 +25,14 @@ import tg
 LOG = logging.getLogger("bridge-bot")
 PID_PATH = Path.home() / ".cache" / "bridge" / "bridge-bot.pid"
 
+# Resolve OUR bridge binary explicitly. systemd's PATH omits ~/.local/bin, so a
+# bare "bridge" would hit the iproute2 networking tool in /usr/sbin. Prefer
+# ~/.local/bin so direct subprocess calls use the real bridge CLI.
+BRIDGE_BIN = shutil.which(
+    "bridge",
+    path=os.path.expanduser("~/.local/bin") + os.pathsep + os.environ.get("PATH", ""),
+) or os.path.expanduser("~/.local/bin/bridge")
+
 # Reload flag set by SIGHUP handler.
 _RELOAD = {"want": False}
 
@@ -38,27 +46,74 @@ def _kill_slot(slot: str) -> bool:
     """Kill the tmux session belonging to a bridge slot."""
     slots = spawn.read_slots()
     entry = slots.get(str(slot))
-    if not entry or not entry.get("session"):
+    if not entry:
         return False
+    # List-format entries have no `session`; the tmux name equals the slot id/key.
+    session = entry.get("session") or str(slot)
     try:
-        subprocess.run(["tmux", "kill-session", "-t", entry["session"]],
+        subprocess.run(["tmux", "kill-session", "-t", session],
                        check=True, env=spawn.clean_env())
         return True
     except subprocess.CalledProcessError:
         return False
 
 
-def _status() -> str:
+BOT_COMMANDS = [
+    {"command": "new", "description": "Start a session (repo picker)"},
+    {"command": "newrepo", "description": "Create a new repo (Forgejo/GitHub)"},
+    {"command": "status", "description": "Bridge summary + live sessions"},
+    {"command": "kill", "description": "Stop a session"},
+    {"command": "cancel", "description": "Drop the current picker"},
+    {"command": "help", "description": "Show help"},
+]
+
+
+def _bridge_summary() -> str:
     try:
         out = subprocess.run(
-            ["bash", "-lc", "bridge --status"],
-            capture_output=True, text=True, timeout=10,
+            [BRIDGE_BIN, "status"], capture_output=True, text=True, timeout=10,
             env=spawn.clean_env(),
         )
-        return (out.stdout + out.stderr).strip() or "(empty)"
+        full = (out.stdout + out.stderr).strip()
+        # `bridge status` prints a counts block, a blank line, then its own
+        # per-slot table. Keep only the counts block — _status renders its own
+        # compact session table (avoids a duplicated, wide table on mobile).
+        return full.split("\n\n", 1)[0]
     except subprocess.SubprocessError as e:
-        LOG.warning("bridge --status failed: %s", e)
+        LOG.warning("bridge status failed: %s", e)
         return f"(error: {e})"
+
+
+def _sessions_table() -> str:
+    try:
+        out = subprocess.run(
+            [BRIDGE_BIN, "sessions", "--json"], capture_output=True, text=True,
+            timeout=10, env=spawn.clean_env(),
+        )
+        rows = json.loads(out.stdout) or []
+    except (subprocess.SubprocessError, json.JSONDecodeError, ValueError) as e:
+        return f"(sessions error: {e})"
+    if not rows:
+        return "(no live sessions)"
+    width = max(len(r.get("slot_id", "?")) for r in rows)
+    lines = []
+    for r in rows:
+        sid = r.get("slot_id", "?")
+        state = r.get("state", "?")
+        when = (r.get("last_activity") or "")[:16].replace("T", " ")
+        lines.append(f"{sid:<{width}}  {state:<8}  {when}")
+    return "\n".join(lines)
+
+
+def _status() -> str:
+    """Structured status: bridge summary, then a table of live sessions."""
+    summary = _bridge_summary()
+    table = _sessions_table()
+    sections = []
+    if summary:
+        sections.append(summary)
+    sections.append("Sessions:\n" + table)
+    return "\n\n".join(sections) or "(empty)"
 
 
 def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
@@ -77,13 +132,33 @@ def _spawn_and_confirm(name: str, extra: list[str] | None) -> dict | None:
 def _capture_idea(target: str, text: str) -> str:
     """Shell out to `bridge capture idea --target <target>`, piping text via stdin."""
     proc = subprocess.run(
-        ["bash", "-lc", f"bridge capture idea --target {shlex.quote(target)}"],
+        [BRIDGE_BIN, "capture", "idea", "--target", target],
         input=text, capture_output=True, text=True, timeout=30,
         env=spawn.clean_env(),
     )
     if proc.returncode != 0:
         raise RuntimeError((proc.stderr or proc.stdout).strip() or "capture failed")
     return proc.stdout.strip()
+
+
+def _create_repo(name: str, forge: str, private: bool) -> dict | None:
+    cmd = [BRIDGE_BIN, "create", "--forge", forge, "--json"]
+    if not private:
+        cmd.append("--public")
+    cmd += ["--", name]
+    try:
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=60,
+                             env=spawn.clean_env())  # create+clone can be slow
+        if out.returncode != 0:
+            _log_event(evt="create_repo", name=name, ok=False, error=out.stderr.strip())
+            return None
+        result = json.loads(out.stdout)
+        _log_event(evt="create_repo", name=name, ok=True,
+                   full_name=result.get("full_name"))
+        return result
+    except (subprocess.SubprocessError, json.JSONDecodeError, ValueError) as e:
+        _log_event(evt="create_repo", name=name, ok=False, error=str(e))
+        return None
 
 
 def build_context(bot: tg.Bot) -> handlers.Context:
@@ -99,6 +174,8 @@ def build_context(bot: tg.Bot) -> handlers.Context:
         idea_pending={},
         capture_idea=_capture_idea,
         ideas_lab_enabled=bool(os.environ.get("BRIDGE_IDEAS_LAB_REPO")),
+        repo_creator=_create_repo,
+        pending={},
     )
 
 
@@ -134,6 +211,8 @@ def _handle_message(ctx: handlers.Context, msg: dict) -> None:
         if ctx.pickers.get(chat_id) is None:
             _refresh_remote_if_stale()  # cheap, only triggers if stale
         handlers.cmd_new(ctx, chat_id, rest.strip())
+    elif cmd == "newrepo":
+        handlers.cmd_newrepo(ctx, chat_id, rest.strip())
     elif cmd == "status":
         handlers.cmd_status(ctx, chat_id)
     elif cmd == "kill":
@@ -195,6 +274,12 @@ def main() -> int:
     bot = tg.Bot(token)
     ctx = build_context(bot)
     rl = auth.RateLimiter(capacity=20, refill_per_sec=20 / 60.0)
+
+    try:
+        bot.set_my_commands(BOT_COMMANDS)
+        _log_event(evt="commands_registered", n=len(BOT_COMMANDS))
+    except tg.TelegramAPIError as e:
+        _log_event(evt="commands_error", error=str(e))
 
     offset = int(cfg.get("last_update_id", 0)) + 1
     last_beat = 0.0

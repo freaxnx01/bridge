@@ -26,13 +26,25 @@ def clean_env(src: dict[str, str] | None = None) -> dict[str, str]:
 
 
 def read_slots(path: str = SLOTS_PATH) -> dict:
+    """Return {slot_key: entry} for active slots, normalizing both on-disk formats.
+
+    Legacy clrepo wrote a dict keyed by slot number; current bridge writes a
+    list of {id, repo, worktree, ...} whose `id` is the tmux session name.
+    Both are normalized to a dict keyed by slot id/number.
+    """
     if not os.path.exists(path):
         return {}
-    with open(path) as fh:
-        try:
-            return json.load(fh).get("slots", {})
-        except (json.JSONDecodeError, ValueError):
-            return {}
+    try:
+        with open(path) as fh:
+            data = json.load(fh)
+    except (json.JSONDecodeError, ValueError, OSError):
+        return {}
+    slots = data.get("slots") if isinstance(data, dict) else None
+    if isinstance(slots, dict):
+        return slots
+    if isinstance(slots, list):
+        return {e["id"]: e for e in slots if isinstance(e, dict) and e.get("id")}
+    return {}
 
 
 def find_new_slot(path: str, before_keys: set[str], repo: str) -> dict | None:
@@ -42,21 +54,24 @@ def find_new_slot(path: str, before_keys: set[str], repo: str) -> dict | None:
     for k in new_keys:
         entry = now[k] or {}
         if entry.get("repo") == repo:
-            return {"slot": k, "session": entry.get("session"), **entry}
+            # In the list format there is no `session` field; the tmux session
+            # name equals the slot id/key.
+            return {**entry, "slot": k, "session": entry.get("session") or k}
     return None
 
 
 def spawn_bridge(name: str, extra_args: list[str] | None = None, agent: str = "claude") -> str:
-    """Launch `bridge open <name> --agent <agent> [extra_args...]` in detached tmux.
+    """Launch `bridge open <name> --agent <agent> --rc [extra_args...]` in detached tmux.
 
     Post v2.0.0 Go cutover, bare `bridge <name>` emits a `cd:` directive that
     the shim handles by `cd`ing in the wrapper bash — the wrapper then exits
     without spawning anything. `--agent` is required so the directive becomes
     `exec:tmux new-session ...` (or the nested switch-client form), which
-    actually launches an agent session that outlives the wrapper.
+    actually launches an agent session that outlives the wrapper. `--rc`
+    enables Remote Control so the session can be taken over via RC afterward.
     """
     wrapper = f"bridge-spawn-{secrets.token_hex(3)}"
-    parts = ["open", shlex.quote(name), "--agent", shlex.quote(agent)]
+    parts = ["open", shlex.quote(name), "--agent", shlex.quote(agent), "--rc"]
     parts += [shlex.quote(a) for a in (extra_args or [])]
     cmdline = "bridge " + " ".join(parts)
     LOG.info("spawn: tmux session=%s cmd=%s", wrapper, cmdline)

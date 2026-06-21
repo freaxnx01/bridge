@@ -108,6 +108,13 @@ func discoverRemoteTargets(root string) []remoteTarget {
 	return out
 }
 
+// EnvFromDirenv resolves the named env vars under dir's direnv scope (falling
+// back to the process env when direnv is absent), for callers outside this
+// package that need a per-dir token — e.g. `bridge create`.
+func EnvFromDirenv(dir string, vars []string) map[string]string {
+	return envFromDirenv(dir, vars)
+}
+
 // envFromDirenv reads the named env vars under dir's direnv scope. Missing vars
 // come back as empty strings. Falls back to the parent process env when direnv
 // is absent or fails, so tests without direnv still resolve tokens.
