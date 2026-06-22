@@ -29,6 +29,8 @@ class Context:
     ideas_lab_enabled: bool  # whether the "ideas-lab" target is offered
     repo_creator: Callable[[str, str, bool], dict | None]
     pending: dict  # chat_id -> awaiting marker (e.g. "newrepo")
+    issue_pending: dict  # chat_id -> {"title": str}
+    capture_issue: Callable[[str, str], str]  # (target, title) -> link; raises on failure
 
 
 HELP_TEXT = (
@@ -40,6 +42,7 @@ HELP_TEXT = (
     "  /status         Show bridge slot status\n"
     "  /kill <slot>    Kill a slot's tmux session (confirms)\n"
     "  /idea <text>    Capture an idea (then pick a target)\n"
+    "  /issue <title>  Capture an issue (then pick a target repo)\n"
     "  /cancel         Drop the current picker\n"
     "  /help           This message"
 )
@@ -188,6 +191,23 @@ def cmd_idea(ctx: Context, chat_id: int, args: str) -> None:
     ctx.idea_pending[chat_id] = {"text": text}
 
 
+def cmd_issue(ctx: Context, chat_id: int, args: str) -> None:
+    title = args.strip()
+    if not title:
+        ctx.bot.send_message(chat_id, "Usage: /issue <title>")
+        return
+    targets = list(ctx.mru_provider())  # no ideas-lab pin — issues need a real repo
+    rows = []
+    for tgt in targets:
+        rows.append([{"text": _basename(tgt), "callback_data": f"issue:{tgt}"}])
+    rows.append([{"text": "✖ cancel", "callback_data": "issue_cancel"}])
+    ctx.bot.send_message(
+        chat_id, f"Capture issue — pick a repo:\n<i>{html.escape(title)}</i>",
+        reply_markup={"inline_keyboard": rows}, parse_mode="HTML",
+    )
+    ctx.issue_pending[chat_id] = {"title": title}
+
+
 def cmd_cancel(ctx: Context, chat_id: int) -> None:
     ctx.pickers.pop(chat_id, None)
     ctx.pending.pop(chat_id, None)
@@ -276,6 +296,26 @@ def on_callback(ctx: Context, chat_id: int, callback_id: str, data: str, message
             msg = f"✅ captured → {link}"
         except Exception as e:  # surfaced to the user, not swallowed
             msg = f"❌ capture failed: {e}"
+        ctx.bot.edit_message_text(chat_id, message_id, msg, reply_markup={"inline_keyboard": []})
+        return
+
+    if data == "issue_cancel":
+        ctx.issue_pending.pop(chat_id, None)
+        ctx.bot.answer_callback_query(callback_id, "Cancelled")
+        ctx.bot.edit_message_text(chat_id, message_id, "Cancelled.", reply_markup={"inline_keyboard": []})
+        return
+    if data.startswith("issue:"):
+        pending = ctx.issue_pending.pop(chat_id, None)
+        if not pending:
+            ctx.bot.answer_callback_query(callback_id, "Issue expired — /issue to restart")
+            return
+        target = data.split(":", 1)[1]
+        ctx.bot.answer_callback_query(callback_id, "Creating…")
+        try:
+            link = ctx.capture_issue(target, pending["title"])
+            msg = f"✅ created → {link}"
+        except Exception as e:  # surfaced to the user, not swallowed
+            msg = f"❌ create failed: {e}"
         ctx.bot.edit_message_text(chat_id, message_id, msg, reply_markup={"inline_keyboard": []})
         return
 

@@ -113,6 +113,26 @@ func (c *GithubClient) CreateRepo(ctx context.Context, name string, private bool
 	}, nil
 }
 
+// CreateIssue creates an issue on owner/repo and returns the minimal Issue.
+func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
+	req := map[string]any{"title": title, "body": body}
+	var raw struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := c.post(ctx, "/repos/"+owner+"/"+repo+"/issues", req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return Issue{
+		Forge:  "github",
+		Repo:   owner + "/" + repo,
+		Number: raw.Number,
+		Title:  raw.Title,
+		URL:    raw.HTMLURL,
+	}, nil
+}
+
 // ListRepos returns the repos owned by the authenticated user (the token's
 // own account), including private ones. It uses the authenticated-user
 // endpoint /user/repos rather than /users/{owner}/repos because the latter

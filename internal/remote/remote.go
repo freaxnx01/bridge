@@ -174,6 +174,25 @@ func GitHubToken(roots []string, owner string) (string, bool) {
 	return "", false
 }
 
+// ForgejoToken resolves the Forgejo token from the (owner-less) git-forgejo
+// .envrc scope across roots, mirroring how fetchTargetRepos resolves it
+// internally. Returns ok=false when no git-forgejo dir is found or the token
+// is empty.
+func ForgejoToken(roots []string) (string, bool) {
+	for _, root := range roots {
+		for _, t := range discoverRemoteTargets(root) {
+			if t.Forge != "forgejo" {
+				continue
+			}
+			tok := envFromDirenv(t.Dir, []string{"FORGEJO_TOKEN"})["FORGEJO_TOKEN"]
+			if tok != "" {
+				return tok, true
+			}
+		}
+	}
+	return "", false
+}
+
 func fetchTargetRepos(ctx context.Context, t remoteTarget) ([]forge.RepoRef, error) {
 	switch t.Forge {
 	case "github":

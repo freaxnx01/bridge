@@ -36,6 +36,107 @@ func init() {
 	rootCmd.AddCommand(captureCmd)
 }
 
+// issueTarget is what resolveIssueTarget returns: identifies the repo AND its
+// forge (which we need to pick the right client + token).
+type issueTarget struct {
+	Owner, Repo, Forge string
+}
+
+// resolveIssueTarget maps a --target string ("owner/name" or a bare repo name)
+// to an issueTarget by looking it up in the discovered repos. Unlike the
+// idea-capture resolver, this one accepts both github and forgejo repos and
+// rejects the "ideas-lab" sentinel.
+func resolveIssueTarget(target string, repos []core.Repo) (issueTarget, error) {
+	if target == "ideas-lab" {
+		return issueTarget{}, fmt.Errorf("ideas-lab target is for ideas only; pick a repo")
+	}
+	if owner, name, ok := strings.Cut(target, "/"); ok {
+		for i := range repos {
+			if strings.EqualFold(repos[i].Owner, owner) && strings.EqualFold(repos[i].Name, name) {
+				return issueTarget{Owner: repos[i].Owner, Repo: repos[i].Name, Forge: repos[i].Forge}, nil
+			}
+		}
+		return issueTarget{}, fmt.Errorf("no known repo %s/%s (need its forge to create the issue)", owner, name)
+	}
+	var match *core.Repo
+	for i := range repos {
+		f := repos[i].Forge
+		if (f == "github" || f == "forgejo") && strings.EqualFold(repos[i].Name, target) {
+			if match != nil {
+				return issueTarget{}, fmt.Errorf("repo %q is ambiguous; use owner/name", target)
+			}
+			match = &repos[i]
+		}
+	}
+	if match == nil {
+		return issueTarget{}, fmt.Errorf("no github/forgejo repo named %q", target)
+	}
+	return issueTarget{Owner: match.Owner, Repo: match.Name, Forge: match.Forge}, nil
+}
+
+var captureIssueCmd = &cobra.Command{
+	Use:   "issue",
+	Short: "Capture an issue (title from stdin) on a chosen repo",
+	RunE:  runCaptureIssue,
+}
+
+var captureIssueTarget string
+
+func init() {
+	captureIssueCmd.Flags().StringVar(&captureIssueTarget, "target", "", "<repo-name> | <owner>/<name>")
+	_ = captureIssueCmd.MarkFlagRequired("target")
+	captureCmd.AddCommand(captureIssueCmd)
+}
+
+func runCaptureIssue(cmd *cobra.Command, args []string) error {
+	repos, _ := discoverAllRoots()
+	tgt, err := resolveIssueTarget(captureIssueTarget, repos)
+	if err != nil {
+		return err
+	}
+	raw, err := io.ReadAll(cmd.InOrStdin())
+	if err != nil {
+		return fmt.Errorf("read title: %w", err)
+	}
+	title := firstNonEmptyLine(string(raw))
+	if title == "" {
+		return fmt.Errorf("no title on stdin")
+	}
+	var creator capture.IssueCreator
+	switch tgt.Forge {
+	case "github":
+		tok, ok := remote.GitHubToken(reposRoots(), tgt.Owner)
+		if !ok {
+			return fmt.Errorf("no github token for owner %q (need an .envrc GH_TOKEN with repo scope)", tgt.Owner)
+		}
+		creator = forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API"))
+	case "forgejo":
+		tok, ok := remote.ForgejoToken(reposRoots())
+		if !ok {
+			return fmt.Errorf("no forgejo token (need a git-forgejo .envrc with FORGEJO_TOKEN)")
+		}
+		creator = forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API"))
+	default:
+		return fmt.Errorf("forge %q is not supported for issue capture", tgt.Forge)
+	}
+	is, err := capture.CaptureIssue(cmd.Context(), creator, tgt.Owner, tgt.Repo, title)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintln(cmd.OutOrStdout(), is.URL)
+	return nil
+}
+
+// firstNonEmptyLine returns the first non-blank line of s, trimmed.
+func firstNonEmptyLine(s string) string {
+	for _, line := range strings.Split(s, "\n") {
+		if t := strings.TrimSpace(line); t != "" {
+			return t
+		}
+	}
+	return ""
+}
+
 // resolveCaptureTarget maps a --target string to a capture.Target. "ideas-lab"
 // uses ideasLabRepo ("owner/name", from config). Otherwise the string is a repo
 // identifier: "owner/name" is taken literally; a bare name is matched (case-

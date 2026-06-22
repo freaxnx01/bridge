@@ -93,3 +93,28 @@ func TestForgejoCreateRepoConflict(t *testing.T) {
 		t.Fatalf("want ErrRepoExists, got %v", err)
 	}
 }
+
+func TestForgejoCreateIssue(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/repos/freax/notes/issues" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":7,"title":"rough idea","html_url":"https://fj.example/freax/notes/issues/7"}`))
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("T", srv.URL)
+	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["title"] != "rough idea" {
+		t.Errorf("body sent: %+v", gotBody)
+	}
+	if is.Forge != "forgejo" || is.Repo != "freax/notes" || is.Number != 7 || is.URL != "https://fj.example/freax/notes/issues/7" {
+		t.Errorf("issue: %+v", is)
+	}
+}

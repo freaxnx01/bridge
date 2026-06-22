@@ -254,3 +254,29 @@ func TestGithubCreateRepoExists(t *testing.T) {
 		t.Fatalf("want ErrRepoExists, got %v", err)
 	}
 }
+
+func TestGithubCreateIssue(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/repos/freaxnx01/bridge/issues" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":142,"title":"flicker","html_url":"https://github.com/freaxnx01/bridge/issues/142"}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["title"] != "flicker" || gotBody["body"] != "" {
+		t.Errorf("body sent: %+v", gotBody)
+	}
+	if is.Forge != "github" || is.Repo != "freaxnx01/bridge" || is.Number != 142 || is.Title != "flicker" ||
+		is.URL != "https://github.com/freaxnx01/bridge/issues/142" {
+		t.Errorf("issue: %+v", is)
+	}
+}

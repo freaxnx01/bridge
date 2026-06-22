@@ -141,6 +141,18 @@ def _capture_idea(target: str, text: str) -> str:
     return proc.stdout.strip()
 
 
+def _capture_issue(target: str, title: str) -> str:
+    """Shell out to `bridge capture issue --target <target>`, piping title via stdin."""
+    proc = subprocess.run(
+        [BRIDGE_BIN, "capture", "issue", "--target", target],
+        input=title, capture_output=True, text=True, timeout=30,
+        env=spawn.clean_env(),
+    )
+    if proc.returncode != 0:
+        raise RuntimeError((proc.stderr or proc.stdout).strip() or "create failed")
+    return proc.stdout.strip()
+
+
 def _create_repo(name: str, forge: str, private: bool) -> dict | None:
     cmd = [BRIDGE_BIN, "create", "--forge", forge, "--json"]
     if not private:
@@ -176,6 +188,8 @@ def build_context(bot: tg.Bot) -> handlers.Context:
         ideas_lab_enabled=bool(os.environ.get("BRIDGE_IDEAS_LAB_REPO")),
         repo_creator=_create_repo,
         pending={},
+        issue_pending={},
+        capture_issue=_capture_issue,
     )
 
 
@@ -219,6 +233,8 @@ def _handle_message(ctx: handlers.Context, msg: dict) -> None:
         handlers.cmd_kill(ctx, chat_id, rest.strip())
     elif cmd == "idea":
         handlers.cmd_idea(ctx, chat_id, rest.strip())
+    elif cmd == "issue":
+        handlers.cmd_issue(ctx, chat_id, rest.strip())
     elif cmd == "cancel":
         handlers.cmd_cancel(ctx, chat_id)
     else:

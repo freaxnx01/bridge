@@ -8,6 +8,8 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/freaxnx01/bridge/internal/forge"
 )
 
 // Target is where a captured idea lands: the ideas-lab repo (a new dated file)
@@ -67,6 +69,23 @@ func CaptureIdea(ctx context.Context, w FileWriter, t Target, text string, now t
 		content += "- " + text + "\n"
 	}
 	return w.PutFile(ctx, t.Owner, t.Repo, path, []byte(content), "capture: idea", sha)
+}
+
+// IssueCreator is the consumer interface for CaptureIssue. Both
+// *forge.GithubClient and *forge.ForgejoClient satisfy it.
+type IssueCreator interface {
+	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
+}
+
+// CaptureIssue creates a title-only issue on the chosen repo's forge and
+// returns the created Issue. The body is always empty by design (title-only
+// capture); a future ergonomics step can add an optional body.
+func CaptureIssue(ctx context.Context, w IssueCreator, owner, repo, title string) (forge.Issue, error) {
+	title = strings.TrimSpace(title)
+	if title == "" {
+		return forge.Issue{}, fmt.Errorf("empty issue title")
+	}
+	return w.CreateIssue(ctx, owner, repo, title, "")
 }
 
 // slug turns idea text into a filename-safe slug (lowercase, non-alnum -> "-",

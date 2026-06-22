@@ -83,6 +83,25 @@ func TestGitHubToken_ResolvesOwnerScope(t *testing.T) {
 	}
 }
 
+func TestForgejoToken_ResolvesFromGitForgejoDir(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "git-forgejo"))
+	t.Setenv("FORGEJO_TOKEN", "fj-tok")
+
+	tok, ok := ForgejoToken([]string{root})
+	if !ok || tok != "fj-tok" {
+		t.Errorf("ForgejoToken = %q,%v, want fj-tok,true", tok, ok)
+	}
+}
+
+func TestForgejoToken_NoneFound(t *testing.T) {
+	root := t.TempDir() // no git-forgejo dir
+	t.Setenv("FORGEJO_TOKEN", "")
+	if _, ok := ForgejoToken([]string{root}); ok {
+		t.Errorf("missing git-forgejo dir should not resolve")
+	}
+}
+
 func mustMkdirEnvrc(t *testing.T, dir string) {
 	t.Helper()
 	if err := os.MkdirAll(dir, 0o755); err != nil {
