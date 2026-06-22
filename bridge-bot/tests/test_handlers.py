@@ -46,6 +46,8 @@ def make_ctx(items=("foo", "bar", "baz")):
             "name": name, "full_name": f"o/{name}", "forge": forge,
             "private": private, "path": f"/r/{name}", "html_url": "u"},
         pending={},
+        issue_pending={},
+        capture_issue=lambda target, title: f"https://example/{target}/issues/1",
     )
 
 
@@ -297,6 +299,43 @@ class NewRepoTests(unittest.TestCase):
                              data="newrepo_launch:myproj", message_id=5)
         self.assertEqual(seen["name"], "myproj")
         self.assertIn("Launched", ctx.bot.edited[-1]["text"])
+
+
+class IssueTests(unittest.TestCase):
+    def test_issue_no_title_shows_usage(self):
+        ctx = make_ctx()
+        handlers.cmd_issue(ctx, 1, "")
+        self.assertIn("Usage", ctx.bot.sent[-1]["text"])
+        self.assertEqual(ctx.issue_pending, {})
+
+    def test_issue_title_shows_target_picker_without_ideas_lab(self):
+        ctx = make_ctx()
+        handlers.cmd_issue(ctx, 1, "flicker on rapid typing")
+        self.assertIn(1, ctx.issue_pending)
+        self.assertEqual(ctx.issue_pending[1]["title"], "flicker on rapid typing")
+        kb = ctx.bot.sent[-1]["reply_markup"]["inline_keyboard"]
+        labels = [btn["text"] for row in kb for btn in row]
+        self.assertTrue(any("foo" in l for l in labels))  # MRU repo present
+        self.assertFalse(any("ideas-lab" in l for l in labels))  # NO ideas-lab pin
+
+    def test_issue_target_callback_creates(self):
+        ctx = make_ctx()
+        handlers.cmd_issue(ctx, 1, "a title")
+        msg_id = ctx.bot.sent[-1]["message_id"]
+        handlers.on_callback(ctx, 1, "cb1", "issue:foo", msg_id)
+        self.assertNotIn(1, ctx.issue_pending)  # cleared
+        self.assertIn("created", ctx.bot.edited[-1]["text"].lower())
+        self.assertIn("https://example/foo/issues/1", ctx.bot.edited[-1]["text"])
+
+    def test_issue_callback_capture_failure_shown(self):
+        ctx = make_ctx()
+        def _fail(target, title): raise RuntimeError("scope missing")
+        ctx.capture_issue = _fail
+        handlers.cmd_issue(ctx, 1, "a title")
+        msg_id = ctx.bot.sent[-1]["message_id"]
+        handlers.on_callback(ctx, 1, "cb1", "issue:foo", msg_id)
+        self.assertIn("failed", ctx.bot.edited[-1]["text"].lower())
+        self.assertIn("scope missing", ctx.bot.edited[-1]["text"])
 
 
 if __name__ == "__main__":
