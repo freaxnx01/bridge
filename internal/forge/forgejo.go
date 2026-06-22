@@ -100,6 +100,27 @@ func (c *ForgejoClient) CreateRepo(ctx context.Context, name string, private boo
 	}, nil
 }
 
+// CreateIssue creates an issue on owner/repo via Forgejo/Gitea and returns the
+// minimal Issue.
+func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
+	req := map[string]any{"title": title, "body": body}
+	var raw struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		HTMLURL string `json:"html_url"`
+	}
+	if err := c.post(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues", req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return Issue{
+		Forge:  "forgejo",
+		Repo:   owner + "/" + repo,
+		Number: raw.Number,
+		Title:  raw.Title,
+		URL:    raw.HTMLURL,
+	}, nil
+}
+
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
 	var raw []fjRepo
 	if err := c.get(ctx, "/api/v1/users/"+owner+"/repos?limit=50", &raw); err != nil {
