@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -101,5 +102,53 @@ func TestCreateRejectsBadForge(t *testing.T) {
 	cmd.SetArgs([]string{"foo", "--forge", "bitbucket"})
 	if err := cmd.Execute(); err == nil {
 		t.Fatal("want error for unknown forge")
+	}
+}
+
+func TestCreateAndClone_GitHub(t *testing.T) {
+	// httptest GitHub forge that accepts the create POST.
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"name":"proj","visibility":"public","default_branch":"main",
+			"html_url":"https://gh/freaxnx01/proj","ssh_url":"git@github.com:freaxnx01/proj.git",
+			"owner":{"login":"freaxnx01"}}`))
+	}))
+	defer srv.Close()
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	t.Setenv("GH_TOKEN", "tok")
+
+	// a repos root with a github/<owner>/public dir so githubTargetDir resolves
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "github", githubOwner, "public"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+
+	var clonedURL, clonedTarget string
+	orig := cloneFn
+	cloneFn = func(sshURL, target string) error { clonedURL, clonedTarget = sshURL, target; return nil }
+	defer func() { cloneFn = orig }()
+
+	repo, ref, err := createAndClone(context.Background(), "proj", "github", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if clonedURL != "git@github.com:freaxnx01/proj.git" {
+		t.Errorf("cloned ssh = %q", clonedURL)
+	}
+	if repo.Name != "proj" || repo.Owner != "freaxnx01" || repo.Forge != "github" || repo.Visibility != "public" {
+		t.Errorf("repo = %+v", repo)
+	}
+	if repo.Path != clonedTarget || repo.Path != filepath.Join(root, "github", githubOwner, "public", "proj") {
+		t.Errorf("path = %q (clonedTarget %q)", repo.Path, clonedTarget)
+	}
+	if ref.HTMLURL != "https://gh/freaxnx01/proj" {
+		t.Errorf("ref.HTMLURL = %q", ref.HTMLURL)
+	}
+}
+
+func TestCreateAndClone_InvalidName(t *testing.T) {
+	if _, _, err := createAndClone(context.Background(), "bad name", "github", true); err == nil {
+		t.Errorf("invalid name should error")
 	}
 }

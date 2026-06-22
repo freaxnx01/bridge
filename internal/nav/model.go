@@ -37,6 +37,7 @@ type Model struct {
 	todosScroll int // top display-line offset of the Todos pane
 	notesState  loadState
 	modal       *newWorktreeModal
+	repoModal   *newRepoModal
 	details     map[string]*worktreeDetails // per-worktree panel cache, keyed by path
 
 	overview      overview.Snapshot

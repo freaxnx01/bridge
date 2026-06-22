@@ -68,6 +68,9 @@ func (m Model) View() string {
 }
 
 func (m Model) viewPicker() string {
+	if m.repoModal != nil {
+		return m.viewRepoModal()
+	}
 	w := m.width
 	var sections []string
 
@@ -138,7 +141,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · tab panes · q quit"))
+	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · q quit"))
 	return strings.Join(sections, "\n")
 }
 
@@ -264,6 +267,34 @@ func (m Model) dirtyView(r dashRow) string {
 		return stOk.Render("✓ clean")
 	}
 	return strings.Join(tokens, " ")
+}
+
+func (m Model) viewRepoModal() string {
+	mo := m.repoModal
+	if mo.step == repoModalName {
+		body := "name: " + mo.name + "_\n\n" + stMuted.Render("⏎ next · esc cancel")
+		if mo.err != "" {
+			body += "\n" + stBad.Render(mo.err)
+		}
+		return panel(m.width, "New repo", body)
+	}
+	var b strings.Builder
+	for i, ch := range repoForgeChoices {
+		if i == mo.sel {
+			b.WriteString(stSel.Render(stAccent.Render("▸ ")+ch.label) + "\n")
+		} else {
+			b.WriteString("  " + stText.Render(ch.label) + "\n")
+		}
+	}
+	if mo.creating {
+		b.WriteString("\n" + stMuted.Render("⏳ creating…"))
+	} else {
+		b.WriteString("\n" + stMuted.Render("↑↓ pick · ⏎ create · esc back"))
+	}
+	if mo.err != "" {
+		b.WriteString("\n" + stBad.Render(mo.err))
+	}
+	return panel(m.width, "New repo · "+mo.name, strings.TrimRight(b.String(), "\n"))
 }
 
 func (m Model) viewModal() string {

@@ -765,3 +765,86 @@ func TestUpdatePicker_R_FetchRemote_GetsDeadlineContext(t *testing.T) {
 		t.Error("FetchRemote should receive a deadline-bounded context")
 	}
 }
+
+func TestUpdatePicker_CtrlN_OpensRepoModal(t *testing.T) {
+	m := initialModel(Config{
+		CreateRepo: func(name, forge string, private bool) (core.Repo, error) {
+			return core.Repo{Name: name, Path: "/r/" + name, Forge: forge}, nil
+		},
+	})
+	m.pickerFocus = focusList
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if out.(Model).repoModal == nil {
+		t.Fatal("ctrl+n should open the repo modal")
+	}
+}
+
+func TestUpdatePicker_CtrlN_NoopWhenDisabled(t *testing.T) {
+	m := initialModel(Config{}) // CreateRepo nil
+	m.pickerFocus = focusList
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	if out.(Model).repoModal != nil {
+		t.Error("ctrl+n should be a no-op when CreateRepo is nil")
+	}
+}
+
+func TestRepoModal_NameStep_EmptyNameErrs(t *testing.T) {
+	m := initialModel(Config{})
+	m.repoModal = &newRepoModal{}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if got := out.(Model).repoModal; got.step != repoModalName || got.err == "" {
+		t.Errorf("empty name should stay on name step with an err: %+v", got)
+	}
+}
+
+func TestRepoModal_NameThenForgeThenCreate(t *testing.T) {
+	var gotName, gotForge string
+	var gotPriv bool
+	m := initialModel(Config{
+		CreateRepo: func(name, forge string, private bool) (core.Repo, error) {
+			gotName, gotForge, gotPriv = name, forge, private
+			return core.Repo{Name: name, Path: "/r/" + name, Forge: forge}, nil
+		},
+	})
+	m.repoModal = &newRepoModal{}
+	// type "proj"
+	for _, r := range "proj" {
+		mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}})
+		m = mm.(Model)
+	}
+	// enter -> forge step
+	mm, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(Model)
+	if m.repoModal.step != repoModalForge {
+		t.Fatalf("after name, step = %d, want forge", m.repoModal.step)
+	}
+	// move to "GitHub · Public" (index 3) then create
+	for i := 0; i < 3; i++ {
+		mm, _ = m.Update(tea.KeyMsg{Type: tea.KeyDown})
+		m = mm.(Model)
+	}
+	mm, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	m = mm.(Model)
+	if !m.repoModal.creating || cmd == nil {
+		t.Fatal("enter on forge step should set creating + return a Cmd")
+	}
+	// resolve the create cmd -> repoCreatedMsg -> dashboard
+	out, _ := m.Update(cmd())
+	got := out.(Model)
+	if gotName != "proj" || gotForge != "github" || gotPriv != false {
+		t.Errorf("create args = %q/%q/%v", gotName, gotForge, gotPriv)
+	}
+	if got.screen != screenDash || got.repo.Name != "proj" || got.repoModal != nil {
+		t.Errorf("after create: screen=%d repo=%+v modal=%v", got.screen, got.repo, got.repoModal)
+	}
+}
+
+func TestUpdate_RepoCreatedMsg_Error(t *testing.T) {
+	m := initialModel(Config{})
+	m.repoModal = &newRepoModal{step: repoModalForge, creating: true}
+	out, _ := m.Update(repoCreatedMsg{err: errFake})
+	got := out.(Model)
+	if got.repoModal == nil || got.repoModal.creating || got.repoModal.err == "" {
+		t.Errorf("error should keep modal open, clear creating, set err: %+v", got.repoModal)
+	}
+}

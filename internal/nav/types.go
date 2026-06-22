@@ -150,6 +150,33 @@ type newWorktreeModal struct {
 	err  string
 }
 
+type repoModalStep int
+
+const (
+	repoModalName repoModalStep = iota
+	repoModalForge
+)
+
+// newRepoModal is the inline Ctrl+N create-repo state (picker screen).
+type newRepoModal struct {
+	name     string
+	step     repoModalStep
+	sel      int // index into repoForgeChoices
+	creating bool
+	err      string
+}
+
+// repoForgeChoices are the forge×visibility options in display order.
+var repoForgeChoices = []struct {
+	label, forge string
+	private      bool
+}{
+	{"Forgejo · Private", "forgejo", true},
+	{"Forgejo · Public", "forgejo", false},
+	{"GitHub · Private", "github", true},
+	{"GitHub · Public", "github", false},
+}
+
 // Config is everything nav needs, injected by cmd/bridge so internal/nav
 // stays free of cmd-layer code (e.g. cloneRemoteRepo).
 type Config struct {
@@ -159,6 +186,9 @@ type Config struct {
 	DefaultAgent string // BRIDGE_DEFAULT_AGENT ("" => no auto-launch agent; nav uses claude)
 	AgentArgs    []string
 	Clone        func(ref forge.RepoRef) (core.Repo, error)
+	// CreateRepo creates a repo on the named forge (forgejo|github) at the given
+	// visibility, clones it, and returns the local repo. Nil disables Ctrl+N.
+	CreateRepo func(name, forgeName string, private bool) (core.Repo, error)
 	// NameArgs returns extra leading args that label the launched agent session
 	// (e.g. claude's `-n "<repo> [<wt>]"`) and performs any pre-launch setup
 	// (the relabel hook). Injected by cmd/bridge so internal/nav stays free of
@@ -217,6 +247,10 @@ type cloneDoneMsg struct {
 type wtCreatedMsg struct {
 	row dashRow
 	err error
+}
+type repoCreatedMsg struct {
+	repo core.Repo
+	err  error
 }
 type execDoneMsg struct{ err error }
 type slotRegisteredMsg struct{}
