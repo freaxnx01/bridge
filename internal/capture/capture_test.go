@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/freaxnx01/bridge/internal/forge"
 )
 
 // fakeWriter records PutFile calls and serves canned GetFile responses.
@@ -134,5 +136,43 @@ func TestSlug(t *testing.T) {
 		if got := slug(tt.in); got != tt.want {
 			t.Errorf("slug(%q) = %q, want %q", tt.in, got, tt.want)
 		}
+	}
+}
+
+type fakeIssueCreator struct {
+	gotOwner, gotRepo, gotTitle, gotBody string
+	ret                                  forge.Issue
+	err                                  error
+}
+
+func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string) (forge.Issue, error) {
+	f.gotOwner, f.gotRepo, f.gotTitle, f.gotBody = owner, repo, title, body
+	return f.ret, f.err
+}
+
+func TestCaptureIssue_TrimsAndCreates(t *testing.T) {
+	w := &fakeIssueCreator{
+		ret: forge.Issue{Forge: "github", Repo: "freaxnx01/bridge", Number: 142,
+			Title: "flicker", URL: "https://github.com/freaxnx01/bridge/issues/142"},
+	}
+	got, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "  flicker  ")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if w.gotTitle != "flicker" {
+		t.Errorf("title not trimmed: %q", w.gotTitle)
+	}
+	if w.gotBody != "" {
+		t.Errorf("body must be empty (title-only capture), got %q", w.gotBody)
+	}
+	if got.Number != 142 || got.URL == "" {
+		t.Errorf("returned issue: %+v", got)
+	}
+}
+
+func TestCaptureIssue_EmptyTitleRejected(t *testing.T) {
+	w := &fakeIssueCreator{}
+	if _, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "   "); err == nil {
+		t.Errorf("empty title must error")
 	}
 }
