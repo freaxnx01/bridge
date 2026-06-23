@@ -54,18 +54,30 @@ func newCreateCmd() *cobra.Command {
 	return cmd
 }
 
-func forgejoTargetDir() (dir, token string, err error) {
+// forgejoTargetDir resolves the per-user git-forgejo directory and the env
+// values bridge needs to talk to the Forgejo instance. Both FORGEJO_TOKEN and
+// BRIDGE_FORGEJO_API are loaded from the directory's .envrc (via direnv) and
+// fall back to the process env when direnv has nothing to say. This lets a
+// self-hosted user keep both `export FORGEJO_TOKEN=…` and
+// `export BRIDGE_FORGEJO_API=https://git.example.com` next to each other in
+// the same .envrc instead of having to set the API URL globally.
+func forgejoTargetDir() (dir, token, api string, err error) {
 	for _, root := range reposRoots() {
 		d := filepath.Join(root, "git-forgejo")
 		if dirExists(d) {
-			tok := remote.EnvFromDirenv(d, []string{"FORGEJO_TOKEN"})["FORGEJO_TOKEN"]
+			env := remote.EnvFromDirenv(d, []string{"FORGEJO_TOKEN", "BRIDGE_FORGEJO_API"})
+			tok := env["FORGEJO_TOKEN"]
 			if tok == "" {
 				tok = os.Getenv("FORGEJO_TOKEN")
 			}
-			return d, tok, nil
+			a := env["BRIDGE_FORGEJO_API"]
+			if a == "" {
+				a = os.Getenv("BRIDGE_FORGEJO_API")
+			}
+			return d, tok, a, nil
 		}
 	}
-	return "", "", fmt.Errorf("no git-forgejo dir under repos roots")
+	return "", "", "", fmt.Errorf("no git-forgejo dir under repos roots")
 }
 
 func githubTargetDir(vis string) (dir, token string, err error) {
@@ -107,14 +119,14 @@ func createAndClone(ctx context.Context, name, forgeName string, private bool) (
 	var targetDir string
 	switch forgeName {
 	case "forgejo":
-		dir, tok, err := forgejoTargetDir()
+		dir, tok, api, err := forgejoTargetDir()
 		if err != nil {
 			return core.Repo{}, forge.RepoRef{}, err
 		}
 		if tok == "" {
 			return core.Repo{}, forge.RepoRef{}, fmt.Errorf("no Forgejo token (check %s/.envrc)", dir)
 		}
-		ref, err = forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API")).CreateRepo(ctx, name, private)
+		ref, err = forge.NewForgejoClient(tok, api).CreateRepo(ctx, name, private)
 		if err != nil {
 			return core.Repo{}, forge.RepoRef{}, createErr(err, name)
 		}

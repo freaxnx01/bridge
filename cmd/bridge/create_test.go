@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 )
@@ -62,6 +63,62 @@ func TestCreateForgejoEndToEnd(t *testing.T) {
 	}
 	if !bytes.Contains(out.Bytes(), []byte(`"forge": "forgejo"`)) {
 		t.Fatalf("json out = %s", out.String())
+	}
+}
+
+// TestCreateForgejo_ApiUrlFromEnvrc verifies that BRIDGE_FORGEJO_API set inside
+// the git-forgejo .envrc (alongside FORGEJO_TOKEN) is honored — the historical
+// bug was that bridge only read it from the process env, so a self-hosted user
+// whose .envrc set the URL still got routed to codeberg.org by default.
+func TestCreateForgejo_ApiUrlFromEnvrc(t *testing.T) {
+	if _, err := exec.LookPath("direnv"); err != nil {
+		t.Skip("direnv not installed")
+	}
+	root := t.TempDir()
+	forgeDir := filepath.Join(root, "git-forgejo")
+	if err := os.MkdirAll(forgeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	var hit bool
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hit = true
+		w.WriteHeader(201)
+		_, _ = w.Write([]byte(`{"name":"foo","private":true,"ssh_url":"ssh://x/foo.git",
+			"html_url":"https://h/foo","owner":{"login":"freax"}}`))
+	}))
+	defer srv.Close()
+
+	envrc := "export FORGEJO_TOKEN=envrc-tok\nexport BRIDGE_FORGEJO_API=" + srv.URL + "\n"
+	if err := os.WriteFile(filepath.Join(forgeDir, ".envrc"), []byte(envrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Isolate direnv's allow database to a tempdir so the test never touches the
+	// user's real direnv config.
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(xdg, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(xdg, "cfg"))
+	if out, err := exec.Command("direnv", "allow", forgeDir).CombinedOutput(); err != nil {
+		t.Fatalf("direnv allow: %v: %s", err, out)
+	}
+
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+	// Crucially: NO BRIDGE_FORGEJO_API / FORGEJO_TOKEN in the process env — the
+	// only source must be the .envrc.
+	t.Setenv("BRIDGE_FORGEJO_API", "")
+	t.Setenv("FORGEJO_TOKEN", "")
+
+	old := cloneFn
+	cloneFn = func(string, string) error { return nil }
+	defer func() { cloneFn = old }()
+
+	cmd := newCreateCmd()
+	cmd.SetOut(&bytes.Buffer{})
+	cmd.SetArgs([]string{"foo", "--forge", "forgejo", "--json"})
+	if err := cmd.Execute(); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if !hit {
+		t.Fatal("create did not call the .envrc BRIDGE_FORGEJO_API server — bridge fell back to a different URL")
 	}
 }
 
