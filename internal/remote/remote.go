@@ -126,6 +126,13 @@ func envFromDirenv(dir string, vars []string) map[string]string {
 		}
 		return result
 	}
+	// direnv records its approval under the canonical path, but `direnv exec`
+	// against a symlinked path (e.g. a repos root of ~/repos -> ~/projects/repos)
+	// reports "blocked". Resolve the symlink first so approval matches; fall back
+	// to the original path if it can't be resolved (e.g. doesn't exist yet).
+	if resolved, err := filepath.EvalSymlinks(dir); err == nil {
+		dir = resolved
+	}
 	var script strings.Builder
 	for _, v := range vars {
 		script.WriteString(`printf '%s\n' "${`)

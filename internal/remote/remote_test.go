@@ -3,6 +3,7 @@ package remote
 import (
 	"context"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"testing"
 
@@ -99,6 +100,51 @@ func TestForgejoToken_NoneFound(t *testing.T) {
 	t.Setenv("FORGEJO_TOKEN", "")
 	if _, ok := ForgejoToken([]string{root}); ok {
 		t.Errorf("missing git-forgejo dir should not resolve")
+	}
+}
+
+// TestEnvFromDirenv_SymlinkedDir_ResolvesVars guards the real-world bug where a
+// repos root is a symlink (e.g. ~/repos -> ~/projects/repos): direnv records its
+// approval under the canonical path, but `direnv exec` against the symlink path
+// reports "blocked", so without resolving the symlink first bridge falls back to
+// the (empty) process env and loses BRIDGE_FORGEJO_API.
+func TestEnvFromDirenv_SymlinkedDir_ResolvesVars(t *testing.T) {
+	if _, err := exec.LookPath("direnv"); err != nil {
+		t.Skip("direnv not installed")
+	}
+	// realDir is the canonical, direnv-allowed dir.
+	realDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	realDir = filepath.Join(realDir, "git-forgejo")
+	if err := os.MkdirAll(realDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(realDir, ".envrc"), []byte("export FOO=bar\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	// Isolate direnv's allow database so the test never touches the host config.
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(xdg, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(xdg, "cfg"))
+	if out, err := exec.Command("direnv", "allow", realDir).CombinedOutput(); err != nil {
+		t.Fatalf("direnv allow: %v: %s", err, out)
+	}
+	// linkDir is a symlink pointing at realDir's parent — callers reach the
+	// .envrc via the symlink path, exactly as a symlinked repos root would.
+	linkParent := filepath.Join(t.TempDir(), "link")
+	if err := os.Symlink(filepath.Dir(realDir), linkParent); err != nil {
+		t.Fatal(err)
+	}
+	symlinkDir := filepath.Join(linkParent, "git-forgejo")
+
+	// FOO must NOT be in the process env, so the only source is the .envrc.
+	t.Setenv("FOO", "")
+
+	got := EnvFromDirenv(symlinkDir, []string{"FOO"})
+	if got["FOO"] != "bar" {
+		t.Fatalf("EnvFromDirenv via symlink = %q, want \"bar\" (symlink not resolved before direnv exec)", got["FOO"])
 	}
 }
 
