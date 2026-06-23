@@ -266,6 +266,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	if m.pickerFocus == focusFilter {
 		switch msg.Type {
+		case tea.KeyCtrlN:
+			if m.cfg.CreateRepo != nil {
+				m.pickerFocus = focusList
+				m.filter.Blur()
+				m.repoModal = &newRepoModal{}
+			}
+			return m, nil
 		case tea.KeyUp:
 			if len(m.sessions) > 0 {
 				m.pickerFocus = focusSessions

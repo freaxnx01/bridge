@@ -788,6 +788,41 @@ func TestUpdatePicker_CtrlN_NoopWhenDisabled(t *testing.T) {
 	}
 }
 
+func TestUpdatePicker_CtrlN_FromFilter_OpensRepoModal(t *testing.T) {
+	m := initialModel(Config{
+		CreateRepo: func(name, forge string, private bool) (core.Repo, error) {
+			return core.Repo{Name: name, Path: "/r/" + name, Forge: forge}, nil
+		},
+	})
+	m.pickerFocus = focusFilter
+	m.filter.Focus()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	got := out.(Model)
+	if got.repoModal == nil {
+		t.Fatal("ctrl+n from filter should open the repo modal")
+	}
+	if got.pickerFocus != focusList {
+		t.Errorf("ctrl+n from filter should move focus to focusList, got %v", got.pickerFocus)
+	}
+	if got.filter.Focused() {
+		t.Error("ctrl+n from filter should blur the filter input")
+	}
+}
+
+func TestUpdatePicker_CtrlN_FromFilter_NoopWhenDisabled(t *testing.T) {
+	m := initialModel(Config{}) // CreateRepo nil
+	m.pickerFocus = focusFilter
+	m.filter.Focus()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlN})
+	got := out.(Model)
+	if got.repoModal != nil {
+		t.Error("ctrl+n from filter should be a no-op when CreateRepo is nil")
+	}
+	if got.pickerFocus != focusFilter {
+		t.Error("ctrl+n no-op should leave filter focused")
+	}
+}
+
 func TestRepoModal_NameStep_EmptyNameErrs(t *testing.T) {
 	m := initialModel(Config{})
 	m.repoModal = &newRepoModal{}
