@@ -160,7 +160,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		cancel()
 		shutCtx, shutCancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer shutCancel()
-		srv.Shutdown(shutCtx) //nolint:errcheck
+		srv.Shutdown(shutCtx) //nolint:errcheck // shutdown errors (e.g. context deadline exceeded) are not actionable at process exit
 	}()
 
 	if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
