@@ -119,6 +119,7 @@ func (h *ReposHandler) create(w http.ResponseWriter, r *http.Request) {
 	if h.Notify != nil {
 		h.Notify("overview-updated", nil)
 	}
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusCreated)
-	writeJSON(w, repo)
+	json.NewEncoder(w).Encode(repo) //nolint:errcheck // best-effort; client disconnect is benign
 }
