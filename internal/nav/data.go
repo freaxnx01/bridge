@@ -339,7 +339,9 @@ func (m Model) refreshRemoteCmd() tea.Cmd {
 		defer cancel()
 		refs, err := fetch(ctx)
 		if err != nil {
-			return remoteErrMsg{err: err}
+			// Refresh returns partial refs alongside the first error when one
+			// forge fails but others succeed; keep those fresh rows.
+			return remoteErrMsg{err: err, rows: remoteRows(refs)}
 		}
 		return remoteMsg{rows: remoteRows(refs)}
 	}

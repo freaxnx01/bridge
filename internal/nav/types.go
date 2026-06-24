@@ -46,6 +46,7 @@ const (
 	loadPending loadState = iota
 	loadOK
 	loadErr
+	loadPartial // some sources loaded, at least one failed; fresh rows still shown
 )
 
 // repoRow is one picker row. Remote rows carry a forge.RepoRef for clone.
@@ -225,7 +226,14 @@ type Config struct {
 type reposMsg struct{ rows []repoRow }
 type sessionsMsg struct{ rows []sessionRow }
 type remoteMsg struct{ rows []repoRow }
-type remoteErrMsg struct{ err error }
+
+// remoteErrMsg reports a failed remote refresh. rows carries any partial fresh
+// rows that loaded before the failure (e.g. one forge 401'd while others
+// succeeded); empty rows means a total failure that keeps the cached rows.
+type remoteErrMsg struct {
+	err  error
+	rows []repoRow
+}
 type issueCountMsg struct {
 	key   string // forge/owner/name
 	count int

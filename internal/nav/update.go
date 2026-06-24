@@ -31,6 +31,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.remoteState = loadOK
 		return m, m.issueCountCmds(msg.rows)
 	case remoteErrMsg:
+		if len(msg.rows) > 0 {
+			// Partial success: at least one forge loaded. Show the fresh rows
+			// rather than discarding them; the cache would only be staler.
+			m.remoteRepos = msg.rows
+			m.remoteState = loadPartial
+			return m, m.issueCountCmds(msg.rows)
+		}
 		m.remoteState = loadErr
 		m.status = "remote unavailable (cached rows shown)"
 		return m, nil

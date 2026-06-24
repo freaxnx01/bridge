@@ -99,6 +99,8 @@ func (m Model) viewPicker() string {
 		title = "Repos   " + m.spin.View() + " loading remote…"
 	case loadErr:
 		title = "Repos   " + stWarn.Render("remote unavailable (cached rows shown)")
+	case loadPartial:
+		title = "Repos   " + stWarn.Render("some remotes unavailable (partial results shown)")
 	}
 	var rb strings.Builder
 	rb.WriteString(m.filter.View() + "\n\n")

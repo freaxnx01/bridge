@@ -2,6 +2,8 @@ package remote
 
 import (
 	"context"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -145,6 +147,57 @@ func TestEnvFromDirenv_SymlinkedDir_ResolvesVars(t *testing.T) {
 	got := EnvFromDirenv(symlinkDir, []string{"FOO"})
 	if got["FOO"] != "bar" {
 		t.Fatalf("EnvFromDirenv via symlink = %q, want \"bar\" (symlink not resolved before direnv exec)", got["FOO"])
+	}
+}
+
+func TestFetchTargetRepos_Forgejo_ResolvesAPIBaseFromEnvrc(t *testing.T) {
+	if _, err := exec.LookPath("direnv"); err != nil {
+		t.Skip("direnv not installed")
+	}
+	// A stand-in for the self-hosted Forgejo. The API base lives only in the
+	// .envrc (direnv scope), never in the process env — exactly the homelab
+	// layout. Without the fix the client falls back to codeberg.org and never
+	// hits this server.
+	var hits int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		if r.URL.Path != "/api/v1/users/freax/repos" {
+			t.Errorf("request path = %q, want /api/v1/users/freax/repos", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[{"name":"obsidian-me","default_branch":"main"}]`))
+	}))
+	defer srv.Close()
+
+	dir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir = filepath.Join(dir, "git-forgejo")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	envrc := "export FORGEJO_TOKEN=fj-tok\nexport BRIDGE_FORGEJO_API=" + srv.URL + "\n"
+	if err := os.WriteFile(filepath.Join(dir, ".envrc"), []byte(envrc), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	xdg := t.TempDir()
+	t.Setenv("XDG_DATA_HOME", filepath.Join(xdg, "data"))
+	t.Setenv("XDG_CONFIG_HOME", filepath.Join(xdg, "cfg"))
+	if out, err := exec.Command("direnv", "allow", dir).CombinedOutput(); err != nil {
+		t.Fatalf("direnv allow: %v: %s", err, out)
+	}
+	// The API base must come only from the .envrc, not the process env.
+	t.Setenv("BRIDGE_FORGEJO_API", "")
+
+	repos, err := fetchTargetRepos(context.Background(), remoteTarget{Forge: "forgejo", Owner: "freax", Dir: dir})
+	if err != nil {
+		t.Fatalf("fetchTargetRepos: %v", err)
+	}
+	if hits == 0 {
+		t.Fatal("server never hit: API base not resolved from .envrc (client used codeberg.org default)")
+	}
+	if len(repos) != 1 || repos[0].Name != "obsidian-me" {
+		t.Fatalf("repos = %+v, want one obsidian-me", repos)
 	}
 }
 

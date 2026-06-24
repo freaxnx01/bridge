@@ -200,10 +200,22 @@ func ForgejoToken(roots []string) (string, bool) {
 	return "", false
 }
 
+// apiBase resolves a BRIDGE_*_API base URL: the per-forge .envrc value (direnv
+// scope) wins, falling back to the process env. The API base lives next to the
+// token in each forge's .envrc, so reading os.Getenv alone misses it when
+// bridge runs outside that direnv scope (the client then defaults to the wrong
+// public host — e.g. codeberg.org for a self-hosted Forgejo).
+func apiBase(env map[string]string, name string) string {
+	if v := env[name]; v != "" {
+		return v
+	}
+	return os.Getenv(name)
+}
+
 func fetchTargetRepos(ctx context.Context, t remoteTarget) ([]forge.RepoRef, error) {
 	switch t.Forge {
 	case "github":
-		env := envFromDirenv(t.Dir, []string{"GH_TOKEN", "GITHUB_TOKEN"})
+		env := envFromDirenv(t.Dir, []string{"GH_TOKEN", "GITHUB_TOKEN", "BRIDGE_GITHUB_API"})
 		tok := env["GH_TOKEN"]
 		if tok == "" {
 			tok = env["GITHUB_TOKEN"]
@@ -211,23 +223,23 @@ func fetchTargetRepos(ctx context.Context, t remoteTarget) ([]forge.RepoRef, err
 		if tok == "" {
 			return nil, nil
 		}
-		c := forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API"))
+		c := forge.NewGithubClient(tok, apiBase(env, "BRIDGE_GITHUB_API"))
 		return c.ListRepos(ctx, t.Owner)
 	case "gitlab":
-		env := envFromDirenv(t.Dir, []string{"GITLAB_TOKEN"})
+		env := envFromDirenv(t.Dir, []string{"GITLAB_TOKEN", "BRIDGE_GITLAB_API"})
 		tok := env["GITLAB_TOKEN"]
 		if tok == "" {
 			return nil, nil
 		}
-		c := forge.NewGitlabClient(tok, os.Getenv("BRIDGE_GITLAB_API"))
+		c := forge.NewGitlabClient(tok, apiBase(env, "BRIDGE_GITLAB_API"))
 		return c.ListRepos(ctx, t.Owner)
 	case "forgejo":
-		env := envFromDirenv(t.Dir, []string{"FORGEJO_TOKEN"})
+		env := envFromDirenv(t.Dir, []string{"FORGEJO_TOKEN", "BRIDGE_FORGEJO_API"})
 		tok := env["FORGEJO_TOKEN"]
 		if tok == "" {
 			return nil, nil
 		}
-		c := forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API"))
+		c := forge.NewForgejoClient(tok, apiBase(env, "BRIDGE_FORGEJO_API"))
 		return c.ListRepos(ctx, t.Owner)
 	case "ado":
 		env := envFromDirenv(t.Dir, []string{"AZURE_DEVOPS_ORG_URL", "AZURE_DEVOPS_EXT_PAT", "ADO_PAT"})
