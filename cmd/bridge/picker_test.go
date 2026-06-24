@@ -15,14 +15,14 @@ import (
 func TestLocalPickerRows_SameNameDifferentOwners_OwnerQualified(t *testing.T) {
 	repos := []core.Repo{
 		{Forge: "github", Owner: "freaxnx01", Name: "ai-instructions", Visibility: "public", Path: "/r/freaxnx01/ai-instructions"},
-		{Forge: "github", Owner: "anim-bossinfo-ch", Name: "ai-instructions", Visibility: "public", Path: "/r/anim/ai-instructions"},
+		{Forge: "github", Owner: "acme", Name: "ai-instructions", Visibility: "public", Path: "/r/acme/ai-instructions"},
 		{Forge: "github", Owner: "freaxnx01", Name: "bridge", Visibility: "public", Path: "/r/freaxnx01/bridge"},
 	}
 	got := localPickerRows(repos)
 
 	want := []string{
 		"github/public/freaxnx01/ai-instructions\t/r/freaxnx01/ai-instructions",
-		"github/public/anim-bossinfo-ch/ai-instructions\t/r/anim/ai-instructions",
+		"github/public/acme/ai-instructions\t/r/acme/ai-instructions",
 		"github/public/bridge\t/r/freaxnx01/bridge", // unique name: clean label
 	}
 	for _, w := range want {

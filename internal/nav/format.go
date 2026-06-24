@@ -69,7 +69,7 @@ func rowParts(r repoRow) (forge, owner, vis, name string) {
 
 // disambiguateOwners rewrites labels for rows that base-render identically (same
 // forge/visibility/name) but belong to different owners — e.g. freaxnx01 and
-// anim-bossinfo-ch both having ai-instructions, which otherwise both show as
+// acme both having ai-instructions, which otherwise both show as
 // github/public/ai-instructions and look like the #124 duplicate. Such rows get
 // the owner injected (github/<vis>/<owner>/<name>) so they're distinguishable;
 // rows with a unique base label keep the clean owner-less form. Returns a new

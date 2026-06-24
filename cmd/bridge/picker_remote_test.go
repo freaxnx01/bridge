@@ -190,7 +190,7 @@ func TestPickerLabel_SameNameDifferentOwners_OwnerQualified(t *testing.T) {
 		{Forge: "github", Owner: "freaxnx01", Name: "bridge", Visibility: "public"},
 	}
 	remote := []forge.RepoRef{
-		{Forge: "github", Owner: "anim-bossinfo-ch", Name: "ai-instructions", Visibility: "public"},
+		{Forge: "github", Owner: "acme", Name: "ai-instructions", Visibility: "public"},
 	}
 	collide := collidingLabels(local, remote)
 
@@ -198,7 +198,7 @@ func TestPickerLabel_SameNameDifferentOwners_OwnerQualified(t *testing.T) {
 		name, forge, owner, vis, repo, want string
 	}{
 		{"local colliding", "github", "freaxnx01", "public", "ai-instructions", "github/public/freaxnx01/ai-instructions"},
-		{"remote colliding", "github", "anim-bossinfo-ch", "public", "ai-instructions", "github/public/anim-bossinfo-ch/ai-instructions"},
+		{"remote colliding", "github", "acme", "public", "ai-instructions", "github/public/acme/ai-instructions"},
 		{"unique name keeps clean label", "github", "freaxnx01", "public", "bridge", "github/public/bridge"},
 	}
 	for _, tt := range tests {

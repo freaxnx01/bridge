@@ -47,7 +47,7 @@ func TestVisibleRepos_SameNameDifferentOwners_DisambiguatesByOwner(t *testing.T)
 		{label: "github/public/bridge", repo: core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge", Visibility: "public"}},
 	}
 	m.remoteRepos = []repoRow{
-		{label: "↓ github/public/ai-instructions", remote: &forge.RepoRef{Forge: "github", Owner: "anim-bossinfo-ch", Name: "ai-instructions", Visibility: "public"}},
+		{label: "↓ github/public/ai-instructions", remote: &forge.RepoRef{Forge: "github", Owner: "acme", Name: "ai-instructions", Visibility: "public"}},
 	}
 
 	got := m.visibleRepos()
@@ -58,7 +58,7 @@ func TestVisibleRepos_SameNameDifferentOwners_DisambiguatesByOwner(t *testing.T)
 	}
 	want := []string{
 		"github/public/freaxnx01/ai-instructions",
-		"↓ github/public/anim-bossinfo-ch/ai-instructions",
+		"↓ github/public/acme/ai-instructions",
 		"github/public/bridge", // unique name: clean label, no owner
 	}
 	for _, w := range want {
