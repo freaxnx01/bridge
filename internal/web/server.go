@@ -34,7 +34,11 @@ func NewServer(hub *Hub, apiMux *http.ServeMux) *Server {
 	mux.Handle("/api/", apiMux)
 
 	// SPA: embedded Svelte assets with fallback to index.html for client-side routing
-	dist, _ := fs.Sub(staticFiles, "dist")
+	dist, err := fs.Sub(staticFiles, "dist")
+	if err != nil {
+		// unreachable: //go:embed dist guarantees "dist" exists in staticFiles at compile time
+		panic(fmt.Sprintf("internal/web: embedded dist subdir missing: %v", err))
+	}
 	mux.Handle("/", spaHandler(dist))
 
 	return &Server{hub: hub, handler: mux}
@@ -69,7 +73,7 @@ func serveEvents(hub *Hub, w http.ResponseWriter, r *http.Request) {
 			if !ok {
 				return
 			}
-			fmt.Fprintf(w, "%s", msg)
+			w.Write(msg) //nolint:errcheck // best-effort; client disconnect is benign
 			flusher.Flush()
 		}
 	}
