@@ -88,9 +88,14 @@ func run(t *testing.T, reposRoot, cacheRoot string, args ...string) (stdout, std
 	// is decided solely by what each test sets below — otherwise a configured
 	// default agent turns `open`'s cd: directive into an exec: launch and the
 	// contract assertions fail only on machines that have it set.
+	// Sandbox Claude config so EnsureRelabel never writes hooks into the
+	// developer's real ~/.claude/settings.json. The dir is scoped to this
+	// test and cleaned up automatically via t.TempDir().
+	claudeDir := t.TempDir()
 	cmd.Env = append(bridgeFreeEnv(),
 		"BRIDGE_REPOS_ROOT="+reposRoot,
 		"XDG_CACHE_HOME="+cacheRoot,
+		"CLAUDE_CONFIG_DIR="+claudeDir,
 		// The real shell shim exports this on every invocation; mirror it so
 		// shim-gated verbs (`open`, `sessions attach`) reach their actual logic
 		// instead of short-circuiting on the no-shim guard. Matches the

@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 )
 
@@ -108,8 +109,14 @@ func mergeHook(settingsPath, scriptPath string) error {
 	}
 
 	entries, _ := hooksMap["SessionStart"].([]any)
+	entries = pruneDeadRelabelHooks(entries, scriptPath)
 	if hookCmdInstalled(entries, cmdStr) {
-		return nil
+		hooksMap["SessionStart"] = entries
+		buf, err := json.MarshalIndent(data, "", "  ")
+		if err != nil {
+			return fmt.Errorf("hooks: marshal settings: %w", err)
+		}
+		return atomicWrite(settingsPath, buf, 0o644)
 	}
 	entries = append(entries, map[string]any{
 		"matcher": "clear",
@@ -124,6 +131,46 @@ func mergeHook(settingsPath, scriptPath string) error {
 		return fmt.Errorf("hooks: marshal settings: %w", err)
 	}
 	return atomicWrite(settingsPath, buf, 0o644)
+}
+
+// pruneDeadRelabelHooks removes SessionStart entries whose command points at a
+// relabel.sh script that no longer exists on disk. This prevents stale hooks
+// from accumulating when the script path changes (e.g. after test runs that
+// used per-test XDG_CACHE_HOME values). Entries that reference a different
+// script path or a still-existing file are left untouched.
+func pruneDeadRelabelHooks(entries []any, liveScriptPath string) []any {
+	out := entries[:0:len(entries)]
+	for _, e := range entries {
+		em, _ := e.(map[string]any)
+		if em == nil {
+			out = append(out, e)
+			continue
+		}
+		hs, _ := em["hooks"].([]any)
+		keep := true
+		for _, h := range hs {
+			hm, _ := h.(map[string]any)
+			if hm == nil {
+				continue
+			}
+			cmd, _ := hm["command"].(string)
+			if !strings.HasSuffix(cmd, "/relabel.sh 0") {
+				continue
+			}
+			scriptFile := strings.TrimSuffix(cmd, " 0")
+			if scriptFile == liveScriptPath {
+				continue // current live script — always keep
+			}
+			if _, err := os.Stat(scriptFile); os.IsNotExist(err) {
+				keep = false
+				break
+			}
+		}
+		if keep {
+			out = append(out, e)
+		}
+	}
+	return out
 }
 
 func hookCmdInstalled(entries []any, cmd string) bool {
