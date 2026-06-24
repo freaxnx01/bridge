@@ -36,6 +36,44 @@ func TestUpdate_RemoteErrMsg_SetsErrStateKeepsCache(t *testing.T) {
 	}
 }
 
+func TestUpdate_RemoteErrMsg_WithPartialRows_ShowsFreshPartial(t *testing.T) {
+	m := initialModel(Config{})
+	m.remoteRepos = []repoRow{{label: "stale-cache"}}
+	partial := []repoRow{{label: "github/acme/alpha"}, {label: "github/acme/beta"}}
+	out, _ := m.Update(remoteErrMsg{err: errFake, rows: partial})
+	got := out.(Model)
+	if got.remoteState != loadPartial {
+		t.Errorf("remoteState = %d, want loadPartial", got.remoteState)
+	}
+	if len(got.remoteRepos) != 2 {
+		t.Fatalf("remoteRepos = %d, want 2 fresh partial rows (stale cache should be replaced)", len(got.remoteRepos))
+	}
+	if got.remoteRepos[0].label != "github/acme/alpha" {
+		t.Errorf("remoteRepos[0] = %q, want the fresh partial row", got.remoteRepos[0].label)
+	}
+}
+
+func TestUpdatePicker_R_PartialFetch_KeepsFreshRows(t *testing.T) {
+	m := initialModel(Config{
+		FetchRemote: func(_ context.Context) ([]forge.RepoRef, error) {
+			// One forge succeeded, another failed: partial refs + error.
+			return []forge.RepoRef{{Forge: "github", Owner: "acme", Name: "alpha"}}, errFake
+		},
+	})
+	m.pickerFocus = focusList
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatal("r should return a Cmd")
+	}
+	em, ok := cmd().(remoteErrMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want remoteErrMsg", cmd())
+	}
+	if len(em.rows) != 1 {
+		t.Fatalf("remoteErrMsg.rows = %d, want 1 fresh partial row (not discarded)", len(em.rows))
+	}
+}
+
 func TestUpdate_DownFromFilter_MovesFocusToList(t *testing.T) {
 	m := initialModel(Config{})
 	m.localRepos = []repoRow{{label: "a"}, {label: "b"}}
