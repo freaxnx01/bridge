@@ -126,6 +126,9 @@ func createAndClone(ctx context.Context, name, forgeName string, private bool) (
 		if tok == "" {
 			return core.Repo{}, forge.RepoRef{}, fmt.Errorf("no Forgejo token (check %s/.envrc)", dir)
 		}
+		if api == "" {
+			return core.Repo{}, forge.RepoRef{}, fmt.Errorf("no Forgejo API URL: set BRIDGE_FORGEJO_API (e.g. in %s/.envrc)", dir)
+		}
 		ref, err = forge.NewForgejoClient(tok, api).CreateRepo(ctx, name, private)
 		if err != nil {
 			return core.Repo{}, forge.RepoRef{}, createErr(err, name)

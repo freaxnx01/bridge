@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -119,6 +120,35 @@ func TestCreateForgejo_ApiUrlFromEnvrc(t *testing.T) {
 	}
 	if !hit {
 		t.Fatal("create did not call the .envrc BRIDGE_FORGEJO_API server — bridge fell back to a different URL")
+	}
+}
+
+// TestCreateForgejo_EmptyApiUrlErrors verifies that when a Forgejo token
+// resolves but no BRIDGE_FORGEJO_API is set, create fails fast with a clear
+// message instead of silently falling back to the codeberg.org default and
+// sending the self-hosted token to the wrong server.
+func TestCreateForgejo_EmptyApiUrlErrors(t *testing.T) {
+	root := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(root, "git-forgejo"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+	t.Setenv("BRIDGE_FORGEJO_API", "")
+	t.Setenv("FORGEJO_TOKEN", "T")
+
+	old := cloneFn
+	cloneFn = func(string, string) error {
+		t.Fatal("clone should not run when BRIDGE_FORGEJO_API is empty")
+		return nil
+	}
+	defer func() { cloneFn = old }()
+
+	_, _, err := createAndClone(context.Background(), "foo", "forgejo", true)
+	if err == nil {
+		t.Fatal("want error when BRIDGE_FORGEJO_API is empty")
+	}
+	if !strings.Contains(err.Error(), "BRIDGE_FORGEJO_API") {
+		t.Fatalf("error should mention BRIDGE_FORGEJO_API, got: %v", err)
 	}
 }
 
