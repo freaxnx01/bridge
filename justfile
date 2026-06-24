@@ -3,10 +3,14 @@ set windows-shell := ["pwsh.exe", "-NoLogo", "-Command"]
 default:
     @just --list
 
+# Build the Svelte frontend into internal/web/dist/.
+web-build:
+    cd web && npm ci && npm run build
+
 # Rebuild + reinstall bridge from the current tree (binary + shim), print version.
 # Use `just sync-build` to pull latest first.
 [unix]
-build:
+build: web-build
     make install
     bridge --version
 

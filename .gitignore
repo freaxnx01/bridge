@@ -7,3 +7,7 @@
 
 /bridge
 .superpowers/
+
+# Svelte build output — embedded into binary; committed placeholder keeps go:embed happy
+internal/web/dist/*
+!internal/web/dist/placeholder
