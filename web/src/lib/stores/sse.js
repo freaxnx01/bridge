@@ -5,6 +5,7 @@ import { writable } from 'svelte/store'
 export function createSseStore(url) {
   const { subscribe, set } = writable(null)
   let es = null
+  let reconnectTimer = null
 
   function connect() {
     es = new EventSource(url)
@@ -13,13 +14,13 @@ export function createSseStore(url) {
     }
     es.onerror = () => {
       es?.close()
-      setTimeout(connect, 3000)
+      reconnectTimer = setTimeout(connect, 3000)
     }
   }
 
   if (typeof window !== 'undefined') connect()
 
-  return { subscribe, disconnect: () => es?.close() }
+  return { subscribe, disconnect: () => { clearTimeout(reconnectTimer); es?.close() } }
 }
 
 export const sseEvent = createSseStore('/api/events')

@@ -20,7 +20,7 @@ func writeJSON(w http.ResponseWriter, v any) {
 func writeError(w http.ResponseWriter, status int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(errorResponse{Error: msg}) //nolint:errcheck
+	json.NewEncoder(w).Encode(errorResponse{Error: msg}) //nolint:errcheck // best-effort; client disconnect is benign
 }
 
 func httpStatus(err error) int {

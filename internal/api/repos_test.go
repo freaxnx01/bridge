@@ -93,3 +93,18 @@ func TestReposHandler_Create_Returns201(t *testing.T) {
 		t.Errorf("Notify called with %q, want overview-updated", notified)
 	}
 }
+
+func TestReposHandler_Create_ErrRepoExists_Returns409(t *testing.T) {
+	h := &ReposHandler{
+		Create: func(_ context.Context, name, _ string, _ bool) (core.Repo, error) {
+			return core.Repo{}, forge.ErrRepoExists
+		},
+	}
+	body := strings.NewReader(`{"name":"existing","forge":"github"}`)
+	r := httptest.NewRequest(http.MethodPost, "/api/repos", body)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+	if w.Code != http.StatusConflict {
+		t.Errorf("status = %d, want 409 Conflict", w.Code)
+	}
+}
