@@ -14,6 +14,6 @@ If a repo name was provided:
   directly here.)
 
 If no repo name was provided:
-- Run `find $HOME/projects/repos -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$HOME/projects/repos/||" | sort` using the Bash tool.
+- Run `find $HOME/repos -type d -name '_archive' -prune -o -type d -name .git -printf '%h\n' 2>/dev/null | sed "s|^$HOME/repos/||" | sort` using the Bash tool.
 - Show the result as a fenced code block, with a one-line tip at the top:
   "Pick one and open from a host shell with `bridge <name>`."

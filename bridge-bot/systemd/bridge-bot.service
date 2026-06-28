@@ -6,7 +6,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 User=freax
-ExecStart=/home/freax/projects/repos/github/freaxnx01/public/bridge/bridge-bot/bridge_bot.py
+ExecStart=/home/freax/repos/github/freaxnx01/public/bridge/bridge-bot/bridge_bot.py
 ExecReload=/bin/kill -HUP $MAINPID
 Restart=on-failure
 RestartSec=5s

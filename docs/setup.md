@@ -88,8 +88,8 @@ here.
 
 ```bash
 git clone https://github.com/freaxnx01/bridge \
-  ~/projects/repos/github/freaxnx01/public/bridge
-cd ~/projects/repos/github/freaxnx01/public/bridge
+  ~/repos/github/freaxnx01/public/bridge
+cd ~/repos/github/freaxnx01/public/bridge
 
 just build        # builds the Go binary → ~/.local/bin/bridge, installs the
                   # shim, prints the version (also git-pulls latest first)
@@ -145,13 +145,13 @@ bridge --version       # → bridge v2.x.y (commit ..., built ...)
 
 ### Where bridge looks for repos
 
-Default root is `~/projects/repos`. Precedence (first non-empty wins):
+Default root is `~/repos`. Precedence (first non-empty wins):
 
 1. `-B/--base <dir>[,<dir>]` (per-invocation)
 2. `BRIDGE_BASE` env (`:`-separated; multiple roots)
 3. `BRIDGE_REPOS_ROOT` env (single root)
 4. `$XDG_CONFIG_HOME/bridge/base` (one path per line)
-5. `~/projects/repos` (default)
+5. `~/repos` (default)
 
 Local repos are picked up automatically — `bridge` (bare) or `bridge <name>`.
 
@@ -178,8 +178,8 @@ Supported forges:
 Example (GitHub scope):
 
 ```bash
-mkdir -p ~/projects/repos/github/freaxnx01
-cd ~/projects/repos/github/freaxnx01
+mkdir -p ~/repos/github/freaxnx01
+cd ~/repos/github/freaxnx01
 echo 'export GH_TOKEN=ghp_xxxxxxxxxxxx' > .envrc
 direnv allow
 ```
@@ -232,7 +232,7 @@ bridge <repo> -w feat-x  # isolated worktree session: opens the feat-x worktree
 ## 7. Developing bridge
 
 ```bash
-cd ~/projects/repos/github/freaxnx01/public/bridge
+cd ~/repos/github/freaxnx01/public/bridge
 
 go test ./...        # full Go test suite (fast iteration; no install needed)
 just test            # Go + shim (bats) tests

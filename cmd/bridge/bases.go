@@ -22,7 +22,7 @@ var baseFlag []string
 //  2. `BRIDGE_BASE` env (colon-separated)
 //  3. `BRIDGE_REPOS_ROOT` env (legacy single value)
 //  4. `$XDG_CONFIG_HOME/bridge/base` (one path per line)
-//  5. `$HOME/projects/repos` (default)
+//  5. `$HOME/repos` (default)
 //
 // Result is de-duplicated by absolute path and the first occurrence wins.
 // Empty entries are dropped.
@@ -39,7 +39,7 @@ func reposRoots() []string {
 		return dedupeAbs(cfg)
 	}
 	home, _ := os.UserHomeDir()
-	return dedupeAbs([]string{filepath.Join(home, "projects", "repos")})
+	return dedupeAbs([]string{filepath.Join(home, "repos")})
 }
 
 // reposRoot returns the first (primary) base. Used by call sites that
@@ -65,7 +65,7 @@ func discoverAllRoots() ([]core.Repo, error) {
 		if !dirExists(root) {
 			if len(roots) > 1 {
 				// Only warn when there's more than one configured base:
-				// the single-base case (default ~/projects/repos on a
+				// the single-base case (default ~/repos on a
 				// fresh checkout) shouldn't pester the user.
 				fmt.Fprintf(os.Stderr, "warning: base %q does not exist\n", root)
 			}

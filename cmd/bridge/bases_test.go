@@ -26,7 +26,7 @@ func TestReposRootsDefault(t *testing.T) {
 	resetEnv(t)
 	t.Setenv("HOME", "/no/such/home")
 	got := reposRoots()
-	want := []string{"/no/such/home/projects/repos"}
+	want := []string{"/no/such/home/repos"}
 	if !reflect.DeepEqual(got, want) {
 		t.Errorf("got %v, want %v", got, want)
 	}
