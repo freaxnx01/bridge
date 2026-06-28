@@ -9,7 +9,7 @@ Product / project context for the `bridge` repo. Read alongside `CLAUDE.md`
 
 ## Purpose
 
-Repo picker and agent-session launcher. Walks `~/projects/repos/`, presents an
+Repo picker and agent-session launcher. Walks `~/repos/`, presents an
 fzf picker, then opens the selected repo in a tmux-wrapped agent session
 (Claude Code, Copilot, opencode, or VS Code) or just `cd`'s into it.
 

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- Default repo-discovery base is now **`~/repos`** (was `~/projects/repos`). Only affects setups relying on the built-in default with no override; the precedence chain is unchanged (`-B`/`--base` → `BRIDGE_BASE` → `BRIDGE_REPOS_ROOT` → `$XDG_CONFIG_HOME/bridge/base` → default), so anyone pointing bridge elsewhere via env/flag/config file is unaffected.
+
 ### Fixed
 
 - Repo discovery now lists only **git checkouts**: a directory under a forge/owner folder that has no `.git` entry (e.g. a OneDrive-synced LINQPad-query or notes folder) is skipped, so it no longer shows up as a repo in `bridge nav` and then fails worktree creation with a raw `git worktree list: fatal: not a git repository` error. (#145)

@@ -25,7 +25,7 @@ var (
 
 var watchCmd = &cobra.Command{
 	Use:   "watch",
-	Short: "Long-running watcher of ~/projects/repos/",
+	Short: "Long-running watcher of ~/repos/",
 	RunE:  runWatch,
 }
 

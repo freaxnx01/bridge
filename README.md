@@ -1,6 +1,6 @@
 # bridge
 
-A repo picker and agent-session launcher. Walks `~/projects/repos/`, presents an fzf picker, then opens the selected repo in a tmux-wrapped agent session (Claude Code, Copilot, opencode, or VS Code) or just `cd`'s into it.
+A repo picker and agent-session launcher. Walks `~/repos/`, presents an fzf picker, then opens the selected repo in a tmux-wrapped agent session (Claude Code, Copilot, opencode, or VS Code) or just `cd`'s into it.
 
 `bridge` is a Go binary at `~/.local/bin/bridge` wrapped by a tiny shell-function shim. The legacy `bridge.sh` and friends were deleted in v2.1.0 (Phase 4, [#35](https://github.com/freaxnx01/bridge/issues/35)); the Go binary is the only implementation.
 
@@ -9,7 +9,7 @@ A repo picker and agent-session launcher. Walks `~/projects/repos/`, presents an
 ## Layout
 
 ```
-~/projects/repos/
+~/repos/
 ├── github/<owner>/(public|private)/<repo>/
 ├── gitlab/<owner>/<repo>/
 └── git-forgejo/<repo>/
@@ -46,7 +46,7 @@ bridge presence [away|back|auto]
 bridge sync [now|--auto]
 bridge list [-r] [--refresh]    # text dump (scripts); -r adds remote rows
 bridge issues                   # open issues across forges (TTL cache)
-bridge watch                    # long-running watcher of ~/projects/repos/
+bridge watch                    # long-running watcher of ~/repos/
 bridge tui                      # Bubbletea dashboard (repos / cached issues / live sessions; Enter to act)
 bridge nav                      # interactive navigator: pick a repo → dashboard of its sessions & worktrees
 bridge --dashboard              # alias for `bridge tui` (legacy spelling)
@@ -137,8 +137,8 @@ Run a single test: `go test ./cmd/bridge -run TestXxx`. Verbose: add `-v`. To be
 ## Setting up on a new machine
 
 ```bash
-git clone https://github.com/freaxnx01/bridge ~/projects/repos/github/freaxnx01/public/bridge
-cd ~/projects/repos/github/freaxnx01/public/bridge
+git clone https://github.com/freaxnx01/bridge ~/repos/github/freaxnx01/public/bridge
+cd ~/repos/github/freaxnx01/public/bridge
 make install        # binary + shim + meta-augmenter
 bridge init --agent=claude --agent-args="--remote-control --dangerously-skip-permissions"
 exec bash -l        # pick up the new lines
