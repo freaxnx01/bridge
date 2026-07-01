@@ -237,6 +237,31 @@ func TestResolveCreateDoesNotRetryOnUnrelatedError(t *testing.T) {
 	}
 }
 
+func TestResolveCreateNameContainsBranchStillClassifiesTargetExists(t *testing.T) {
+	// A worktree name containing "branch" must not be misread as a branch-exists
+	// failure: git's target-exists error echoes the full path, so the bare token
+	// "branch" would misclassify. Resolve must still return *WorktreeExistsError
+	// and must NOT retry.
+	r := &fakeRunner{listOut: porcelain, addErr: errors.New("fatal: '/repo/FlowHub-CAS-AISE/.worktrees/release-branch' already exists")}
+	_, _, err := Resolve(r, "/repo/FlowHub-CAS-AISE", "release-branch")
+	var wex *WorktreeExistsError
+	if !errors.As(err, &wex) {
+		t.Fatalf("want *WorktreeExistsError, got %T: %v", err, err)
+	}
+	if wex.Name != "release-branch" {
+		t.Errorf("Name = %q, want %q", wex.Name, "release-branch")
+	}
+	var addCalls int
+	for _, c := range r.calls {
+		if strings.Contains(strings.Join(c, " "), "worktree add") {
+			addCalls++
+		}
+	}
+	if addCalls != 1 {
+		t.Errorf("want exactly 1 add attempt (no blind retry), got %d", addCalls)
+	}
+}
+
 func TestResolveNotGitRepoReturnsError(t *testing.T) {
 	r := &fakeRunner{listErr: errors.New("fatal: not a git repository")}
 	_, _, err := Resolve(r, "/tmp/plain-dir", "doc")

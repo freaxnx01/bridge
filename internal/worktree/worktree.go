@@ -95,11 +95,12 @@ func Resolve(r Runner, repoPath, wt string) (dir string, created bool, err error
 
 // branchExistsErr reports whether a `git worktree add -b <branch>` failure was
 // caused by the branch already existing — git says "a branch named '<x>'
-// already exists". The "branch" qualifier distinguishes it from a target-path
-// "'<path>' already exists" failure, which must not trigger the no-`-b` retry.
+// already exists". The "a branch named" phrase distinguishes it from a
+// target-path "'<path>' already exists" failure, which must not trigger the
+// no-`-b` retry.
 func branchExistsErr(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "already exists") && strings.Contains(msg, "branch")
+	return strings.Contains(msg, "a branch named") && strings.Contains(msg, "already exists")
 }
 
 // WorktreeExistsError is returned by Resolve when the target directory already
@@ -116,10 +117,10 @@ func (e *WorktreeExistsError) Error() string {
 
 // targetExistsErr reports whether a `git worktree add` failure was caused by the
 // target directory already existing — git says "'<path>' already exists" without
-// the "branch" qualifier that branchExistsErr looks for.
+// the "a branch named" phrase that branchExistsErr looks for.
 func targetExistsErr(err error) bool {
 	msg := err.Error()
-	return strings.Contains(msg, "already exists") && !strings.Contains(msg, "branch")
+	return strings.Contains(msg, "already exists") && !strings.Contains(msg, "a branch named")
 }
 
 // matches reports whether worktree entry e is the one named wt. A worktree is
