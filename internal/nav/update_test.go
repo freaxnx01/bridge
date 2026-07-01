@@ -2,6 +2,7 @@ package nav
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -12,6 +13,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
 func TestUpdate_ReposMsg_PopulatesLocal(t *testing.T) {
@@ -919,5 +921,32 @@ func TestUpdate_RepoCreatedMsg_Error(t *testing.T) {
 	got := out.(Model)
 	if got.repoModal == nil || got.repoModal.creating || got.repoModal.err == "" {
 		t.Errorf("error should keep modal open, clear creating, set err: %+v", got.repoModal)
+	}
+}
+
+func TestUpdate_WtCreatedMsg_ExistsError_FriendlyMessage(t *testing.T) {
+	m := initialModel(Config{})
+	m.modal = &newWorktreeModal{name: "misc"}
+	out, _ := m.Update(wtCreatedMsg{err: &worktree.WorktreeExistsError{
+		Name: "misc",
+		Path: "/repo/.worktrees/misc",
+	}})
+	got := out.(Model)
+	want := `worktree "misc" already exists — pick a different name, or remove .worktrees/misc`
+	if got.modal == nil {
+		t.Fatalf("modal should stay open on error")
+	}
+	if got.modal.err != want {
+		t.Errorf("modal.err = %q, want %q", got.modal.err, want)
+	}
+}
+
+func TestUpdate_WtCreatedMsg_OtherError_RawMessage(t *testing.T) {
+	m := initialModel(Config{})
+	m.modal = &newWorktreeModal{name: "misc"}
+	out, _ := m.Update(wtCreatedMsg{err: errors.New("git worktree add: boom")})
+	got := out.(Model)
+	if got.modal == nil || got.modal.err != "git worktree add: boom" {
+		t.Errorf("modal.err = %v, want raw error string", got.modal)
 	}
 }
