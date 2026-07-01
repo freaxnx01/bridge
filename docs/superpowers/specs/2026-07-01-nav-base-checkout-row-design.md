@@ -134,13 +134,8 @@ func (r dashRow) listName(repoName string) string {
 No new keybinding: the base row is `dashRows[0]`, so existing navigation, `enter`
 (→ `launchRow`), and the `dashSel == len(m.dashRows)` create-row logic
 (`update.go:369-377`) all keep working with the base row counted as a normal
-selectable row.
-
-### 6. Minor polish — Details hint wording
-
-`internal/nav/view.go:315`. The Details panel shows `(⏎ start worktree)` for a
-session-less selected row. For the base row that reads oddly — reword to
-`(⏎ start session)` when the selected row `isBase`.
+selectable row. Selecting the base row shows the standard Details panel
+(branches/commits/status of `repo.Path`) with no special wording.
 
 ## Out of scope
 
