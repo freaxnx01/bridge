@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -12,6 +13,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/launcher"
+	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -107,7 +109,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case wtCreatedMsg:
 		if msg.err != nil {
 			if m.modal != nil {
-				m.modal.err = msg.err.Error()
+				m.modal.err = worktreeErrMessage(msg.err)
 			} else {
 				m.status = "worktree create failed: " + msg.err.Error()
 			}
@@ -857,4 +859,15 @@ func logKey(path string, k tea.KeyMsg) {
 	}
 	defer f.Close()
 	fmt.Fprintf(f, "string=%q type=%d runes=%q alt=%v\n", k.String(), int(k.Type), string(k.Runes), k.Alt)
+}
+
+// worktreeErrMessage maps a worktree.Resolve error to the modal's error line: a
+// friendly, actionable message for the "target dir already exists" case, and the
+// raw error string for everything else.
+func worktreeErrMessage(err error) string {
+	var wex *worktree.WorktreeExistsError
+	if errors.As(err, &wex) {
+		return fmt.Sprintf("worktree %q already exists — pick a different name, or remove .worktrees/%s", wex.Name, wex.Name)
+	}
+	return err.Error()
 }
