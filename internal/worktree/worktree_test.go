@@ -179,18 +179,52 @@ branch refs/heads/main
 	}
 }
 
-func TestResolveCreateDoesNotRetryOnUnrelatedError(t *testing.T) {
-	// The first `worktree add -b` fails for a reason unrelated to an existing
-	// branch (here: the target dir already exists). Resolve must NOT blindly
-	// retry without -b (which would mask the real cause with a confusing
-	// "invalid reference" error); it returns the original error after one add.
-	r := &fakeRunner{listOut: porcelain, addErr: errors.New("fatal: '.worktrees/x' already exists")}
+func TestResolveCreateReturnsWorktreeExistsError(t *testing.T) {
+	// The target dir already exists but is not a registered worktree: git's
+	// `add -b` fails with "'<path>' already exists" (no "branch"). Resolve must
+	// return a typed *WorktreeExistsError and NOT retry without -b.
+	r := &fakeRunner{listOut: porcelain, addErr: errors.New("fatal: '/repo/FlowHub-CAS-AISE/.worktrees/x' already exists")}
 	_, _, err := Resolve(r, "/repo/FlowHub-CAS-AISE", "x")
 	if err == nil {
 		t.Fatalf("want error, got nil")
 	}
-	if !strings.Contains(err.Error(), "already exists") {
+	var wex *WorktreeExistsError
+	if !errors.As(err, &wex) {
+		t.Fatalf("want *WorktreeExistsError, got %T: %v", err, err)
+	}
+	if wex.Name != "x" {
+		t.Errorf("Name = %q, want %q", wex.Name, "x")
+	}
+	if want := filepath.Join("/repo/FlowHub-CAS-AISE", ".worktrees", "x"); wex.Path != want {
+		t.Errorf("Path = %q, want %q", wex.Path, want)
+	}
+	var addCalls int
+	for _, c := range r.calls {
+		if strings.Contains(strings.Join(c, " "), "worktree add") {
+			addCalls++
+		}
+	}
+	if addCalls != 1 {
+		t.Errorf("want exactly 1 add attempt (no blind retry), got %d", addCalls)
+	}
+}
+
+func TestResolveCreateDoesNotRetryOnUnrelatedError(t *testing.T) {
+	// The first `worktree add -b` fails for a reason unrelated to an existing
+	// branch (here: must be run in a work tree). Resolve must NOT blindly
+	// retry without -b (which would mask the real cause with a confusing
+	// "invalid reference" error); it returns the original error after one add.
+	r := &fakeRunner{listOut: porcelain, addErr: errors.New("fatal: this operation must be run in a work tree")}
+	_, _, err := Resolve(r, "/repo/FlowHub-CAS-AISE", "x")
+	if err == nil {
+		t.Fatalf("want error, got nil")
+	}
+	if !strings.Contains(err.Error(), "must be run in a work tree") {
 		t.Errorf("error should surface git's original message, got: %v", err)
+	}
+	var wex *WorktreeExistsError
+	if errors.As(err, &wex) {
+		t.Errorf("unrelated failure must not be classified as WorktreeExistsError")
 	}
 	var addCalls int
 	for _, c := range r.calls {

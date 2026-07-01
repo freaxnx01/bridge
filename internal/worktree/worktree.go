@@ -73,15 +73,21 @@ func Resolve(r Runner, repoPath, wt string) (dir string, created bool, err error
 	target := filepath.Join(repoPath, ".worktrees", wt)
 	branch := "worktree-" + wt
 	if _, aerr := r.Run(repoPath, "worktree", "add", "-b", branch, target); aerr != nil {
-		// Only retry when the branch already exists (a dangling branch from a
-		// removed worktree): check it out into the new worktree without -b.
-		// Any other failure (target dir exists, no commits yet, bad name) is
-		// returned as-is so its real cause isn't masked.
-		if !branchExistsErr(aerr) {
+		switch {
+		case branchExistsErr(aerr):
+			// A dangling branch from a removed worktree: check it out into the
+			// new worktree without -b.
+			if _, aerr2 := r.Run(repoPath, "worktree", "add", target, branch); aerr2 != nil {
+				return "", false, fmt.Errorf("git worktree add: %w", aerr2)
+			}
+		case targetExistsErr(aerr):
+			// The directory exists but is not a registered worktree — surface a
+			// typed error so the UI can render a friendly message.
+			return "", false, &WorktreeExistsError{Name: wt, Path: target}
+		default:
+			// Any other failure (no commits yet, bad name) is returned as-is so
+			// its real cause isn't masked.
 			return "", false, fmt.Errorf("git worktree add: %w", aerr)
-		}
-		if _, aerr2 := r.Run(repoPath, "worktree", "add", target, branch); aerr2 != nil {
-			return "", false, fmt.Errorf("git worktree add: %w", aerr2)
 		}
 	}
 	return target, true, nil
@@ -94,6 +100,26 @@ func Resolve(r Runner, repoPath, wt string) (dir string, created bool, err error
 func branchExistsErr(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "already exists") && strings.Contains(msg, "branch")
+}
+
+// WorktreeExistsError is returned by Resolve when the target directory already
+// exists on disk but is not a registered worktree of the repo, so it can be
+// neither created nor safely attached.
+type WorktreeExistsError struct {
+	Name string
+	Path string
+}
+
+func (e *WorktreeExistsError) Error() string {
+	return fmt.Sprintf("worktree %q already exists at %s", e.Name, e.Path)
+}
+
+// targetExistsErr reports whether a `git worktree add` failure was caused by the
+// target directory already existing — git says "'<path>' already exists" without
+// the "branch" qualifier that branchExistsErr looks for.
+func targetExistsErr(err error) bool {
+	msg := err.Error()
+	return strings.Contains(msg, "already exists") && !strings.Contains(msg, "branch")
 }
 
 // matches reports whether worktree entry e is the one named wt. A worktree is
