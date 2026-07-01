@@ -1,0 +1,51 @@
+name: Auto area-label issues
+
+# Maps an issue's conventional-commit scope (or a leading "nav:") to an area:*
+# label. Deterministic prefix matching only — titles without a recognised scope
+# are left unlabeled on purpose, for a human/triage pass to decide.
+on:
+  issues:
+    types: [opened, edited]
+
+permissions:
+  issues: write
+
+jobs:
+  area-label:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Apply area:* label from title scope
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          NUMBER: ${{ github.event.issue.number }}
+          TITLE: ${{ github.event.issue.title }}
+        run: |
+          set -euo pipefail
+
+          # Skip if the issue already carries an area:* label.
+          if gh issue view "$NUMBER" --repo "$REPO" --json labels \
+               -q '.labels[].name' | grep -q '^area:'; then
+            echo "#$NUMBER already has an area:* label — leaving as-is"
+            exit 0
+          fi
+
+          # Extract scope from "type(scope): ..."; treat a leading "nav:" as nav.
+          scope="$(printf '%s' "$TITLE" | sed -nE 's/^[a-z]+\(([a-z/]+)\).*/\1/p')"
+          case "$TITLE" in nav:*) scope="nav" ;; esac
+
+          label=""
+          case "$scope" in
+            nav|nav/*|*/nav|filter)                                 label="area:nav" ;;
+            webui)                                                  label="area:webui" ;;
+            bot)                                                    label="area:bot" ;;
+            config|doctor|sync|rm|focus|issues|launcher|shim|completion|pwsh|cli)
+                                                                    label="area:core" ;;
+          esac
+
+          if [ -n "$label" ]; then
+            gh issue edit "$NUMBER" --repo "$REPO" --add-label "$label"
+            echo "#$NUMBER -> $label"
+          else
+            echo "no confident mapping for scope '${scope:-<none>}' — left unlabeled for triage"
+          fi
