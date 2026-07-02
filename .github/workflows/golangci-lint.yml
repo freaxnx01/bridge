@@ -1,0 +1,32 @@
+name: golangci-lint
+
+# Lint gate for the agent-pipeline. Runs the linters configured in
+# .golangci.yml (v2). only-new-issues holds *new* code to the standard: findings
+# introduced by a PR fail the job, while the repo's pre-existing findings are
+# left for a separate cleanup and do not block. fetch-depth: 0 gives the action
+# the base ref it needs to diff against.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  golangci-lint:
+    name: golangci-lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v8
+        with:
+          version: latest
+          only-new-issues: true

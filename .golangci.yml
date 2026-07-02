@@ -1,0 +1,33 @@
+# golangci-lint configuration for bridge.
+# Schema: golangci-lint v2 (https://golangci-lint.run/usage/configuration/).
+#
+# Intentionally lean: the curated `standard` set (errcheck, govet, ineffassign,
+# staticcheck, unused) plus a few low-noise, high-value linters, and gofmt /
+# goimports as formatters. Tighten by adding linters once the codebase is
+# confirmed clean under each — don't enable a noisy linter that fails CI on
+# pre-existing code without also fixing that code.
+version: "2"
+
+linters:
+  default: standard
+  enable:
+    - bodyclose   # response/request bodies are closed (net/http)
+    - errorlint   # correct %w wrapping and errors.Is/As usage (see CLAUDE.md)
+    - unconvert   # redundant type conversions
+
+  exclusions:
+    generated: lax
+    rules:
+      # Test files may leave some deferred/utility errors unchecked.
+      - path: _test\.go
+        linters:
+          - errcheck
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/freaxnx01/bridge
