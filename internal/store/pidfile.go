@@ -54,12 +54,12 @@ func AcquirePIDFile(path string) (release func() error, err error) {
 		f, err := os.OpenFile(path, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o644)
 		if err == nil {
 			if _, werr := f.WriteString(strconv.Itoa(pid) + "\n"); werr != nil {
-				f.Close()
-				os.Remove(path)
+				_ = f.Close()       // best-effort close; returning the write error
+				_ = os.Remove(path) // best-effort cleanup of the failed pidfile
 				return nil, werr
 			}
 			if cerr := f.Close(); cerr != nil {
-				os.Remove(path)
+				_ = os.Remove(path) // best-effort cleanup of the failed pidfile
 				return nil, cerr
 			}
 			return func() error { return RemovePIDFile(path) }, nil

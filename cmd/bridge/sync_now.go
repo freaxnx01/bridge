@@ -22,7 +22,7 @@ func runSyncNow(ctx context.Context, cmd *cobra.Command) error {
 	if err != nil {
 		return fmt.Errorf("sync: acquire lock: %w", err)
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }() // best-effort unlock on exit
 
 	repos, err := discoverAllRoots()
 	if err != nil {

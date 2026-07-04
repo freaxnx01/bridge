@@ -65,7 +65,7 @@ func WriteSlots(path string, slots []Slot) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }() // best-effort unlock on exit
 	return writeSlotsLocked(path, slots)
 }
 
@@ -104,7 +104,7 @@ func UpsertSlot(path string, slot Slot) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }() // best-effort unlock on exit
 	existing, err := LoadSlots(path)
 	if err != nil {
 		return err

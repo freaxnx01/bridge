@@ -23,13 +23,13 @@ func MRUTouch(path, target string) error {
 	if err != nil {
 		return err
 	}
-	defer lock.Release()
+	defer func() { _ = lock.Release() }() // best-effort unlock on exit
 
 	f, err := os.OpenFile(path, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o644)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close; write errors are checked below
 	if _, err := f.WriteString(target + "\n"); err != nil {
 		return err
 	}

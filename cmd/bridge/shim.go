@@ -17,5 +17,5 @@ func requireShim() error {
 	return errors.New(
 		"this command needs the bridge shell shim to actually attach/cd.\n" +
 			"Install it once with `make install` and start a new shell, or\n" +
-			"see go-migrate.md for the source line to add to ~/.bashrc / $PROFILE.")
+			"see go-migrate.md for the source line to add to ~/.bashrc / $PROFILE")
 }

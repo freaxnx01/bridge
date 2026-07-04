@@ -294,7 +294,7 @@ func initPowerShell(out io.Writer, dryRun bool) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close; write errors are already checked below
 	if _, err := f.WriteString(toWrite); err != nil {
 		return err
 	}

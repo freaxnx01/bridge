@@ -73,7 +73,7 @@ func readNote(name, path string) (noteFile, bool) {
 	if err != nil {
 		return noteFile{}, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close of a read-only file
 	data, err := io.ReadAll(io.LimitReader(f, notesMaxBytes+1))
 	if err != nil {
 		return noteFile{}, false

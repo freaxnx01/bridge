@@ -130,7 +130,7 @@ func readBaseFile() ([]string, bool) {
 	if err != nil {
 		return nil, false
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close of a read-only file
 	var out []string
 	sc := bufio.NewScanner(f)
 	for sc.Scan() {

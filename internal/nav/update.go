@@ -857,7 +857,7 @@ func logKey(path string, k tea.KeyMsg) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close of a debug log file
 	fmt.Fprintf(f, "string=%q type=%d runes=%q alt=%v\n", k.String(), int(k.Type), string(k.Runes), k.Alt)
 }
 

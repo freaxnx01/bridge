@@ -16,7 +16,7 @@ func LoadMRU(path string) ([]string, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close of a read-only file
 
 	var raw []string
 	sc := bufio.NewScanner(f)
