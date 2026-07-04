@@ -219,3 +219,15 @@ func TestDashListBody_BaseRowDetachedUsesRepoName(t *testing.T) {
 		t.Errorf("detached primary should render \"★ bridge\":\n%s", body)
 	}
 }
+
+func TestFlow_Dashboard_BaseRowPinned_Golden(t *testing.T) {
+	s := newSession(t, Config{})
+	s.m.screen = screenDash
+	s.m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	s.m.dashFocus = dashFocusWorktrees
+	s.send(dashRowsMsg{rows: []dashRow{
+		{isBase: true, branch: "main", path: "/r", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+		{worktree: "fix-x", branch: "worktree-fix-x", path: "/r/.worktrees/fix-x", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+	}})
+	assertGolden(t, "dash_base_row_pinned", s.frame())
+}
