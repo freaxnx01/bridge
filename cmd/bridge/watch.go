@@ -85,13 +85,13 @@ func runWatch(cmd *cobra.Command, args []string) error {
 		}
 		return err
 	}
-	defer release()
+	defer func() { _ = release() }() // best-effort pidfile cleanup on exit
 
 	w, err := fsnotify.NewWatcher()
 	if err != nil {
 		return err
 	}
-	defer w.Close()
+	defer func() { _ = w.Close() }() // best-effort watcher close on exit
 	if err := w.Add(reposRoot()); err != nil {
 		return err
 	}

@@ -114,7 +114,7 @@ func Fetch(ctx context.Context, apiBase, owner, repo string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode != http.StatusOK {
 		// Drain to allow connection reuse.
 		_, _ = io.Copy(io.Discard, resp.Body)

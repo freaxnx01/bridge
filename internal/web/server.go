@@ -90,7 +90,7 @@ func spaHandler(dist fs.FS) http.Handler {
 		}
 		f, err := dist.Open(path)
 		if err == nil {
-			f.Close()
+			_ = f.Close() // best-effort close; only checking existence here
 			fileServer.ServeHTTP(w, r)
 			return
 		}

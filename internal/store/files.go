@@ -18,17 +18,17 @@ func AtomicWrite(path string, data []byte) error {
 	}
 	tmp := f.Name()
 	if _, err := f.Write(data); err != nil {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()      // best-effort close; returning the write error
+		_ = os.Remove(tmp) // best-effort cleanup of the failed tmp file
 		return err
 	}
 	if err := f.Sync(); err != nil {
-		f.Close()
-		os.Remove(tmp)
+		_ = f.Close()      // best-effort close; returning the sync error
+		_ = os.Remove(tmp) // best-effort cleanup of the failed tmp file
 		return err
 	}
 	if err := f.Close(); err != nil {
-		os.Remove(tmp)
+		_ = os.Remove(tmp) // best-effort cleanup of the failed tmp file
 		return err
 	}
 	return os.Rename(tmp, path)

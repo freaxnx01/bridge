@@ -244,7 +244,7 @@ func TestLoadSessionsToleratesMissingSlots(t *testing.T) {
 }
 
 func TestLoadReposMissingRootReturnsEmpty(t *testing.T) {
-	if got := loadRepos("/no/such/dir/here"); got != nil && len(got) != 0 {
+	if got := loadRepos("/no/such/dir/here"); len(got) != 0 {
 		t.Errorf("expected empty, got %v", got)
 	}
 }

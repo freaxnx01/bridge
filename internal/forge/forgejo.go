@@ -34,7 +34,7 @@ func (c *ForgejoClient) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("forgejo %s: %s: %s", path, resp.Status, string(b))
@@ -69,7 +69,7 @@ func (c *ForgejoClient) post(ctx context.Context, path string, body, out any) er
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode == http.StatusConflict {
 		return ErrRepoExists
 	}

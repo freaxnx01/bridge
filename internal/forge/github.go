@@ -44,7 +44,7 @@ func (c *GithubClient) get(ctx context.Context, path string, out any) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("github %s: %s: %s", path, resp.Status, string(body))
@@ -84,7 +84,7 @@ func (c *GithubClient) post(ctx context.Context, path string, body, out any) err
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode == http.StatusUnprocessableEntity {
 		return ErrRepoExists
 	}
@@ -209,7 +209,7 @@ func (c *GithubClient) graphqlPost(ctx context.Context, query string, vars map[s
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("github graphql: %s: %s", resp.Status, string(body))
@@ -367,7 +367,7 @@ func (c *GithubClient) GetFile(ctx context.Context, owner, repo, path string) (c
 	if err != nil {
 		return nil, "", false, err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode == http.StatusNotFound {
 		return nil, "", false, nil
 	}
@@ -417,7 +417,7 @@ func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, co
 	if err != nil {
 		return "", err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
 		return "", fmt.Errorf("github put %s: %s: %s", path, resp.Status, string(b))

@@ -31,7 +31,7 @@ var captureIdeaCmd = &cobra.Command{
 
 func init() {
 	captureIdeaCmd.Flags().StringVar(&captureTarget, "target", "", "ideas-lab | <repo-name> | <owner>/<name>")
-	captureIdeaCmd.MarkFlagRequired("target")
+	_ = captureIdeaCmd.MarkFlagRequired("target") // only errors on an invalid flag name (programmer error)
 	captureCmd.AddCommand(captureIdeaCmd)
 	rootCmd.AddCommand(captureCmd)
 }

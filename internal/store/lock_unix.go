@@ -31,7 +31,7 @@ func AcquireLock(path string) (Lock, error) {
 		return nil, err
 	}
 	if err := unix.Flock(int(f.Fd()), unix.LOCK_EX); err != nil {
-		f.Close()
+		_ = f.Close() // best-effort close; returning the flock error
 		return nil, err
 	}
 	return &unixLock{f: f}, nil

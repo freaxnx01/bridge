@@ -48,7 +48,7 @@ func runSyncAuto(cmd *cobra.Command) error {
 		}
 		return err
 	}
-	defer release()
+	defer func() { _ = release() }() // best-effort pidfile cleanup on exit
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()

@@ -1,0 +1,34 @@
+# golangci-lint configuration (v2). The `golangci-lint` CI job (see
+# .github/workflows/go.yml) and branch protection require this to pass.
+#
+# Policy: the standard linter set (errcheck, govet, ineffassign, staticcheck,
+# unused). errcheck stays meaningful for resource handles (Close/Release/Remove)
+# but excludes user-facing CLI writes (fmt.Fprint*) — per the Go stack overlay,
+# CLI notices go to stderr via fmt.Fprintln and their write errors are not
+# actionable — and excludes test files (I/O errors in tests are noise). The
+# staticcheck QF* "quickfix" style suggestions are advisory-only and disabled.
+version: "2"
+
+linters:
+  default: standard
+  settings:
+    errcheck:
+      exclude-functions:
+        - fmt.Fprint
+        - fmt.Fprintln
+        - fmt.Fprintf
+        - fmt.Fscanln
+  exclusions:
+    rules:
+      # I/O error checks in tests (w.Write, resp.Body.Close, ...) are noise.
+      - path: _test\.go
+        linters:
+          - errcheck
+      # QF1001/QF1002 are advisory "quickfix" style suggestions (De Morgan's
+      # law, tagged switch) — keep the rest of staticcheck's default set.
+      - linters:
+          - staticcheck
+        text: "QF1001"
+      - linters:
+          - staticcheck
+        text: "QF1002"
