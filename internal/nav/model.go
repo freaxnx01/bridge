@@ -46,6 +46,11 @@ type Model struct {
 	ovRankedSel   int
 	ovInboxSel    int
 
+	agents            []agentRow
+	agentsSel         int
+	agentsState       loadState
+	agentsUnavailable bool
+
 	status string
 }
 
