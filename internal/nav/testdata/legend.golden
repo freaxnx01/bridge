@@ -1,0 +1,29 @@
+╭──────────────────────────────────────────────────────────────────────────────────────────────────╮
+│  Legend                                                                                          │
+│                                                                                                  │
+│ Session                                                                                          │
+│   ●              session attached                                                                │
+│   ○              session detached                                                                │
+│   ·              no session (dashboard row)                                                      │
+│                                                                                                  │
+│ Git status                                                                                       │
+│   ●N             N modified/changed files                                                        │
+│   ↑N             N commits ahead of upstream                                                     │
+│   ↓N             N commits behind upstream                                                       │
+│   ✓ clean        nothing modified/diverged                                                       │
+│   ⤳ no upstream  branch has no upstream tracking ref                                             │
+│   ?              dirty-state load error                                                          │
+│   ⠋              dirty-state loading (spinner)                                                   │
+│                                                                                                  │
+│ Rows & selection                                                                                 │
+│   ↓              remote-only repo (not cloned; clone on select)                                  │
+│   ●N             open-issue count on a repo row                                                  │
+│   ▸              selected row (picker list/sessions, create row)                                 │
+│   +              dashboard action row: create a new worktree                                     │
+│                                                                                                  │
+│ Header                                                                                           │
+│   ●N open        repo open-issue count                                                           │
+│   ✎ <names>      present note files, e.g. ✎ ideas.md · TODO.md                                   │
+│                                                                                                  │
+│ ? / esc to close                                                                                 │
+╰──────────────────────────────────────────────────────────────────────────────────────────────────╯

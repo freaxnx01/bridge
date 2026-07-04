@@ -2,6 +2,7 @@ package nav
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -226,5 +227,80 @@ func TestDirtyView_States(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLegend_CoversAuditedGlyphs(t *testing.T) {
+	type want struct{ glyph, meaning, group string }
+	expected := []want{
+		{"●", "session attached", "Session"},
+		{"○", "session detached", "Session"},
+		{"·", "no session (dashboard row)", "Session"},
+		{"●N", "N modified/changed files", "Git status"},
+		{"↑N", "N commits ahead of upstream", "Git status"},
+		{"↓N", "N commits behind upstream", "Git status"},
+		{"✓ clean", "nothing modified/diverged", "Git status"},
+		{"⤳ no upstream", "branch has no upstream tracking ref", "Git status"},
+		{"?", "dirty-state load error", "Git status"},
+		{"⠋", "dirty-state loading (spinner)", "Git status"},
+		{"↓ ", "remote-only repo (not cloned; clone on select)", "Rows & selection"},
+		{"●N", "open-issue count on a repo row", "Rows & selection"},
+		{"▸ ", "selected row (picker list/sessions, create row)", "Rows & selection"},
+		{"+", "dashboard action row: create a new worktree", "Rows & selection"},
+		{"●N open", "repo open-issue count", "Header"},
+		{"✎ <names>", "present note files, e.g. ✎ ideas.md · TODO.md", "Header"},
+	}
+	if len(legendEntries) != len(expected) {
+		t.Fatalf("legendEntries has %d entries, want %d — the legend must document exactly the audited glyph set", len(legendEntries), len(expected))
+	}
+	for i, e := range legendEntries {
+		w := expected[i]
+		if e.glyph == "" || e.meaning == "" {
+			t.Errorf("entry %d: empty glyph or meaning: %+v", i, e)
+		}
+		if e.glyph != w.glyph || e.meaning != w.meaning || e.group != w.group {
+			t.Errorf("entry %d = {%q,%q,%q}, want {%q,%q,%q}", i, e.glyph, e.meaning, e.group, w.glyph, w.meaning, w.group)
+		}
+	}
+}
+
+func TestLegend_NoPhantomGlyphs(t *testing.T) {
+	src, err := os.ReadFile("view.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ambiguous as bare substrings — legitimately absent from view.go (the
+	// remote-only "↓ " prefix is emitted in data.go) or too generic to prove
+	// anything by mere presence.
+	skip := map[string]bool{"?": true, "+": true, "↓ ": true}
+	distinctive := []string{"●", "○", "·", "↑", "↓", "✓", "⤳", "✎", "▸"}
+	for _, e := range legendEntries {
+		if skip[e.glyph] {
+			continue
+		}
+		for _, r := range distinctive {
+			if strings.Contains(e.glyph, r) && !strings.Contains(string(src), r) {
+				t.Errorf("legend entry %q (%s) uses rune %q, not found anywhere in view.go", e.glyph, e.meaning, r)
+			}
+		}
+	}
+}
+
+func TestViewLegend_Golden(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 40
+	assertGolden(t, "legend", m.viewLegend())
+}
+
+func TestView_ShowLegend_ReturnsLegendOverEitherScreen(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 40
+	m.showLegend = true
+	for _, scr := range []screen{screenPicker, screenDash} {
+		m.screen = scr
+		out := m.View()
+		if !strings.Contains(out, "session attached") {
+			t.Errorf("screen %d: View() with showLegend=true should render the legend, got:\n%s", scr, out)
+		}
 	}
 }
