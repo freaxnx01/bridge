@@ -1178,3 +1178,181 @@ func TestCyclePickerFocus_SkipsRecentWhenHidden(t *testing.T) {
 		t.Errorf("tab must skip focusRecent when the section is hidden")
 	}
 }
+
+func TestPresentForges_DerivesCanonicalOrder(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{repo: core.Repo{Forge: "forgejo", Owner: "o", Name: "f"}},
+		{repo: core.Repo{Forge: "github", Owner: "o", Name: "g"}},
+	}
+	m.remoteRepos = []repoRow{
+		{remote: &forge.RepoRef{Forge: "ado", Owner: "o", Name: "a"}},
+		{remote: &forge.RepoRef{Forge: "github", Owner: "o", Name: "g2"}},
+	}
+	got := m.presentForges()
+	want := []forgeOpt{{"github", "GitHub"}, {"forgejo", "Forgejo"}, {"ado", "ADO"}}
+	if len(got) != len(want) {
+		t.Fatalf("presentForges() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestForgeSubfilterVisible_CountGate(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	if m.forgeSubfilterVisible() {
+		t.Error("one forge present -> subfilter hidden")
+	}
+	m.localRepos = append(m.localRepos, repoRow{repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "b"}})
+	if !m.forgeSubfilterVisible() {
+		t.Error("two forges present -> subfilter visible")
+	}
+}
+
+func TestCycleForge_WrapForward(t *testing.T) {
+	base := func() Model {
+		m := initialModel(Config{})
+		m.localRepos = []repoRow{
+			{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}},
+			{repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "b"}},
+		}
+		return m
+	}
+	tests := []struct{ name, start, want string }{
+		{"all_to_github", "", "github"},
+		{"github_to_gitlab", "github", "gitlab"},
+		{"gitlab_wraps_to_all", "gitlab", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := base()
+			m.forgeFilter = tt.start
+			if got := m.cycleForge(1).forgeFilter; got != tt.want {
+				t.Errorf("cycleForge(1) from %q = %q, want %q", tt.start, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCycleForge_NoopWhenSingleOrZeroForge(t *testing.T) {
+	m := initialModel(Config{}) // zero forges
+	if got := m.cycleForge(1).forgeFilter; got != "" {
+		t.Errorf("zero forges cycle should be a no-op, got %q", got)
+	}
+	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	if got := m.cycleForge(1).forgeFilter; got != "" {
+		t.Errorf("single forge cycle should be a no-op, got %q", got)
+	}
+}
+
+func TestMatchesForge_AllAndSpecific(t *testing.T) {
+	local := repoRow{repo: core.Repo{Forge: "github"}}
+	if !matchesForge(local, "") {
+		t.Error(`empty forge ("" = All) should match every row`)
+	}
+	if !matchesForge(local, "github") {
+		t.Error("github row should match github scope")
+	}
+	if matchesForge(local, "gitlab") {
+		t.Error("github row must not match gitlab scope")
+	}
+	remote := repoRow{remote: &forge.RepoRef{Forge: "ado"}}
+	if !matchesForge(remote, "ado") {
+		t.Error("remote ado row should match ado scope (via rowParts)")
+	}
+}
+
+// multiForgeModel is a picker at focusFilter with one github and one gitlab repo.
+func multiForgeModel() Model {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Forge: "github", Owner: "o", Name: "bridge"}},
+		{label: "github/public/agent", repo: core.Repo{Forge: "github", Owner: "o", Name: "agent"}},
+		{label: "gitlab/o/bridge-gl", repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "bridge-gl"}},
+	}
+	return m
+}
+
+func TestVisibleRepos_ForgeAndTextAND(t *testing.T) {
+	m := multiForgeModel()
+	if got := len(m.visibleRepos()); got != 3 {
+		t.Fatalf("All + empty filter should show all 3 rows, got %d", got)
+	}
+	m.forgeFilter = "github"
+	if got := len(m.visibleRepos()); got != 2 {
+		t.Errorf("github scope should show 2 github rows, got %d", got)
+	}
+	m.filter.SetValue("bridge")
+	rows := m.visibleRepos()
+	if len(rows) != 1 || rows[0].label != "github/public/bridge" {
+		t.Errorf("github AND \"bridge\" should yield only github/public/bridge, got %+v", rows)
+	}
+}
+
+func TestVisibleRepos_AllScopeUnchanged(t *testing.T) {
+	m := multiForgeModel()
+	m.forgeFilter = "" // All
+	if got := len(m.visibleRepos()); got != 3 {
+		t.Errorf("All scope should not drop any row, got %d", got)
+	}
+}
+
+func TestUpdatePicker_CtrlF_CyclesFromFilterFocus(t *testing.T) {
+	m := multiForgeModel() // pickerFocus == focusFilter (initial)
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	got := out.(Model)
+	if got.pickerFocus != focusFilter {
+		t.Errorf("ctrl+f must not change focus, got %d", got.pickerFocus)
+	}
+	if got.forgeFilter != "github" {
+		t.Errorf("ctrl+f from All should advance to first present forge, got %q", got.forgeFilter)
+	}
+}
+
+func TestUpdatePicker_CtrlF_WorksWhileTypingFilter(t *testing.T) {
+	m := multiForgeModel()
+	m.filter.SetValue("br")
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	got := out.(Model)
+	if got.forgeFilter != "github" {
+		t.Errorf("ctrl+f should cycle even with filter text present, got %q", got.forgeFilter)
+	}
+	if got.filter.Value() != "br" {
+		t.Errorf("ctrl+f must not be captured as filter text, got %q", got.filter.Value())
+	}
+}
+
+func TestUpdatePicker_CtrlF_NoopWhenSingleForge(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{label: "github/public/a", repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlF})
+	if got := out.(Model).forgeFilter; got != "" {
+		t.Errorf("ctrl+f with one forge should be a no-op, got %q", got)
+	}
+}
+
+func TestUpdate_RemoteMsg_ResetsForgeFilterWhenGone(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	m.remoteRepos = []repoRow{{remote: &forge.RepoRef{Forge: "gitlab", Owner: "o", Name: "g"}}}
+	m.forgeFilter = "gitlab"
+	// A refresh whose rows no longer contain any gitlab repo.
+	out, _ := m.Update(remoteMsg{rows: []repoRow{{remote: &forge.RepoRef{Forge: "github", Owner: "o", Name: "b"}}}})
+	if got := out.(Model).forgeFilter; got != "" {
+		t.Errorf("forgeFilter should reset to All when the active forge is gone, got %q", got)
+	}
+}
+
+func TestUpdate_RemoteMsg_KeepsForgeFilterWhenStillPresent(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	m.forgeFilter = "gitlab"
+	out, _ := m.Update(remoteMsg{rows: []repoRow{{remote: &forge.RepoRef{Forge: "gitlab", Owner: "o", Name: "g"}}}})
+	if got := out.(Model).forgeFilter; got != "gitlab" {
+		t.Errorf("forgeFilter should be kept while its forge is still present, got %q", got)
+	}
+}

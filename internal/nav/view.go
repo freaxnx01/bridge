@@ -188,6 +188,31 @@ func (m Model) recentBlock() (string, int) {
 	return s + "\n", lipgloss.Height(s)
 }
 
+// viewForgeBar renders the forge subfilter as a segmented indicator drawn under
+// the filter box: "forge:  [All]  GitHub  GitLab" with the active segment
+// bracketed and highlighted (stSel, matching the create-repo modal's selected
+// style). Returns "" (renders nothing) when one forge or fewer is present, so
+// single-forge environments see no change.
+func (m Model) viewForgeBar() string {
+	if !m.forgeSubfilterVisible() {
+		return ""
+	}
+	segs := []string{m.forgeSeg("", "All")}
+	for _, o := range m.presentForges() {
+		segs = append(segs, m.forgeSeg(o.key, o.label))
+	}
+	return stMuted.Render("forge:") + "  " + strings.Join(segs, "  ")
+}
+
+// forgeSeg renders one forge subfilter segment: bracketed + highlighted (stSel)
+// when it is the active scope, plain otherwise.
+func (m Model) forgeSeg(key, label string) string {
+	if m.forgeFilter == key {
+		return stSel.Render("[" + label + "]")
+	}
+	return stText.Render(label)
+}
+
 func (m Model) viewPicker() string {
 	if m.repoModal != nil {
 		return m.viewRepoModal()
@@ -224,7 +249,13 @@ func (m Model) viewPicker() string {
 		title = "Repos   " + stWarn.Render("some remotes unavailable (partial results shown)")
 	}
 	var rb strings.Builder
-	rb.WriteString(m.filter.View() + "\n\n")
+	rb.WriteString(m.filter.View() + "\n")
+	forgeH := 0
+	if bar := m.viewForgeBar(); bar != "" {
+		rb.WriteString(bar + "\n")
+		forgeH = 1
+	}
+	rb.WriteString("\n")
 	recent, recentH := m.recentBlock()
 	rb.WriteString(recent)
 	rows := m.visibleRepos()
@@ -244,7 +275,7 @@ func (m Model) viewPicker() string {
 		}
 		// Budget: terminal height minus the sessions panel and this panel's
 		// chrome (borders + title + filter + blanks) + hint + scroll markers.
-		maxVisible := m.height - used - 9 - recentH
+		maxVisible := m.height - used - 9 - recentH - forgeH
 		if maxVisible < 3 {
 			maxVisible = 3
 		}
@@ -266,7 +297,12 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend · q quit"))
+	hint := "↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend"
+	if m.forgeSubfilterVisible() {
+		hint += " · ctrl+f forge"
+	}
+	hint += " · q quit"
+	sections = append(sections, m.hintLine(hint))
 	return strings.Join(sections, "\n")
 }
 

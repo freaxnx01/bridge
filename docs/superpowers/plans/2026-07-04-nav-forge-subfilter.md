@@ -596,15 +596,17 @@ func (m Model) forgeSeg(key, label string) string {
 }
 ```
 
-In `viewPicker`, replace the filter line + `visibleRepos` fetch (lines 105-107):
+In `viewPicker`, the current code (after #183's Recent section landed) reads:
 
 ```go
 	var rb strings.Builder
 	rb.WriteString(m.filter.View() + "\n\n")
+	recent, recentH := m.recentBlock()
+	rb.WriteString(recent)
 	rows := m.visibleRepos()
 ```
 
-with (filter line, then the forge bar when visible, then the blank line — so the byte layout is identical to today when the bar is hidden):
+Replace it with (filter line, then the forge bar when visible, then the blank line, then the existing Recent block — so the byte layout is identical to today when the bar is hidden):
 
 ```go
 	var rb strings.Builder
@@ -615,34 +617,37 @@ with (filter line, then the forge bar when visible, then the blank line — so t
 		forgeH = 1
 	}
 	rb.WriteString("\n")
+	recent, recentH := m.recentBlock()
+	rb.WriteString(recent)
 	rows := m.visibleRepos()
 ```
 
-Adjust the row budget so the bar's line is accounted for. Change the budget line (line 124):
+Adjust the row budget so the bar's line is accounted for. The current budget line already subtracts `recentH` (from #183):
 
 ```go
-		maxVisible := m.height - used - 9
+		maxVisible := m.height - used - 9 - recentH
 ```
 
-to:
+Change it to also subtract `forgeH`:
 
 ```go
-		maxVisible := m.height - used - 9 - forgeH
+		maxVisible := m.height - used - 9 - recentH - forgeH
 ```
 
-Finally, make the picker hint mention `ctrl+f` only when the bar shows (so single-forge goldens stay byte-identical). Replace the hint line (line 146):
+Finally, make the picker hint mention `ctrl+f` only when the bar shows (so single-forge goldens stay byte-identical). The current hint line already includes `· ? legend` (from #157):
 
 ```go
-	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · q quit"))
+	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend · q quit"))
 ```
 
-with:
+Replace it with (building the hint so `ctrl+f forge` sits before ` · q quit`, only when the bar shows):
 
 ```go
-	hint := "↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · q quit"
+	hint := "↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend"
 	if m.forgeSubfilterVisible() {
 		hint += " · ctrl+f forge"
 	}
+	hint += " · q quit"
 	sections = append(sections, m.hintLine(hint))
 ```
 

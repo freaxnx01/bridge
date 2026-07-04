@@ -184,6 +184,22 @@ var repoForgeChoices = []struct {
 	{"GitHub · Public", "github", false},
 }
 
+// forgeOpt is one forge subfilter option: the canonical forge key (matched
+// against a row's forge) and its display label. Kept next to repoForgeChoices so
+// the forge->label mapping lives in one place.
+type forgeOpt struct {
+	key, label string
+}
+
+// forgeOptOrder is the canonical display order of the forge subfilter options.
+// presentForges filters it to the forges actually present in the current rows.
+var forgeOptOrder = []forgeOpt{
+	{"github", "GitHub"},
+	{"gitlab", "GitLab"},
+	{"forgejo", "Forgejo"},
+	{"ado", "ADO"},
+}
+
 // Config is everything nav needs, injected by cmd/bridge so internal/nav
 // stays free of cmd-layer code (e.g. cloneRemoteRepo).
 type Config struct {

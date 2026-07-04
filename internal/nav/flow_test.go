@@ -264,3 +264,47 @@ func TestFlow_RecentSection_Golden(t *testing.T) {
 	s.send(recentMsg{paths: []string{"/r/bridge", "/r/agent"}})
 	assertGolden(t, "picker_recent_section", s.frame())
 }
+
+func TestViewForgeBar_MultiForge_Highlights(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{
+		{label: "github/public/a", repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}},
+		{label: "gitlab/o/b", repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "b"}},
+	}
+	bar := stripANSI(m.viewForgeBar())
+	for _, want := range []string{"forge:", "[All]", "GitHub", "GitLab"} {
+		if !strings.Contains(bar, want) {
+			t.Errorf("forge bar missing %q: %q", want, bar)
+		}
+	}
+	m.forgeFilter = "github"
+	bar = stripANSI(m.viewForgeBar())
+	if !strings.Contains(bar, "[GitHub]") || strings.Contains(bar, "[All]") {
+		t.Errorf("active segment should move to [GitHub]: %q", bar)
+	}
+}
+
+func TestViewForgeBar_SingleForge_Empty(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{
+		{label: "github/public/a", repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}},
+		{label: "github/public/b", repo: core.Repo{Forge: "github", Owner: "o", Name: "b"}},
+	}
+	if got := m.viewForgeBar(); got != "" {
+		t.Errorf("single forge should render no bar, got %q", got)
+	}
+	if strings.Contains(stripANSI(m.viewPicker()), "forge:") {
+		t.Errorf("single-forge picker must not show the forge bar")
+	}
+}
+
+func TestFlow_ForgeBar_Golden(t *testing.T) {
+	s := newSession(t, Config{})
+	s.send(reposMsg{rows: []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Forge: "github", Owner: "o", Name: "bridge"}},
+		{label: "gitlab/o/agent", repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "agent"}},
+	}})
+	assertGolden(t, "picker_forge_bar", s.frame())
+}

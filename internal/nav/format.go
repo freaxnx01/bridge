@@ -145,6 +145,17 @@ func filterRepos(rows []repoRow, q string) []repoRow {
 	return out
 }
 
+// matchesForge reports whether row r belongs to forge, using rowParts so remote
+// (clone-on-select) rows match on their forge ref too. An empty forge ("" = All)
+// matches every row.
+func matchesForge(r repoRow, forge string) bool {
+	if forge == "" {
+		return true
+	}
+	rf, _, _, _ := rowParts(r)
+	return rf == forge
+}
+
 // slotRepoMatches reports whether a slot's Repo field refers to repo. The
 // registry stores Repo as either a bare name ("bridge") or an owner-qualified
 // label ("freaxnx01/bridge"), so match on equality or a "/"+name suffix.
