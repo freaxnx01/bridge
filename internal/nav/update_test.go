@@ -1041,3 +1041,140 @@ func TestUpdate_QuestionMark_IgnoredOnOverview(t *testing.T) {
 		t.Errorf("? is not wired on the overview screen (out of scope) and must not open the legend")
 	}
 }
+
+func TestRecentRepos_ResolvesCapsAndSkips(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{label: "github/public/a", repo: core.Repo{Path: "/r/a"}},
+		{label: "github/public/b", repo: core.Repo{Path: "/r/b"}},
+		{label: "github/public/c", repo: core.Repo{Path: "/r/c"}},
+		{label: "github/public/d", repo: core.Repo{Path: "/r/d"}},
+		{label: "github/public/e", repo: core.Repo{Path: "/r/e"}},
+		{label: "github/public/f", repo: core.Repo{Path: "/r/f"}},
+	}
+	// most-recent-first, with one stale path (/r/gone) that must be skipped.
+	m.mruPaths = []string{"/r/c", "/r/gone", "/r/a", "/r/f", "/r/b", "/r/d", "/r/e"}
+	got := m.recentRepos()
+	want := []string{"/r/c", "/r/a", "/r/f", "/r/b", "/r/d"} // capped at 5, stale skipped
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].repo.Path != want[i] {
+			t.Errorf("[%d] = %q, want %q", i, got[i].repo.Path, want[i])
+		}
+	}
+}
+
+func TestRecentRepos_EmptyWhenNoMRU(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Path: "/r/a"}}}
+	if got := m.recentRepos(); len(got) != 0 {
+		t.Errorf("no MRU should yield no recent rows, got %+v", got)
+	}
+}
+
+func TestRecentVisible_FilterGate(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Path: "/r/a"}}}
+	m.mruPaths = []string{"/r/a"}
+	if !m.recentVisible() {
+		t.Fatal("empty filter + resolved MRU should be visible")
+	}
+	m.filter.SetValue("a")
+	if m.recentVisible() {
+		t.Error("non-empty filter should hide the Recent section")
+	}
+}
+
+func TestUpdate_RecentMsg_StoresPaths(t *testing.T) {
+	m := initialModel(Config{})
+	out, _ := m.Update(recentMsg{paths: []string{"/r/x", "/r/y"}})
+	if got := out.(Model).mruPaths; len(got) != 2 || got[0] != "/r/x" {
+		t.Errorf("recentMsg should store paths, got %+v", got)
+	}
+}
+
+func recentModel() Model {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{label: "github/public/a", repo: core.Repo{Path: "/r/a"}},
+		{label: "github/public/b", repo: core.Repo{Path: "/r/b"}},
+	}
+	m.mruPaths = []string{"/r/b", "/r/a"} // 2 resolved recent rows
+	return m
+}
+
+func TestUpdatePicker_FilterDown_EntersRecent(t *testing.T) {
+	m := recentModel() // pickerFocus == focusFilter (initial)
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if got.pickerFocus != focusRecent || got.recentSel != 0 {
+		t.Errorf("↓ from filter with Recent visible: focus=%d sel=%d", got.pickerFocus, got.recentSel)
+	}
+}
+
+func TestUpdatePicker_FilterDown_SkipsRecentWhenHidden(t *testing.T) {
+	m := initialModel(Config{}) // no MRU -> Recent hidden
+	m.localRepos = []repoRow{{repo: core.Repo{Path: "/r/a"}}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if out.(Model).pickerFocus != focusList {
+		t.Errorf("↓ from filter with Recent hidden should go to focusList, got %d", out.(Model).pickerFocus)
+	}
+}
+
+func TestFocusRecent_DownPastEnd_GoesToList(t *testing.T) {
+	m := recentModel()
+	m.pickerFocus = focusRecent
+	m.recentSel = 1 // last of 2
+	m.filter.Blur()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if got.pickerFocus != focusList || got.pickerSel != 0 {
+		t.Errorf("↓ past last recent row should land focusList@0, got focus=%d sel=%d", got.pickerFocus, got.pickerSel)
+	}
+}
+
+func TestFocusRecent_UpAtTop_GoesToFilter(t *testing.T) {
+	m := recentModel()
+	m.pickerFocus = focusRecent
+	m.recentSel = 0
+	m.filter.Blur()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if out.(Model).pickerFocus != focusFilter {
+		t.Errorf("↑ at top of Recent should return to focusFilter, got %d", out.(Model).pickerFocus)
+	}
+}
+
+func TestFocusRecent_Enter_OpensDashboard(t *testing.T) {
+	m := recentModel()
+	m.pickerFocus = focusRecent
+	m.recentSel = 0 // -> /r/b
+	m.filter.Blur()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := out.(Model)
+	if got.screen != screenDash || got.repo.Path != "/r/b" {
+		t.Errorf("enter on recent row should enter dashboard for /r/b, got screen=%d repo=%q", got.screen, got.repo.Path)
+	}
+}
+
+func TestCyclePickerFocus_IncludesRecentWhenVisible(t *testing.T) {
+	m := recentModel() // focusFilter
+	m = m.cyclePickerFocus()
+	if m.pickerFocus != focusRecent {
+		t.Fatalf("tab from filter should reach focusRecent, got %d", m.pickerFocus)
+	}
+	m = m.cyclePickerFocus()
+	if m.pickerFocus != focusList {
+		t.Errorf("tab from recent should reach focusList, got %d", m.pickerFocus)
+	}
+}
+
+func TestCyclePickerFocus_SkipsRecentWhenHidden(t *testing.T) {
+	m := recentModel()
+	m.filter.SetValue("x") // hides Recent
+	m = m.cyclePickerFocus()
+	if m.pickerFocus == focusRecent {
+		t.Errorf("tab must skip focusRecent when the section is hidden")
+	}
+}

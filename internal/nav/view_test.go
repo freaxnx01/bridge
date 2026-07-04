@@ -89,6 +89,38 @@ func TestView_Picker_FitsHeightWithLongList(t *testing.T) {
 	}
 }
 
+// TestView_Picker_RecentSectionHeightBudget pins the exact Repos-list window
+// size the picker computes when the Recent section is visible under a
+// height-constrained terminal. recentBlock's returned height must equal the
+// section's true rendered line count (heading + rows + one blank separator)
+// so the Repos-list budget isn't over- or under-reserved by an off-by-one.
+func TestView_Picker_RecentSectionHeightBudget(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 80, 20
+	m.localRepos = []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Path: "/r/bridge"}},
+		{label: "github/public/agent-os", repo: core.Repo{Path: "/r/agent"}},
+	}
+	m.mruPaths = []string{"/r/bridge", "/r/agent"} // 2-row Recent section
+	for i := 0; i < 5; i++ {
+		m.localRepos = append(m.localRepos, repoRow{label: fmt.Sprintf("github/public/repo-%03d", i)})
+	}
+	// 7 repos total (2 recent + 5 plain); with the Recent section's true
+	// on-screen footprint (heading + 2 rows + 1 blank = 4 lines) at height 20,
+	// the Repos-list budget (maxVisible = 20 - 9 - 4 = 7) exactly fits all 7
+	// rows with no truncation indicator.
+	out := stripANSI(m.viewPicker())
+	if strings.Contains(out, "more") {
+		t.Errorf("expected all 7 repos to fit with no truncation indicator:\n%s", out)
+	}
+	for i := 0; i < 5; i++ {
+		want := fmt.Sprintf("repo-%03d", i)
+		if !strings.Contains(out, want) {
+			t.Errorf("expected row %s to be visible in the Repos list:\n%s", want, out)
+		}
+	}
+}
+
 func TestView_Picker_ShowsVersionBottomRight(t *testing.T) {
 	m := initialModel(Config{Version: "v9.9.9"})
 	m.width, m.height = 100, 30

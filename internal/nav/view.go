@@ -165,6 +165,29 @@ func (m Model) View() string {
 	return m.viewDash()
 }
 
+// recentBlock renders the "Recent" section (heading + rows) for the picker,
+// highlighting recentSel when focused. Rows reuse the Repos-list label and
+// repoIssueTag so formatting matches. Returns the block (with a trailing blank
+// line) and its rendered height; ("", 0) when the section is hidden.
+func (m Model) recentBlock() (string, int) {
+	if !m.recentVisible() {
+		return "", 0
+	}
+	rows := m.recentRepos()
+	var b strings.Builder
+	b.WriteString(stMuted.Render("Recent") + "\n")
+	for i, r := range rows {
+		tag := repoIssueTag(r)
+		if m.pickerFocus == focusRecent && i == m.recentSel {
+			b.WriteString(stSel.Render(stAccent.Render("▸ ")+r.label+tag) + "\n")
+		} else {
+			b.WriteString("  " + stText.Render(r.label) + tag + "\n")
+		}
+	}
+	s := b.String()
+	return s + "\n", lipgloss.Height(s)
+}
+
 func (m Model) viewPicker() string {
 	if m.repoModal != nil {
 		return m.viewRepoModal()
@@ -202,6 +225,8 @@ func (m Model) viewPicker() string {
 	}
 	var rb strings.Builder
 	rb.WriteString(m.filter.View() + "\n\n")
+	recent, recentH := m.recentBlock()
+	rb.WriteString(recent)
 	rows := m.visibleRepos()
 	if len(rows) == 0 {
 		rb.WriteString(stMuted.Render("no repos — remote rows appear once loaded"))
@@ -219,7 +244,7 @@ func (m Model) viewPicker() string {
 		}
 		// Budget: terminal height minus the sessions panel and this panel's
 		// chrome (borders + title + filter + blanks) + hint + scroll markers.
-		maxVisible := m.height - used - 9
+		maxVisible := m.height - used - 9 - recentH
 		if maxVisible < 3 {
 			maxVisible = 3
 		}
