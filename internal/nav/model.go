@@ -25,6 +25,7 @@ type Model struct {
 	remoteState loadState
 	pickerSel   int
 	sessionSel  int
+	forgeFilter string   // active forge subfilter key ("" = All); session-local, ctrl+f cycles it
 	mruPaths    []string // raw MRU order (from recentMsg); resolved lazily by recentRepos
 	recentSel   int
 

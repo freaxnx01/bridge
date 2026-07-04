@@ -1178,3 +1178,90 @@ func TestCyclePickerFocus_SkipsRecentWhenHidden(t *testing.T) {
 		t.Errorf("tab must skip focusRecent when the section is hidden")
 	}
 }
+
+func TestPresentForges_DerivesCanonicalOrder(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{repo: core.Repo{Forge: "forgejo", Owner: "o", Name: "f"}},
+		{repo: core.Repo{Forge: "github", Owner: "o", Name: "g"}},
+	}
+	m.remoteRepos = []repoRow{
+		{remote: &forge.RepoRef{Forge: "ado", Owner: "o", Name: "a"}},
+		{remote: &forge.RepoRef{Forge: "github", Owner: "o", Name: "g2"}},
+	}
+	got := m.presentForges()
+	want := []forgeOpt{{"github", "GitHub"}, {"forgejo", "Forgejo"}, {"ado", "ADO"}}
+	if len(got) != len(want) {
+		t.Fatalf("presentForges() = %+v, want %+v", got, want)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Errorf("[%d] = %+v, want %+v", i, got[i], want[i])
+		}
+	}
+}
+
+func TestForgeSubfilterVisible_CountGate(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	if m.forgeSubfilterVisible() {
+		t.Error("one forge present -> subfilter hidden")
+	}
+	m.localRepos = append(m.localRepos, repoRow{repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "b"}})
+	if !m.forgeSubfilterVisible() {
+		t.Error("two forges present -> subfilter visible")
+	}
+}
+
+func TestCycleForge_WrapForward(t *testing.T) {
+	base := func() Model {
+		m := initialModel(Config{})
+		m.localRepos = []repoRow{
+			{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}},
+			{repo: core.Repo{Forge: "gitlab", Owner: "o", Name: "b"}},
+		}
+		return m
+	}
+	tests := []struct{ name, start, want string }{
+		{"all_to_github", "", "github"},
+		{"github_to_gitlab", "github", "gitlab"},
+		{"gitlab_wraps_to_all", "gitlab", ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			m := base()
+			m.forgeFilter = tt.start
+			if got := m.cycleForge(1).forgeFilter; got != tt.want {
+				t.Errorf("cycleForge(1) from %q = %q, want %q", tt.start, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCycleForge_NoopWhenSingleOrZeroForge(t *testing.T) {
+	m := initialModel(Config{}) // zero forges
+	if got := m.cycleForge(1).forgeFilter; got != "" {
+		t.Errorf("zero forges cycle should be a no-op, got %q", got)
+	}
+	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
+	if got := m.cycleForge(1).forgeFilter; got != "" {
+		t.Errorf("single forge cycle should be a no-op, got %q", got)
+	}
+}
+
+func TestMatchesForge_AllAndSpecific(t *testing.T) {
+	local := repoRow{repo: core.Repo{Forge: "github"}}
+	if !matchesForge(local, "") {
+		t.Error(`empty forge ("" = All) should match every row`)
+	}
+	if !matchesForge(local, "github") {
+		t.Error("github row should match github scope")
+	}
+	if matchesForge(local, "gitlab") {
+		t.Error("github row must not match gitlab scope")
+	}
+	remote := repoRow{remote: &forge.RepoRef{Forge: "ado"}}
+	if !matchesForge(remote, "ado") {
+		t.Error("remote ado row should match ado scope (via rowParts)")
+	}
+}

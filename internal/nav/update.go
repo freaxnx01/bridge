@@ -267,6 +267,61 @@ func (m Model) visibleRepos() []repoRow {
 	return filterRepos(all, m.filter.Value())
 }
 
+// presentForges returns the forge subfilter options for the forges that have at
+// least one repo in the current local+remote rows, in canonical display order
+// (GitHub, GitLab, Forgejo, ADO). Environment-driven: an option appears only when
+// a matching repo is present, so empty forges never show.
+func (m Model) presentForges() []forgeOpt {
+	present := map[string]bool{}
+	mark := func(rows []repoRow) {
+		for _, r := range rows {
+			if forge, _, _, _ := rowParts(r); forge != "" {
+				present[forge] = true
+			}
+		}
+	}
+	mark(m.localRepos)
+	mark(m.remoteRepos)
+	out := make([]forgeOpt, 0, len(forgeOptOrder))
+	for _, o := range forgeOptOrder {
+		if present[o.key] {
+			out = append(out, o)
+		}
+	}
+	return out
+}
+
+// forgeSubfilterVisible reports whether the forge subfilter bar shows and ctrl+f
+// does anything: only when more than one forge is present.
+func (m Model) forgeSubfilterVisible() bool {
+	return len(m.presentForges()) > 1
+}
+
+// cycleForge advances the forge subfilter by dir over [All, ...presentForges()]
+// with wrap-around, where All is the empty key. A no-op when one forge or fewer is
+// present (nothing to cycle). Modeled on cycledDashFocus / cyclePickerFocus.
+func (m Model) cycleForge(dir int) Model {
+	present := m.presentForges()
+	if len(present) <= 1 {
+		return m
+	}
+	keys := make([]string, 0, len(present)+1)
+	keys = append(keys, "") // All
+	for _, o := range present {
+		keys = append(keys, o.key)
+	}
+	idx := 0
+	for i, k := range keys {
+		if k == m.forgeFilter {
+			idx = i
+			break
+		}
+	}
+	idx = ((idx+dir)%len(keys) + len(keys)) % len(keys)
+	m.forgeFilter = keys[idx]
+	return m
+}
+
 // recentRepos returns up to 5 most-recently-used local repos, most-recent-first,
 // resolved from m.mruPaths against m.localRepos by path. Unresolved paths (repo
 // moved/deleted) are skipped so every entry is openable. Computed on demand so it
