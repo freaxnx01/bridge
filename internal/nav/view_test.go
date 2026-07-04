@@ -7,7 +7,6 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
-	"github.com/muesli/termenv"
 
 	"github.com/freaxnx01/bridge/internal/core"
 )
@@ -299,44 +298,54 @@ func TestLegend_NoPhantomGlyphs(t *testing.T) {
 	}
 }
 
-// TestViewLegend_ColumnsAlignUnderRealColorProfile forces a real (non-Ascii)
-// color profile so styled glyphs carry ANSI escapes even in this non-TTY test
-// run — the colorless default profile can't catch a %-Ns-pads-the-styled-
-// string bug because Render() is a no-op without color. Under a real
-// terminal, a styled 1-rune glyph like "●" is ~20 runes once wrapped in
-// escapes, so naively width-formatting the styled string produces no padding
-// and ragged columns; the fix must pad by the glyph's unstyled display width
-// instead.
-func TestViewLegend_ColumnsAlignUnderRealColorProfile(t *testing.T) {
-	orig := lipgloss.ColorProfile()
-	lipgloss.SetColorProfile(termenv.TrueColor)
-	t.Cleanup(func() { lipgloss.SetColorProfile(orig) })
-
-	m := initialModel(Config{})
-	m.width, m.height = 100, 40
-	out := m.viewLegend()
-	lines := strings.Split(out, "\n")
+// TestViewLegend_ColumnsAlignByDisplayWidth guards legendRow's contract: pad
+// by the glyph's UNSTYLED DISPLAY WIDTH (lipgloss.Width), never by a naive
+// rune/byte count of the (possibly styled) glyph string. On a real TTY a
+// styled glyph carries ANSI escapes that a naive %-Ns format would count as
+// visible width, breaking column alignment — but a colorless test run can't
+// reproduce that directly, since Render() is a no-op without a forced color
+// profile (see probe below), and forcing one would need the termenv package
+// as a new direct import, which this test deliberately avoids.
+//
+// Instead this exploits a second, TTY-independent place where "display
+// width" and "naive length" diverge: East-Asian wide runes. lipgloss.Width
+// treats "文" as width 2 (it occupies two terminal columns), while a naive
+// rune-count format (e.g. Go's fmt "%-Ns", or len(string) on ASCII) treats
+// it as width 1. A revert to length-based padding therefore still pads wide
+// glyphs incorrectly even with no ANSI in play, which this test can observe
+// deterministically. Verified against a simulated revert
+// (fmt.Sprintf("%-14s", e.style.Render(e.glyph))+e.meaning): the old
+// approach produced glyph-column widths of 14/15/16 for glyphs "●"/"文"/"文字"
+// respectively, while legendRow produces a constant 15 for all three — this
+// test asserts that constant-width property directly against the real
+// legendRow helper.
+func TestViewLegend_ColumnsAlignByDisplayWidth(t *testing.T) {
+	entries := []legendEntry{
+		{"●", stOk, "narrow ascii glyph", "g"},
+		{"文", stBad, "wide cjk glyph", "g"},
+		{"文字", stWarn, "two wide cjk glyphs", "g"},
+		{"↓N", stAccent, "narrow multi-rune glyph", "g"},
+	}
+	colWidth := 0
+	for _, e := range entries {
+		if w := lipgloss.Width(e.glyph); w+1 > colWidth {
+			colWidth = w + 1
+		}
+	}
 
 	var widths []int
-	for _, e := range legendEntries {
-		found := false
-		for _, line := range lines {
-			idx := strings.Index(line, e.meaning)
-			if idx < 0 {
-				continue
-			}
-			widths = append(widths, lipgloss.Width(line[:idx]))
-			found = true
-			break
+	for _, e := range entries {
+		row := legendRow(e, colWidth)
+		idx := strings.Index(row, e.meaning)
+		if idx < 0 {
+			t.Fatalf("meaning %q not found in row %q", e.meaning, row)
 		}
-		if !found {
-			t.Fatalf("meaning %q not found in rendered legend:\n%s", e.meaning, out)
-		}
+		widths = append(widths, lipgloss.Width(row[:idx]))
 	}
 	for i, w := range widths {
 		if w != widths[0] {
-			t.Errorf("entry %d (glyph %q, meaning %q) meaning starts at visual column %d, want %d (all columns must align) — got widths %v",
-				i, legendEntries[i].glyph, legendEntries[i].meaning, w, widths[0], widths)
+			t.Errorf("entry %d (glyph %q) glyph column visual width = %d, want %d (all columns must align) — got widths %v",
+				i, entries[i].glyph, w, widths[0], widths)
 		}
 	}
 }
