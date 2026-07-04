@@ -148,7 +148,7 @@ func slotRepoMatches(slotRepo string, repo core.Repo) bool {
 // it and that slot's tmux session is live. Rows with a session sort first by
 // last-accessed DESC; session-less worktrees follow, name-sorted. dirtyState is
 // loadPending (filled later by dirtyMsg).
-func buildDashRows(repo core.Repo, wts []worktree.Entry, slots []core.Slot, sessions []core.Session, now time.Time) []dashRow {
+func buildDashRows(repo core.Repo, baseBranch string, wts []worktree.Entry, slots []core.Slot, sessions []core.Session, now time.Time) []dashRow {
 	liveBySlot := make(map[string]core.Session, len(sessions))
 	for _, s := range sessions {
 		liveBySlot[s.SlotID] = s
@@ -176,7 +176,33 @@ func buildDashRows(repo core.Repo, wts []worktree.Entry, slots []core.Slot, sess
 		rows = append(rows, row)
 	}
 	sortDashRows(rows, liveBySlot)
-	return rows
+	base := baseRow(repo, baseBranch, slots, liveBySlot, now)
+	return append([]dashRow{base}, rows...)
+}
+
+// baseRow builds the pinned base-checkout row for repo's primary working tree. It
+// launches in repo.Path with the bare "<repo>" slot id (worktree ""), so it
+// shares a session with the shell `bridge open <repo>`. When a live bare-<repo>
+// session exists it carries that session's dot/agent/state/last-accessed, exactly
+// like a worktree row.
+func baseRow(repo core.Repo, branch string, slots []core.Slot, liveBySlot map[string]core.Session, now time.Time) dashRow {
+	row := dashRow{isBase: true, branch: branch, path: repo.Path, dirtyState: loadPending}
+	id := core.SlotID(repo.Name, "") // == "<repo>"
+	sess, live := liveBySlot[id]
+	if !live {
+		return row
+	}
+	row.hasSession = true
+	row.slotID = id
+	row.state = sess.State
+	row.lastAccessed = humanLastAccessed(now.Sub(sess.LastActivity))
+	for _, sl := range slots {
+		if sl.ID == id { // the bare-<repo> slot carries the agent
+			row.agent = sl.Agent
+			break
+		}
+	}
+	return row
 }
 
 // sortDashRows orders sessioned rows first (last-accessed DESC), then

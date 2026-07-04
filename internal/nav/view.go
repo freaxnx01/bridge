@@ -215,16 +215,24 @@ func (m Model) dashListBody(compact bool) string {
 		if agent == "" {
 			agent = "—"
 		}
+		name := trunc(r.worktree, 18)
+		if r.isBase {
+			label := r.branch
+			if label == "" {
+				label = m.repo.Name
+			}
+			name = trunc("★ "+label, 18)
+		}
 		var line string
 		if compact {
-			line = fmt.Sprintf("%s %-18s %-7s %s", dot, trunc(r.worktree, 18), trunc(agent, 7), m.dirtyView(r))
+			line = fmt.Sprintf("%s %-18s %-7s %s", dot, name, trunc(agent, 7), m.dirtyView(r))
 		} else {
 			la := r.lastAccessed
 			if !r.hasSession {
 				la = "(no session)"
 			}
 			line = fmt.Sprintf("%s %-18s %-14s %-8s %-12s %s",
-				dot, trunc(r.worktree, 18), trunc(r.branch, 14), agent, la, m.dirtyView(r))
+				dot, name, trunc(r.branch, 14), agent, la, m.dirtyView(r))
 		}
 		if i == m.dashSel && m.dashFocus == dashFocusWorktrees {
 			line = stSel.Render(line)

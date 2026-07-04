@@ -190,3 +190,44 @@ func TestFlow_CtrlN_RepoModal_Golden(t *testing.T) {
 	s.send(tea.KeyMsg{Type: tea.KeyEnter}) // -> forge step
 	assertGolden(t, "ctrln_repo_modal_forge", s.frame())
 }
+
+func TestDashListBody_BaseRowStarLabelFirst(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.dashRows = []dashRow{
+		{isBase: true, branch: "main", path: "/r", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+		{worktree: "fix", branch: "worktree-fix", path: "/r/.worktrees/fix", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+	}
+	body := m.dashListBody(false)
+	star := strings.Index(body, "★ main")
+	fix := strings.Index(body, "fix")
+	if star < 0 {
+		t.Fatalf("base row should render \"★ main\":\n%s", body)
+	}
+	if fix >= 0 && star > fix {
+		t.Errorf("base row must render before worktree rows:\n%s", body)
+	}
+}
+
+func TestDashListBody_BaseRowDetachedUsesRepoName(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.dashRows = []dashRow{{isBase: true, branch: "", path: "/r", dirtyState: loadOK, dirty: dirtyInfo{clean: true}}}
+	if body := m.dashListBody(false); !strings.Contains(body, "★ bridge") {
+		t.Errorf("detached primary should render \"★ bridge\":\n%s", body)
+	}
+}
+
+func TestFlow_Dashboard_BaseRowPinned_Golden(t *testing.T) {
+	s := newSession(t, Config{})
+	s.m.screen = screenDash
+	s.m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	s.m.dashFocus = dashFocusWorktrees
+	s.send(dashRowsMsg{rows: []dashRow{
+		{isBase: true, branch: "main", path: "/r", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+		{worktree: "fix-x", branch: "worktree-fix-x", path: "/r/.worktrees/fix-x", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+	}})
+	assertGolden(t, "dash_base_row_pinned", s.frame())
+}

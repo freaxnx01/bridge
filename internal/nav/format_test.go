@@ -59,21 +59,60 @@ func TestBuildDashRows_MatchesSessionsAndSorts(t *testing.T) {
 		{SlotID: "s-docs", State: "detached", LastActivity: time.Unix(2000, 0)},
 	}
 	now := time.Unix(3000, 0)
-	got := buildDashRows(repo, wts, slots, sessions, now)
+	got := buildDashRows(repo, "main", wts, slots, sessions, now)
 
-	if len(got) != 3 {
-		t.Fatalf("got %d rows, want 3", len(got))
+	if len(got) != 4 { // base + 3 worktrees
+		t.Fatalf("got %d rows, want 4", len(got))
 	}
-	// Sessioned rows first, sorted by last-accessed DESC (docs@2000 before fix@1000),
+	// row[0] is the pinned base row (no session in this fixture).
+	if !got[0].isBase || got[0].worktree != "" || got[0].branch != "main" || got[0].hasSession {
+		t.Errorf("row[0] = %+v, want pinned base row (branch main, no session)", got[0])
+	}
+	// Sessioned worktree rows follow, sorted by last-accessed DESC (docs before fix),
 	// then session-less worktrees (spike).
-	if got[0].worktree != "docs" || !got[0].hasSession || got[0].agent != "copilot" {
-		t.Errorf("row[0] = %+v, want docs/copilot/hasSession", got[0])
+	if got[1].worktree != "docs" || !got[1].hasSession || got[1].agent != "copilot" {
+		t.Errorf("row[1] = %+v, want docs/copilot/hasSession", got[1])
 	}
-	if got[1].worktree != "fix-x" || got[1].state != "attached" {
-		t.Errorf("row[1] = %+v, want fix-x/attached", got[1])
+	if got[2].worktree != "fix-x" || got[2].state != "attached" {
+		t.Errorf("row[2] = %+v, want fix-x/attached", got[2])
 	}
-	if got[2].worktree != "spike" || got[2].hasSession {
-		t.Errorf("row[2] = %+v, want spike with no session", got[2])
+	if got[3].worktree != "spike" || got[3].hasSession {
+		t.Errorf("row[3] = %+v, want spike with no session", got[3])
+	}
+}
+
+func TestBuildDashRows_BasePinnedFirstDespiteRecency(t *testing.T) {
+	repo := core.Repo{Name: "bridge", Path: "/r"}
+	wts := []worktree.Entry{{Path: "/r/.worktrees/fix", Branch: "worktree-fix"}}
+	slots := []core.Slot{{ID: "bridge-wt-fix", Repo: "bridge", Worktree: "fix", Agent: "claude"}}
+	// The worktree session is very recent; the base row must still be first.
+	sessions := []core.Session{{SlotID: "bridge-wt-fix", State: "attached", LastActivity: time.Unix(9000, 0)}}
+	got := buildDashRows(repo, "main", wts, slots, sessions, time.Unix(9001, 0))
+	if len(got) != 2 || !got[0].isBase {
+		t.Fatalf("base row must be pinned first, got %+v", got)
+	}
+}
+
+func TestBuildDashRows_BaseLiveSession(t *testing.T) {
+	repo := core.Repo{Name: "bridge"}
+	// A live bare-<repo> session (slot id "bridge") started via `bridge open bridge`.
+	slots := []core.Slot{{ID: "bridge", Repo: "bridge", Worktree: "", Agent: "codex"}}
+	sessions := []core.Session{{SlotID: "bridge", State: "detached", LastActivity: time.Unix(1000, 0)}}
+	got := buildDashRows(repo, "main", nil, slots, sessions, time.Unix(1000, 0))
+	base := got[0]
+	if !base.isBase || !base.hasSession || base.slotID != "bridge" {
+		t.Fatalf("base row session fields wrong: %+v", base)
+	}
+	if base.agent != "codex" || base.state != "detached" {
+		t.Errorf("base row = %+v, want agent codex / state detached from the bare slot", base)
+	}
+}
+
+func TestBuildDashRows_DetachedPrimary_EmptyBranch(t *testing.T) {
+	repo := core.Repo{Name: "bridge"}
+	got := buildDashRows(repo, "", nil, nil, nil, time.Unix(0, 0))
+	if len(got) != 1 || !got[0].isBase || got[0].branch != "" {
+		t.Fatalf("detached primary → base row with empty branch, got %+v", got)
 	}
 }
 
