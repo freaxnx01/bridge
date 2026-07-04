@@ -76,6 +76,7 @@ var legendGroups = []string{"Session", "Git status", "Rows & selection", "Header
 // screen while open (View()'s early return), mirroring the viewRepoModal
 // idiom (view.go:71-73).
 func (m Model) viewLegend() string {
+	colWidth := legendColWidth()
 	var b strings.Builder
 	for gi, group := range legendGroups {
 		if gi > 0 {
@@ -86,11 +87,36 @@ func (m Model) viewLegend() string {
 			if e.group != group {
 				continue
 			}
-			b.WriteString(fmt.Sprintf("  %-14s %s\n", e.style.Render(e.glyph), e.meaning))
+			b.WriteString("  " + legendRow(e, colWidth) + "\n")
 		}
 	}
 	b.WriteString("\n" + stMuted.Render("? / esc to close"))
 	return panel(m.width, "Legend", strings.TrimRight(b.String(), "\n"))
+}
+
+// legendColWidth is the glyph column width for viewLegend, sized from the
+// widest glyph's DISPLAY width (lipgloss.Width, i.e. the unstyled rune count)
+// plus one so every row gets at least one trailing space before its meaning.
+func legendColWidth() int {
+	w := 0
+	for _, e := range legendEntries {
+		if gw := lipgloss.Width(e.glyph); gw > w {
+			w = gw
+		}
+	}
+	return w + 1
+}
+
+// legendRow renders one legend line: the glyph in its real style, padded to
+// colWidth by its unstyled DISPLAY width (not the styled string's rune count —
+// a styled glyph carries ANSI escapes that %-Ns would count as visible width,
+// breaking alignment on a real colored TTY), followed by the meaning.
+func legendRow(e legendEntry, colWidth int) string {
+	pad := colWidth - lipgloss.Width(e.glyph)
+	if pad < 1 {
+		pad = 1
+	}
+	return e.style.Render(e.glyph) + strings.Repeat(" ", pad) + e.meaning
 }
 
 // dashTwoColMin is the minimum terminal width for the master-detail dashboard;

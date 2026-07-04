@@ -1016,6 +1016,22 @@ func TestUpdate_QuestionMark_TogglesLegendFromDash(t *testing.T) {
 	}
 }
 
+func TestUpdate_LegendOpen_CtrlCQuits(t *testing.T) {
+	m := initialModel(Config{})
+	m.showLegend = true
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+	got := out.(Model)
+	if !got.showLegend {
+		t.Errorf("ctrl+c should not merely close the legend, it should quit")
+	}
+	if cmd == nil {
+		t.Fatalf("ctrl+c while legend open should return a quit command, got nil")
+	}
+	if msg := cmd(); msg != tea.Quit() {
+		t.Errorf("ctrl+c while legend open should return tea.Quit, got %#v", msg)
+	}
+}
+
 func TestUpdate_QuestionMark_IgnoredOnOverview(t *testing.T) {
 	m := initialModel(Config{})
 	m.screen = screenOverview

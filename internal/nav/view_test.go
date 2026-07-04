@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/charmbracelet/lipgloss"
+	"github.com/muesli/termenv"
 
 	"github.com/freaxnx01/bridge/internal/core"
 )
@@ -264,6 +265,15 @@ func TestLegend_CoversAuditedGlyphs(t *testing.T) {
 	}
 }
 
+// TestLegend_NoPhantomGlyphs guards against a legend entry documenting a glyph
+// view.go no longer actually renders. legendEntries is itself defined in
+// view.go, so a bare "does this rune appear in view.go" check is vacuous —
+// every rune in the table is present by construction (the table literal is
+// itself a match). Instead this requires each distinctive rune to appear MORE
+// THAN ONCE: once for the legendEntries table row, and at least once more at a
+// real render site elsewhere in the file. If a render site is deleted (glyph
+// no longer actually drawn) without pruning the corresponding legend entry,
+// the count drops to 1 and this test fails.
 func TestLegend_NoPhantomGlyphs(t *testing.T) {
 	src, err := os.ReadFile("view.go")
 	if err != nil {
@@ -279,9 +289,54 @@ func TestLegend_NoPhantomGlyphs(t *testing.T) {
 			continue
 		}
 		for _, r := range distinctive {
-			if strings.Contains(e.glyph, r) && !strings.Contains(string(src), r) {
-				t.Errorf("legend entry %q (%s) uses rune %q, not found anywhere in view.go", e.glyph, e.meaning, r)
+			if !strings.Contains(e.glyph, r) {
+				continue
 			}
+			if n := strings.Count(string(src), r); n < 2 {
+				t.Errorf("legend entry %q (%s) uses rune %q, found only %d time(s) in view.go — want it also rendered somewhere beyond the legendEntries table row", e.glyph, e.meaning, r, n)
+			}
+		}
+	}
+}
+
+// TestViewLegend_ColumnsAlignUnderRealColorProfile forces a real (non-Ascii)
+// color profile so styled glyphs carry ANSI escapes even in this non-TTY test
+// run — the colorless default profile can't catch a %-Ns-pads-the-styled-
+// string bug because Render() is a no-op without color. Under a real
+// terminal, a styled 1-rune glyph like "●" is ~20 runes once wrapped in
+// escapes, so naively width-formatting the styled string produces no padding
+// and ragged columns; the fix must pad by the glyph's unstyled display width
+// instead.
+func TestViewLegend_ColumnsAlignUnderRealColorProfile(t *testing.T) {
+	orig := lipgloss.ColorProfile()
+	lipgloss.SetColorProfile(termenv.TrueColor)
+	t.Cleanup(func() { lipgloss.SetColorProfile(orig) })
+
+	m := initialModel(Config{})
+	m.width, m.height = 100, 40
+	out := m.viewLegend()
+	lines := strings.Split(out, "\n")
+
+	var widths []int
+	for _, e := range legendEntries {
+		found := false
+		for _, line := range lines {
+			idx := strings.Index(line, e.meaning)
+			if idx < 0 {
+				continue
+			}
+			widths = append(widths, lipgloss.Width(line[:idx]))
+			found = true
+			break
+		}
+		if !found {
+			t.Fatalf("meaning %q not found in rendered legend:\n%s", e.meaning, out)
+		}
+	}
+	for i, w := range widths {
+		if w != widths[0] {
+			t.Errorf("entry %d (glyph %q, meaning %q) meaning starts at visual column %d, want %d (all columns must align) — got widths %v",
+				i, legendEntries[i].glyph, legendEntries[i].meaning, w, widths[0], widths)
 		}
 	}
 }
