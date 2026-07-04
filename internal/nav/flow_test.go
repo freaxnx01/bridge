@@ -231,3 +231,36 @@ func TestFlow_Dashboard_BaseRowPinned_Golden(t *testing.T) {
 	}})
 	assertGolden(t, "dash_base_row_pinned", s.frame())
 }
+
+func TestViewPicker_RecentSection(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Path: "/r/bridge"}, issueCount: 3, issueState: loadOK},
+		{label: "github/public/agent-os", repo: core.Repo{Path: "/r/agent"}},
+	}
+	m.mruPaths = []string{"/r/bridge", "/r/agent"}
+	// filter empty -> section shown, with the issue-count tag reused
+	frame := stripANSI(m.viewPicker())
+	if !strings.Contains(frame, "Recent") {
+		t.Errorf("empty filter should show the Recent heading:\n%s", frame)
+	}
+	if !strings.Contains(frame, "●3") {
+		t.Errorf("recent row should reuse the issue-count tag:\n%s", frame)
+	}
+	// typing filter text collapses the section
+	m.filter.SetValue("agent")
+	if strings.Contains(stripANSI(m.viewPicker()), "Recent") {
+		t.Errorf("non-empty filter should hide the Recent section")
+	}
+}
+
+func TestFlow_RecentSection_Golden(t *testing.T) {
+	s := newSession(t, Config{})
+	s.send(reposMsg{rows: []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Path: "/r/bridge"}},
+		{label: "github/public/agent-os", repo: core.Repo{Path: "/r/agent"}},
+	}})
+	s.send(recentMsg{paths: []string{"/r/bridge", "/r/agent"}})
+	assertGolden(t, "picker_recent_section", s.frame())
+}
