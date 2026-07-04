@@ -64,6 +64,9 @@ func (m Model) View() string {
 	if m.screen == screenOverview {
 		return m.viewOverview()
 	}
+	if m.screen == screenAgents {
+		return m.viewAgents()
+	}
 	return m.viewDash()
 }
 

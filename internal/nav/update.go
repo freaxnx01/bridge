@@ -181,6 +181,21 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.overviewState = loadErr
 		m.status = "overview unavailable: " + msg.err.Error()
 		return m, nil
+	case agentsMsg:
+		m.agents = msg.rows
+		m.agentsState = loadOK
+		m.agentsUnavailable = false
+		if m.agentsSel >= len(m.agents) {
+			m.agentsSel = 0
+		}
+		return m, nil
+	case agentsErrMsg:
+		m.agentsState = loadErr
+		m.agentsUnavailable = msg.unavailable
+		if !msg.unavailable && msg.err != nil {
+			m.status = "agents unavailable: " + msg.err.Error()
+		}
+		return m, nil
 
 	case tea.KeyMsg:
 		if m.cfg.DebugKeys != "" {
@@ -191,6 +206,12 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, tea.Quit
 			}
 			return m.updateOverviewKeys(msg)
+		}
+		if m.screen == screenAgents {
+			if msg.String() == "q" || msg.String() == "ctrl+c" {
+				return m, tea.Quit
+			}
+			return m.updateAgentsKeys(msg)
 		}
 		if m.screen == screenPicker {
 			return m.updatePicker(msg)
@@ -371,6 +392,11 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.ovRankedSel = 0
 		m.ovInboxSel = 0
 		return m, m.buildOverviewCmd()
+	case "a":
+		m.screen = screenAgents
+		m.agentsState = loadPending
+		m.agentsSel = 0
+		return m, loadAgentsCmd()
 	case "enter":
 		if len(rows) == 0 {
 			return m, nil

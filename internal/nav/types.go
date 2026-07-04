@@ -17,6 +17,7 @@ const (
 	screenPicker screen = iota
 	screenDash
 	screenOverview
+	screenAgents
 )
 
 type focus int
@@ -281,4 +282,9 @@ type statusMsg struct {
 	path  string
 	files []statusFile
 	err   error
+}
+type agentsMsg struct{ rows []agentRow }
+type agentsErrMsg struct {
+	err         error
+	unavailable bool
 }
