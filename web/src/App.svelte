@@ -10,6 +10,17 @@
     const parts = cwd.split('/').filter(Boolean);
     return parts.slice(-2).join('/');
   }
+
+  function shortAge(startedAt) {
+    if (!startedAt) return '';
+    const ms = Date.now() - new Date(startedAt).getTime();
+    if (!(ms >= 0)) return '';
+    const mins = Math.floor(ms / 60000);
+    if (mins < 60) return `${mins}m`;
+    const hours = Math.floor(mins / 60);
+    if (hours < 24) return `${hours}h`;
+    return `${Math.floor(hours / 24)}d`;
+  }
 </script>
 
 <main>
@@ -22,9 +33,9 @@
       <p>No live Claude sessions.</p>
     {:else}
       <ul>
-        {#each $agents as a}
+        {#each $agents as a (a.sessionId)}
           <li>
-            <strong>{a.name}</strong> · {a.status} · {a.kind} · {shortRepo(a.cwd)}
+            <strong>{a.name}</strong> · {a.status} · {a.kind} · {shortRepo(a.cwd)} · {shortAge(a.startedAt)}
           </li>
         {/each}
       </ul>
