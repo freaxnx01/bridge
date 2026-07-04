@@ -1041,3 +1041,56 @@ func TestUpdate_QuestionMark_IgnoredOnOverview(t *testing.T) {
 		t.Errorf("? is not wired on the overview screen (out of scope) and must not open the legend")
 	}
 }
+
+func TestRecentRepos_ResolvesCapsAndSkips(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{label: "github/public/a", repo: core.Repo{Path: "/r/a"}},
+		{label: "github/public/b", repo: core.Repo{Path: "/r/b"}},
+		{label: "github/public/c", repo: core.Repo{Path: "/r/c"}},
+		{label: "github/public/d", repo: core.Repo{Path: "/r/d"}},
+		{label: "github/public/e", repo: core.Repo{Path: "/r/e"}},
+		{label: "github/public/f", repo: core.Repo{Path: "/r/f"}},
+	}
+	// most-recent-first, with one stale path (/r/gone) that must be skipped.
+	m.mruPaths = []string{"/r/c", "/r/gone", "/r/a", "/r/f", "/r/b", "/r/d", "/r/e"}
+	got := m.recentRepos()
+	want := []string{"/r/c", "/r/a", "/r/f", "/r/b", "/r/d"} // capped at 5, stale skipped
+	if len(got) != len(want) {
+		t.Fatalf("got %d rows, want %d: %+v", len(got), len(want), got)
+	}
+	for i := range want {
+		if got[i].repo.Path != want[i] {
+			t.Errorf("[%d] = %q, want %q", i, got[i].repo.Path, want[i])
+		}
+	}
+}
+
+func TestRecentRepos_EmptyWhenNoMRU(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Path: "/r/a"}}}
+	if got := m.recentRepos(); len(got) != 0 {
+		t.Errorf("no MRU should yield no recent rows, got %+v", got)
+	}
+}
+
+func TestRecentVisible_FilterGate(t *testing.T) {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{{repo: core.Repo{Path: "/r/a"}}}
+	m.mruPaths = []string{"/r/a"}
+	if !m.recentVisible() {
+		t.Fatal("empty filter + resolved MRU should be visible")
+	}
+	m.filter.SetValue("a")
+	if m.recentVisible() {
+		t.Error("non-empty filter should hide the Recent section")
+	}
+}
+
+func TestUpdate_RecentMsg_StoresPaths(t *testing.T) {
+	m := initialModel(Config{})
+	out, _ := m.Update(recentMsg{paths: []string{"/r/x", "/r/y"}})
+	if got := out.(Model).mruPaths; len(got) != 2 || got[0] != "/r/x" {
+		t.Errorf("recentMsg should store paths, got %+v", got)
+	}
+}

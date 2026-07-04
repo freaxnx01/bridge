@@ -25,6 +25,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case reposMsg:
 		m.localRepos = msg.rows
 		return m, m.issueCountCmds(msg.rows)
+	case recentMsg:
+		m.mruPaths = msg.paths
+		return m, nil
 	case sessionsMsg:
 		m.sessions = msg.rows
 		return m, nil
@@ -262,6 +265,37 @@ func (m Model) visibleRepos() []repoRow {
 	all = append(all, dedupRemoteRows(m.localRepos, m.remoteRepos)...)
 	all = disambiguateOwners(all)
 	return filterRepos(all, m.filter.Value())
+}
+
+// recentRepos returns up to 5 most-recently-used local repos, most-recent-first,
+// resolved from m.mruPaths against m.localRepos by path. Unresolved paths (repo
+// moved/deleted) are skipped so every entry is openable. Computed on demand so it
+// tracks localRepos (including async issue counts), mirroring visibleRepos.
+func (m Model) recentRepos() []repoRow {
+	const maxRecent = 5
+	if len(m.mruPaths) == 0 {
+		return nil
+	}
+	byPath := make(map[string]repoRow, len(m.localRepos))
+	for _, r := range m.localRepos {
+		byPath[r.repo.Path] = r
+	}
+	out := make([]repoRow, 0, maxRecent)
+	for _, p := range m.mruPaths {
+		if r, ok := byPath[p]; ok {
+			out = append(out, r)
+			if len(out) == maxRecent {
+				break
+			}
+		}
+	}
+	return out
+}
+
+// recentVisible reports whether the Recent section shows: only with an empty
+// filter and at least one resolved recent repo. Also gates the focusRecent cycle.
+func (m Model) recentVisible() bool {
+	return m.filter.Value() == "" && len(m.recentRepos()) > 0
 }
 
 func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {

@@ -38,6 +38,16 @@ func loadLocalReposCmd(roots []string) tea.Cmd {
 	}
 }
 
+// loadRecentCmd reads the MRU file (read-only) and returns its paths, most-
+// recent-first. A read error is swallowed to an empty list, matching nav's
+// best-effort loaders.
+func loadRecentCmd(path string) tea.Cmd {
+	return func() tea.Msg {
+		paths, _ := core.LoadMRU(path)
+		return recentMsg{paths: paths}
+	}
+}
+
 func loadSessionsCmd(slotsPath string) tea.Cmd {
 	return func() tea.Msg {
 		live, _ := core.LiveSessions()

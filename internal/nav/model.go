@@ -25,6 +25,8 @@ type Model struct {
 	remoteState loadState
 	pickerSel   int
 	sessionSel  int
+	mruPaths    []string // raw MRU order (from recentMsg); resolved lazily by recentRepos
+	recentSel   int
 
 	repo        core.Repo
 	dashRows    []dashRow
@@ -75,10 +77,14 @@ func initialModel(cfg Config) Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(
+	cmds := []tea.Cmd{
 		m.spin.Tick,
 		loadLocalReposCmd(m.cfg.ReposRoots),
 		loadSessionsCmd(m.cfg.SlotsPath),
 		loadRemoteCmd(m.cfg.RemoteCache),
-	)
+	}
+	if m.cfg.RecentPath != "" {
+		cmds = append(cmds, loadRecentCmd(m.cfg.RecentPath))
+	}
+	return tea.Batch(cmds...)
 }

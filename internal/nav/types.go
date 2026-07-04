@@ -24,6 +24,7 @@ type focus int
 
 const (
 	focusFilter focus = iota
+	focusRecent
 	focusList
 	focusSessions
 )
@@ -186,9 +187,12 @@ var repoForgeChoices = []struct {
 // Config is everything nav needs, injected by cmd/bridge so internal/nav
 // stays free of cmd-layer code (e.g. cloneRemoteRepo).
 type Config struct {
-	ReposRoots   []string
-	RemoteCache  string // path to remote.list
-	SlotsPath    string // path to slots.json
+	ReposRoots  []string
+	RemoteCache string // path to remote.list
+	SlotsPath   string // path to slots.json
+	// RecentPath is the MRU file read (read-only) to build the picker's Recent
+	// section. Empty disables the section.
+	RecentPath   string
 	DefaultAgent string // BRIDGE_DEFAULT_AGENT ("" => no auto-launch agent; nav uses claude)
 	AgentArgs    []string
 	Clone        func(ref forge.RepoRef) (core.Repo, error)
@@ -229,6 +233,7 @@ type Config struct {
 // --- messages ---
 
 type reposMsg struct{ rows []repoRow }
+type recentMsg struct{ paths []string }
 type sessionsMsg struct{ rows []sessionRow }
 type remoteMsg struct{ rows []repoRow }
 
