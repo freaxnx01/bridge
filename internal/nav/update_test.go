@@ -950,3 +950,78 @@ func TestUpdate_WtCreatedMsg_OtherError_RawMessage(t *testing.T) {
 		t.Errorf("modal.err = %v, want raw error string", got.modal)
 	}
 }
+
+func TestUpdate_QuestionMark_TogglesLegendFromPicker(t *testing.T) {
+	m := initialModel(Config{})
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	got := out.(Model)
+	if !got.showLegend {
+		t.Fatalf("? on picker should open the legend")
+	}
+}
+
+func TestUpdate_QuestionMark_TogglesLegendOffAgain(t *testing.T) {
+	m := initialModel(Config{})
+	m.showLegend = true
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	got := out.(Model)
+	if got.showLegend {
+		t.Fatalf("? while legend open should close it")
+	}
+}
+
+func TestUpdate_Esc_ClosesLegend(t *testing.T) {
+	m := initialModel(Config{})
+	m.showLegend = true
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := out.(Model)
+	if got.showLegend {
+		t.Fatalf("esc while legend open should close it")
+	}
+}
+
+func TestUpdate_LegendOpen_SwallowsOtherKeys(t *testing.T) {
+	m := initialModel(Config{})
+	m.showLegend = true
+	m.pickerSel = 2
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if !got.showLegend {
+		t.Errorf("a non-close key must not close the legend")
+	}
+	if got.pickerSel != 2 {
+		t.Errorf("pickerSel = %d, want unchanged 2 (key should be swallowed)", got.pickerSel)
+	}
+}
+
+func TestUpdate_QuestionMark_WorksWhileFilterFocused(t *testing.T) {
+	m := initialModel(Config{}) // pickerFocus defaults to focusFilter, filter.Focused()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	got := out.(Model)
+	if !got.showLegend {
+		t.Fatalf("? should open the legend even while the filter input is focused")
+	}
+	if got.filter.Value() != "" {
+		t.Errorf("? must not be captured as filter text, got filter value %q", got.filter.Value())
+	}
+}
+
+func TestUpdate_QuestionMark_TogglesLegendFromDash(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenDash
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	got := out.(Model)
+	if !got.showLegend {
+		t.Fatalf("? on the dashboard should open the legend")
+	}
+}
+
+func TestUpdate_QuestionMark_IgnoredOnOverview(t *testing.T) {
+	m := initialModel(Config{})
+	m.screen = screenOverview
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("?")})
+	got := out.(Model)
+	if got.showLegend {
+		t.Errorf("? is not wired on the overview screen (out of scope) and must not open the legend")
+	}
+}
