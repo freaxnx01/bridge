@@ -27,6 +27,7 @@ var navCmd = &cobra.Command{
 			ReposRoots:   reposRoots(),
 			RemoteCache:  filepath.Join(cacheRoot(), "remote.list"),
 			SlotsPath:    filepath.Join(cacheRoot(), "slots.json"),
+			RecentPath:   filepath.Join(cacheRoot(), "mru"),
 			DefaultAgent: os.Getenv("BRIDGE_DEFAULT_AGENT"),
 			AgentArgs:    strings.Fields(os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS")),
 			Version:      version,
