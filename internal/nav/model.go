@@ -16,6 +16,7 @@ type Model struct {
 
 	screen      screen
 	pickerFocus focus
+	showLegend  bool // ? toggles the status-glyph legend overlay (picker/dash only)
 
 	filter      textinput.Model
 	sessions    []sessionRow

@@ -27,6 +27,98 @@ var (
 	stBad    = lipgloss.NewStyle().Foreground(colBad)
 )
 
+// legendEntry is one row of the ? status-glyph legend: a glyph rendered in
+// its real style, a short meaning, and the group it's shown under.
+type legendEntry struct {
+	glyph   string
+	style   lipgloss.Style
+	meaning string
+	group   string
+}
+
+// legendEntries documents every status glyph the picker/dashboard render. It
+// is the single source viewLegend renders from, and is guarded by
+// TestLegend_CoversAuditedGlyphs: adding, removing, or changing an entry here
+// without updating that test's expected set fails the build. When you add or
+// change a rendered status glyph, update this table (and the primary
+// render site's comment pointing back here).
+var legendEntries = []legendEntry{
+	{"●", stOk, "session attached", "Session"},
+	{"○", stMuted, "session detached", "Session"},
+	{"·", stMuted, "no session (dashboard row)", "Session"},
+
+	{"●N", stBad, "N modified/changed files", "Git status"},
+	{"↑N", stWarn, "N commits ahead of upstream", "Git status"},
+	{"↓N", stAccent, "N commits behind upstream", "Git status"},
+	{"✓ clean", stOk, "nothing modified/diverged", "Git status"},
+	{"⤳ no upstream", stMuted, "branch has no upstream tracking ref", "Git status"},
+	{"?", stMuted, "dirty-state load error", "Git status"},
+	// The spinner is a live widget (spinner.Model), not a static st*-styled
+	// glyph; "⠋" (its first bubbles/spinner.Dot frame) stands in for it here.
+	{"⠋", stMuted, "dirty-state loading (spinner)", "Git status"},
+
+	{"↓ ", stMuted, "remote-only repo (not cloned; clone on select)", "Rows & selection"},
+	{"●N", stWarn, "open-issue count on a repo row", "Rows & selection"},
+	{"▸ ", stAccent, "selected row (picker list/sessions, create row)", "Rows & selection"},
+	// The create-row action text renders unstyled (view.go:235), so its
+	// legend entry uses the zero-value style — the honest representation.
+	{"+", lipgloss.NewStyle(), "dashboard action row: create a new worktree", "Rows & selection"},
+
+	{"●N open", stWarn, "repo open-issue count", "Header"},
+	{"✎ <names>", stAccent, "present note files, e.g. ✎ ideas.md · TODO.md", "Header"},
+}
+
+// legendGroups is the fixed display order of legend sections.
+var legendGroups = []string{"Session", "Git status", "Rows & selection", "Header"}
+
+// viewLegend renders the ? overlay: legendEntries grouped by category, each
+// glyph in its real style, followed by a close hint. Replaces the whole
+// screen while open (View()'s early return), mirroring the viewRepoModal
+// idiom (view.go:71-73).
+func (m Model) viewLegend() string {
+	colWidth := legendColWidth()
+	var b strings.Builder
+	for gi, group := range legendGroups {
+		if gi > 0 {
+			b.WriteString("\n")
+		}
+		b.WriteString(stTitle.Render(group) + "\n")
+		for _, e := range legendEntries {
+			if e.group != group {
+				continue
+			}
+			b.WriteString("  " + legendRow(e, colWidth) + "\n")
+		}
+	}
+	b.WriteString("\n" + stMuted.Render("? / esc to close"))
+	return panel(m.width, "Legend", strings.TrimRight(b.String(), "\n"))
+}
+
+// legendColWidth is the glyph column width for viewLegend, sized from the
+// widest glyph's DISPLAY width (lipgloss.Width, i.e. the unstyled rune count)
+// plus one so every row gets at least one trailing space before its meaning.
+func legendColWidth() int {
+	w := 0
+	for _, e := range legendEntries {
+		if gw := lipgloss.Width(e.glyph); gw > w {
+			w = gw
+		}
+	}
+	return w + 1
+}
+
+// legendRow renders one legend line: the glyph in its real style, padded to
+// colWidth by its unstyled DISPLAY width (not the styled string's rune count —
+// a styled glyph carries ANSI escapes that %-Ns would count as visible width,
+// breaking alignment on a real colored TTY), followed by the meaning.
+func legendRow(e legendEntry, colWidth int) string {
+	pad := colWidth - lipgloss.Width(e.glyph)
+	if pad < 1 {
+		pad = 1
+	}
+	return e.style.Render(e.glyph) + strings.Repeat(" ", pad) + e.meaning
+}
+
 // dashTwoColMin is the minimum terminal width for the master-detail dashboard;
 // below it the dashboard renders list-only (today's layout), unchanged.
 const dashTwoColMin = 90
@@ -57,6 +149,9 @@ func panelH(w, h int, title, body string) string {
 func (m Model) View() string {
 	if m.width == 0 || m.height == 0 {
 		return "initialising…"
+	}
+	if m.showLegend {
+		return m.viewLegend()
 	}
 	if m.screen == screenPicker {
 		return m.viewPicker()
@@ -146,7 +241,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · q quit"))
+	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend · q quit"))
 	return strings.Join(sections, "\n")
 }
 
@@ -192,7 +287,7 @@ func (m Model) viewDash() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, rightAt(h))
 	}
 
-	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · esc back · q quit")
+	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · ? legend · esc back · q quit")
 
 	out := header + "\n" + body + "\n" + hint
 	if m.modal != nil {

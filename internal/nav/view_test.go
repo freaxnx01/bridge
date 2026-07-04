@@ -2,6 +2,7 @@ package nav
 
 import (
 	"fmt"
+	"os"
 	"strings"
 	"testing"
 
@@ -226,5 +227,162 @@ func TestDirtyView_States(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestLegend_CoversAuditedGlyphs(t *testing.T) {
+	type want struct{ glyph, meaning, group string }
+	expected := []want{
+		{"●", "session attached", "Session"},
+		{"○", "session detached", "Session"},
+		{"·", "no session (dashboard row)", "Session"},
+		{"●N", "N modified/changed files", "Git status"},
+		{"↑N", "N commits ahead of upstream", "Git status"},
+		{"↓N", "N commits behind upstream", "Git status"},
+		{"✓ clean", "nothing modified/diverged", "Git status"},
+		{"⤳ no upstream", "branch has no upstream tracking ref", "Git status"},
+		{"?", "dirty-state load error", "Git status"},
+		{"⠋", "dirty-state loading (spinner)", "Git status"},
+		{"↓ ", "remote-only repo (not cloned; clone on select)", "Rows & selection"},
+		{"●N", "open-issue count on a repo row", "Rows & selection"},
+		{"▸ ", "selected row (picker list/sessions, create row)", "Rows & selection"},
+		{"+", "dashboard action row: create a new worktree", "Rows & selection"},
+		{"●N open", "repo open-issue count", "Header"},
+		{"✎ <names>", "present note files, e.g. ✎ ideas.md · TODO.md", "Header"},
+	}
+	if len(legendEntries) != len(expected) {
+		t.Fatalf("legendEntries has %d entries, want %d — the legend must document exactly the audited glyph set", len(legendEntries), len(expected))
+	}
+	for i, e := range legendEntries {
+		w := expected[i]
+		if e.glyph == "" || e.meaning == "" {
+			t.Errorf("entry %d: empty glyph or meaning: %+v", i, e)
+		}
+		if e.glyph != w.glyph || e.meaning != w.meaning || e.group != w.group {
+			t.Errorf("entry %d = {%q,%q,%q}, want {%q,%q,%q}", i, e.glyph, e.meaning, e.group, w.glyph, w.meaning, w.group)
+		}
+	}
+}
+
+// TestLegend_NoPhantomGlyphs guards against a legend entry documenting a glyph
+// view.go no longer actually renders. legendEntries is itself defined in
+// view.go, so a bare "does this rune appear in view.go" check is vacuous —
+// every rune in the table is present by construction (the table literal is
+// itself a match). Instead this requires each distinctive rune to appear MORE
+// THAN ONCE: once for the legendEntries table row, and at least once more at a
+// real render site elsewhere in the file. If a render site is deleted (glyph
+// no longer actually drawn) without pruning the corresponding legend entry,
+// the count drops to 1 and this test fails.
+func TestLegend_NoPhantomGlyphs(t *testing.T) {
+	src, err := os.ReadFile("view.go")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Ambiguous as bare substrings — legitimately absent from view.go (the
+	// remote-only "↓ " prefix is emitted in data.go) or too generic to prove
+	// anything by mere presence.
+	skip := map[string]bool{"?": true, "+": true, "↓ ": true}
+	distinctive := []string{"●", "○", "·", "↑", "↓", "✓", "⤳", "✎", "▸"}
+	for _, e := range legendEntries {
+		if skip[e.glyph] {
+			continue
+		}
+		for _, r := range distinctive {
+			if !strings.Contains(e.glyph, r) {
+				continue
+			}
+			if n := strings.Count(string(src), r); n < 2 {
+				t.Errorf("legend entry %q (%s) uses rune %q, found only %d time(s) in view.go — want it also rendered somewhere beyond the legendEntries table row", e.glyph, e.meaning, r, n)
+			}
+		}
+	}
+}
+
+// TestViewLegend_ColumnsAlignByDisplayWidth guards legendRow's contract: pad
+// by the glyph's UNSTYLED DISPLAY WIDTH (lipgloss.Width), never by a naive
+// rune/byte count of the (possibly styled) glyph string. On a real TTY a
+// styled glyph carries ANSI escapes that a naive %-Ns format would count as
+// visible width, breaking column alignment — but a colorless test run can't
+// reproduce that directly, since Render() is a no-op without a forced color
+// profile (see probe below), and forcing one would need the termenv package
+// as a new direct import, which this test deliberately avoids.
+//
+// Instead this exploits a second, TTY-independent place where "display
+// width" and "naive length" diverge: East-Asian wide runes. lipgloss.Width
+// treats "文" as width 2 (it occupies two terminal columns), while a naive
+// rune-count format (e.g. Go's fmt "%-Ns", or len(string) on ASCII) treats
+// it as width 1. A revert to length-based padding therefore still pads wide
+// glyphs incorrectly even with no ANSI in play, which this test can observe
+// deterministically. Verified against a simulated revert
+// (fmt.Sprintf("%-14s", e.style.Render(e.glyph))+e.meaning): the old
+// approach produced glyph-column widths of 14/15/16 for glyphs "●"/"文"/"文字"
+// respectively, while legendRow produces a constant 15 for all three — this
+// test asserts that constant-width property directly against the real
+// legendRow helper.
+func TestViewLegend_ColumnsAlignByDisplayWidth(t *testing.T) {
+	entries := []legendEntry{
+		{"●", stOk, "narrow ascii glyph", "g"},
+		{"文", stBad, "wide cjk glyph", "g"},
+		{"文字", stWarn, "two wide cjk glyphs", "g"},
+		{"↓N", stAccent, "narrow multi-rune glyph", "g"},
+	}
+	colWidth := 0
+	for _, e := range entries {
+		if w := lipgloss.Width(e.glyph); w+1 > colWidth {
+			colWidth = w + 1
+		}
+	}
+
+	var widths []int
+	for _, e := range entries {
+		row := legendRow(e, colWidth)
+		idx := strings.Index(row, e.meaning)
+		if idx < 0 {
+			t.Fatalf("meaning %q not found in row %q", e.meaning, row)
+		}
+		widths = append(widths, lipgloss.Width(row[:idx]))
+	}
+	for i, w := range widths {
+		if w != widths[0] {
+			t.Errorf("entry %d (glyph %q) glyph column visual width = %d, want %d (all columns must align) — got widths %v",
+				i, entries[i].glyph, w, widths[0], widths)
+		}
+	}
+}
+
+func TestViewLegend_Golden(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 40
+	assertGolden(t, "legend", m.viewLegend())
+}
+
+func TestView_ShowLegend_ReturnsLegendOverEitherScreen(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 40
+	m.showLegend = true
+	for _, scr := range []screen{screenPicker, screenDash} {
+		m.screen = scr
+		out := m.View()
+		if !strings.Contains(out, "session attached") {
+			t.Errorf("screen %d: View() with showLegend=true should render the legend, got:\n%s", scr, out)
+		}
+	}
+}
+
+func TestView_Picker_HintMentionsLegend(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 30
+	if out := m.View(); !strings.Contains(out, "? legend") {
+		t.Errorf("picker hint should mention ? legend:\n%s", out)
+	}
+}
+
+func TestView_Dash_HintMentionsLegend(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 30
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	if out := m.View(); !strings.Contains(out, "? legend") {
+		t.Errorf("dashboard hint should mention ? legend:\n%s", out)
 	}
 }

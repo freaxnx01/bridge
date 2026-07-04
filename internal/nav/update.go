@@ -213,6 +213,26 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			return m.updateAgentsKeys(msg)
 		}
+		// Legend overlay: ? toggles it on picker/dashboard, ahead of the
+		// picker/dash key routing below so it works even while the picker
+		// filter input is focused (repo labels never contain "?", so a global
+		// intercept costs nothing; the toggle above already handles "?" while
+		// open, so it never reaches the switch below). While open, esc/q
+		// close it, ctrl+c still quits, and every other key is swallowed so
+		// nothing leaks through to the underlying screen.
+		if k := msg.String(); k == "?" && (m.screen == screenPicker || m.screen == screenDash) {
+			m.showLegend = !m.showLegend
+			return m, nil
+		}
+		if m.showLegend {
+			switch msg.String() {
+			case "ctrl+c":
+				return m, tea.Quit
+			case "esc", "q":
+				m.showLegend = false
+			}
+			return m, nil
+		}
 		if m.screen == screenPicker {
 			return m.updatePicker(msg)
 		}
