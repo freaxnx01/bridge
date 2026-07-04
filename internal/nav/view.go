@@ -215,7 +215,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · q quit"))
+	sections = append(sections, m.hintLine("↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend · q quit"))
 	return strings.Join(sections, "\n")
 }
 
@@ -261,7 +261,7 @@ func (m Model) viewDash() string {
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, rightAt(h))
 	}
 
-	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · esc back · q quit")
+	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · ? legend · esc back · q quit")
 
 	out := header + "\n" + body + "\n" + hint
 	if m.modal != nil {

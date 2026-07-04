@@ -304,3 +304,21 @@ func TestView_ShowLegend_ReturnsLegendOverEitherScreen(t *testing.T) {
 		}
 	}
 }
+
+func TestView_Picker_HintMentionsLegend(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 30
+	if out := m.View(); !strings.Contains(out, "? legend") {
+		t.Errorf("picker hint should mention ? legend:\n%s", out)
+	}
+}
+
+func TestView_Dash_HintMentionsLegend(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 30
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	if out := m.View(); !strings.Contains(out, "? legend") {
+		t.Errorf("dashboard hint should mention ? legend:\n%s", out)
+	}
+}
