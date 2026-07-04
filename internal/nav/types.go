@@ -83,6 +83,10 @@ type dashRow struct {
 	// displayLabel overrides the default "<repo> [<wt>]" session name when set
 	// (issue-launched worktrees carry "#123 [<short title>]"); "" => default.
 	displayLabel string
+	// isBase marks the pinned base-checkout ("main") row: it launches in the repo
+	// root (path == repo.Path) with the bare "<repo>" slot (worktree == ""), the
+	// same session as the shell `bridge open <repo>`. Never a real worktree.
+	isBase bool
 }
 
 // issueRow is one open-issue row in the Screen-2 issues pane.

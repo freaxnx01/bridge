@@ -108,9 +108,10 @@ func registerSlotCmd(slotsPath string, slot core.Slot) tea.Cmd {
 func loadDashRowsCmd(repo core.Repo, slotsPath string) tea.Cmd {
 	return func() tea.Msg {
 		wts, _ := worktree.List(worktree.ExecRunner{}, repo.Path)
+		primary, _ := worktree.Primary(worktree.ExecRunner{}, repo.Path)
 		slots, _ := core.LoadSlots(slotsPath)
 		live, _ := core.LiveSessions()
-		return dashRowsMsg{rows: buildDashRows(repo, wts, slots, live, time.Now())}
+		return dashRowsMsg{rows: buildDashRows(repo, primary.Branch, wts, slots, live, time.Now())}
 	}
 }
 
