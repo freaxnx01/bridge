@@ -348,6 +348,43 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 
+	if m.pickerFocus == focusRecent {
+		rows := m.recentRepos()
+		if !m.recentVisible() || len(rows) == 0 {
+			// section vanished (filter set / repos changed): fall back to filter.
+			m.pickerFocus = focusFilter
+			m.filter.Focus()
+			return m, nil
+		}
+		switch msg.String() {
+		case "up", "k":
+			if m.recentSel <= 0 {
+				m.pickerFocus = focusFilter
+				m.filter.Focus()
+			} else {
+				m.recentSel--
+			}
+		case "down", "j":
+			if m.recentSel < len(rows)-1 {
+				m.recentSel++
+			} else {
+				m.pickerFocus = focusList
+				m.pickerSel = 0
+			}
+		case "home", "g":
+			m.recentSel = 0
+		case "end", "G":
+			m.recentSel = len(rows) - 1
+		case "/":
+			m.pickerFocus = focusFilter
+			m.filter.Focus()
+		case "enter":
+			m.recentSel = clampInt(m.recentSel, 0, len(rows)-1)
+			return m.openRepoRow(rows[m.recentSel])
+		}
+		return m, nil
+	}
+
 	if m.pickerFocus == focusFilter {
 		switch msg.Type {
 		case tea.KeyCtrlN:
@@ -365,9 +402,14 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 		case tea.KeyDown:
-			m.pickerFocus = focusList
 			m.filter.Blur()
-			m.pickerSel = 0
+			if m.recentVisible() {
+				m.pickerFocus = focusRecent
+				m.recentSel = 0
+			} else {
+				m.pickerFocus = focusList
+				m.pickerSel = 0
+			}
 			return m, nil
 		case tea.KeyEnter:
 			if rows := m.visibleRepos(); len(rows) == 1 {
@@ -406,9 +448,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "up", "k":
 		if m.pickerSel <= 0 {
-			// at the top of the list: step back up into the filter
-			m.pickerFocus = focusFilter
-			m.filter.Focus()
+			if m.recentVisible() {
+				m.pickerFocus = focusRecent
+				m.recentSel = len(m.recentRepos()) - 1
+			} else {
+				m.pickerFocus = focusFilter
+				m.filter.Focus()
+			}
 			return m, nil
 		}
 		m.pickerSel--
@@ -824,8 +870,15 @@ func clampInt(v, lo, hi int) int {
 func (m Model) cyclePickerFocus() Model {
 	switch m.pickerFocus {
 	case focusFilter:
-		m.pickerFocus = focusList
 		m.filter.Blur()
+		if m.recentVisible() {
+			m.pickerFocus = focusRecent
+			m.recentSel = clampInt(m.recentSel, 0, len(m.recentRepos())-1)
+		} else {
+			m.pickerFocus = focusList
+		}
+	case focusRecent:
+		m.pickerFocus = focusList
 	case focusList:
 		if len(m.sessions) > 0 {
 			m.pickerFocus = focusSessions
@@ -875,7 +928,15 @@ func (m Model) cyclePickerFocusBack() Model {
 		}
 	case focusSessions:
 		m.pickerFocus = focusList
-	default: // focusList
+	case focusList:
+		if m.recentVisible() {
+			m.pickerFocus = focusRecent
+			m.recentSel = clampInt(m.recentSel, 0, len(m.recentRepos())-1)
+		} else {
+			m.pickerFocus = focusFilter
+			m.filter.Focus()
+		}
+	default: // focusRecent
 		m.pickerFocus = focusFilter
 		m.filter.Focus()
 	}

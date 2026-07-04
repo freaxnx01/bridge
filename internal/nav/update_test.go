@@ -1094,3 +1094,87 @@ func TestUpdate_RecentMsg_StoresPaths(t *testing.T) {
 		t.Errorf("recentMsg should store paths, got %+v", got)
 	}
 }
+
+func recentModel() Model {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{label: "github/public/a", repo: core.Repo{Path: "/r/a"}},
+		{label: "github/public/b", repo: core.Repo{Path: "/r/b"}},
+	}
+	m.mruPaths = []string{"/r/b", "/r/a"} // 2 resolved recent rows
+	return m
+}
+
+func TestUpdatePicker_FilterDown_EntersRecent(t *testing.T) {
+	m := recentModel() // pickerFocus == focusFilter (initial)
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if got.pickerFocus != focusRecent || got.recentSel != 0 {
+		t.Errorf("↓ from filter with Recent visible: focus=%d sel=%d", got.pickerFocus, got.recentSel)
+	}
+}
+
+func TestUpdatePicker_FilterDown_SkipsRecentWhenHidden(t *testing.T) {
+	m := initialModel(Config{}) // no MRU -> Recent hidden
+	m.localRepos = []repoRow{{repo: core.Repo{Path: "/r/a"}}}
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	if out.(Model).pickerFocus != focusList {
+		t.Errorf("↓ from filter with Recent hidden should go to focusList, got %d", out.(Model).pickerFocus)
+	}
+}
+
+func TestFocusRecent_DownPastEnd_GoesToList(t *testing.T) {
+	m := recentModel()
+	m.pickerFocus = focusRecent
+	m.recentSel = 1 // last of 2
+	m.filter.Blur()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyDown})
+	got := out.(Model)
+	if got.pickerFocus != focusList || got.pickerSel != 0 {
+		t.Errorf("↓ past last recent row should land focusList@0, got focus=%d sel=%d", got.pickerFocus, got.pickerSel)
+	}
+}
+
+func TestFocusRecent_UpAtTop_GoesToFilter(t *testing.T) {
+	m := recentModel()
+	m.pickerFocus = focusRecent
+	m.recentSel = 0
+	m.filter.Blur()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyUp})
+	if out.(Model).pickerFocus != focusFilter {
+		t.Errorf("↑ at top of Recent should return to focusFilter, got %d", out.(Model).pickerFocus)
+	}
+}
+
+func TestFocusRecent_Enter_OpensDashboard(t *testing.T) {
+	m := recentModel()
+	m.pickerFocus = focusRecent
+	m.recentSel = 0 // -> /r/b
+	m.filter.Blur()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	got := out.(Model)
+	if got.screen != screenDash || got.repo.Path != "/r/b" {
+		t.Errorf("enter on recent row should enter dashboard for /r/b, got screen=%d repo=%q", got.screen, got.repo.Path)
+	}
+}
+
+func TestCyclePickerFocus_IncludesRecentWhenVisible(t *testing.T) {
+	m := recentModel() // focusFilter
+	m = m.cyclePickerFocus()
+	if m.pickerFocus != focusRecent {
+		t.Fatalf("tab from filter should reach focusRecent, got %d", m.pickerFocus)
+	}
+	m = m.cyclePickerFocus()
+	if m.pickerFocus != focusList {
+		t.Errorf("tab from recent should reach focusList, got %d", m.pickerFocus)
+	}
+}
+
+func TestCyclePickerFocus_SkipsRecentWhenHidden(t *testing.T) {
+	m := recentModel()
+	m.filter.SetValue("x") // hides Recent
+	m = m.cyclePickerFocus()
+	if m.pickerFocus == focusRecent {
+		t.Errorf("tab must skip focusRecent when the section is hidden")
+	}
+}
