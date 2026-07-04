@@ -13,6 +13,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/freaxnx01/bridge/internal/agentview"
 	"github.com/freaxnx01/bridge/internal/api"
 	"github.com/freaxnx01/bridge/internal/capture"
 	"github.com/freaxnx01/bridge/internal/core"
@@ -120,11 +121,18 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		Notify: notify,
 	}
 
+	agentsH := &api.AgentsHandler{
+		List: func(ctx context.Context) ([]agentview.Session, error) {
+			return agentview.List(ctx, agentview.ExecRunner{})
+		},
+	}
+
 	apiMux := http.NewServeMux()
 	apiMux.Handle("/api/overview", overviewH)
 	apiMux.Handle("/api/repos/", reposH)
 	apiMux.Handle("/api/repos", reposH)
 	apiMux.Handle("/api/capture/", captureH)
+	apiMux.Handle("/api/agents", agentsH)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.
 	go func() {
@@ -136,6 +144,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 				return
 			case <-t.C:
 				hub.Broadcast(web.Event{Type: "overview-updated"})
+				hub.Broadcast(web.Event{Type: "agents-updated"})
 			}
 		}
 	}()
