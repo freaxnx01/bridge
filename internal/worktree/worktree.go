@@ -48,6 +48,25 @@ func List(r Runner, repoPath string) ([]Entry, error) {
 	return entries, nil
 }
 
+// Primary returns the repo's primary working tree (repoPath itself): its path
+// and short branch name ("" when HEAD is detached). It is the counterpart to
+// List, which excludes the primary — nav needs the primary's branch to label the
+// base-checkout row. A non-nil error means repoPath is not a usable git repo, or
+// its primary working tree could not be found in the porcelain output.
+func Primary(r Runner, repoPath string) (Entry, error) {
+	out, err := r.Run(repoPath, "worktree", "list", "--porcelain")
+	if err != nil {
+		return Entry{}, fmt.Errorf("git worktree list: %w", err)
+	}
+	main := filepath.Clean(repoPath)
+	for _, e := range parsePorcelain(out) {
+		if filepath.Clean(e.path) == main {
+			return Entry{Path: e.path, Branch: e.branch}, nil
+		}
+	}
+	return Entry{}, fmt.Errorf("primary working tree not found for %s", repoPath)
+}
+
 // Resolve returns the directory to launch in for worktree wt of the repo at
 // repoPath. It returns created=true when it had to make the worktree. A
 // non-nil error means repoPath is not a usable git repo (caller may fall back

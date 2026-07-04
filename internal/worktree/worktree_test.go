@@ -285,3 +285,33 @@ func TestList_ParsesPorcelain_ExcludesPrimary(t *testing.T) {
 		t.Errorf("entry = %+v, want path=/repo/.worktrees/fix branch=worktree-fix", got[0])
 	}
 }
+
+func TestPrimary_ReturnsRepoRootBranch(t *testing.T) {
+	r := &fakeRunner{listOut: "worktree /r\nHEAD abc\nbranch refs/heads/main\n\n" +
+		"worktree /r/.worktrees/fix\nHEAD def\nbranch refs/heads/worktree-fix\n\n"}
+	got, err := Primary(r, "/r")
+	if err != nil {
+		t.Fatalf("Primary: %v", err)
+	}
+	if got.Path != "/r" || got.Branch != "main" {
+		t.Errorf("Primary = %+v, want {/r main}", got)
+	}
+}
+
+func TestPrimary_DetachedHead_EmptyBranch(t *testing.T) {
+	r := &fakeRunner{listOut: "worktree /r\nHEAD abc\ndetached\n\n"}
+	got, err := Primary(r, "/r")
+	if err != nil {
+		t.Fatalf("Primary: %v", err)
+	}
+	if got.Path != "/r" || got.Branch != "" {
+		t.Errorf("Primary = %+v, want {/r <empty>}", got)
+	}
+}
+
+func TestPrimary_NotAGitRepo_Errors(t *testing.T) {
+	r := &fakeRunner{listErr: errors.New("not a git repository")}
+	if _, err := Primary(r, "/r"); err == nil {
+		t.Error("Primary should error when git worktree list fails")
+	}
+}
