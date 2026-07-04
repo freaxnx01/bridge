@@ -304,3 +304,84 @@ func TestParseDirtyStatus_UpstreamGrammar(t *testing.T) {
 		})
 	}
 }
+
+func TestFilterRepos_MultiTerm(t *testing.T) {
+	rows := []repoRow{
+		{label: "ado/ASSL Customer standard package/archiverestapi"},
+		{label: "github/public/bridge"},
+		{label: "github/private/archive-tool"},
+		{label: "forgejo/notes"},
+	}
+	tests := []struct {
+		name  string
+		query string
+		want  []string // wanted labels, in order
+	}{
+		{"empty returns all", "", []string{
+			"ado/ASSL Customer standard package/archiverestapi",
+			"github/public/bridge",
+			"github/private/archive-tool",
+			"forgejo/notes",
+		}},
+		{"whitespace only returns all", "   ", []string{
+			"ado/ASSL Customer standard package/archiverestapi",
+			"github/public/bridge",
+			"github/private/archive-tool",
+			"forgejo/notes",
+		}},
+		{"single term substring", "bridge", []string{"github/public/bridge"}},
+		{"single term no match", "zzz", nil},
+		// The headline issue case: two independent fragments, case-insensitive.
+		{"multi-term AND across path", "assl archive", []string{
+			"ado/ASSL Customer standard package/archiverestapi",
+		}},
+		{"order independent", "archive assl", []string{
+			"ado/ASSL Customer standard package/archiverestapi",
+		}},
+		{"one term missing excludes row", "archive bridge", nil},
+		{"collapsed internal whitespace", "assl   archive", []string{
+			"ado/ASSL Customer standard package/archiverestapi",
+		}},
+		{"term matches two rows narrowed by second", "archive tool", []string{
+			"github/private/archive-tool",
+		}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := filterRepos(rows, tt.query)
+			var gotLabels []string
+			for _, r := range got {
+				gotLabels = append(gotLabels, r.label)
+			}
+			if len(gotLabels) != len(tt.want) {
+				t.Fatalf("filterRepos(%q) = %v, want %v", tt.query, gotLabels, tt.want)
+			}
+			for i := range tt.want {
+				if gotLabels[i] != tt.want[i] {
+					t.Errorf("filterRepos(%q)[%d] = %q, want %q", tt.query, i, gotLabels[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
+
+func TestMatchesAllTerms(t *testing.T) {
+	label := "ado/assl customer standard package/archiverestapi" // already lower-cased
+	tests := []struct {
+		name  string
+		terms []string
+		want  bool
+	}{
+		{"all present", []string{"assl", "archive"}, true},
+		{"one missing", []string{"assl", "zzz"}, false},
+		{"single present", []string{"archiverestapi"}, true},
+		{"empty terms vacuously true", nil, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := matchesAllTerms(label, tt.terms); got != tt.want {
+				t.Errorf("matchesAllTerms(%v) = %v, want %v", tt.terms, got, tt.want)
+			}
+		})
+	}
+}

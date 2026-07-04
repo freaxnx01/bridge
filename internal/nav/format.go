@@ -117,16 +117,28 @@ func ownerQualifiedLabel(r repoRow) string {
 	return display
 }
 
-// filterRepos keeps rows whose label contains q (case-insensitive). Empty q
-// returns all rows. Result is a new slice; input is not mutated.
+// matchesAllTerms reports whether every term is a substring of labelLower. Both
+// labelLower and terms must already be lower-cased. No terms is vacuously true.
+func matchesAllTerms(labelLower string, terms []string) bool {
+	for _, t := range terms {
+		if !strings.Contains(labelLower, t) {
+			return false
+		}
+	}
+	return true
+}
+
+// filterRepos keeps rows whose label contains every whitespace-separated term in
+// q (case-insensitive, order-independent AND). An empty/whitespace-only query
+// returns all rows; a single term behaves like a plain substring filter.
 func filterRepos(rows []repoRow, q string) []repoRow {
 	if strings.TrimSpace(q) == "" {
 		return rows
 	}
-	needle := strings.ToLower(q)
+	terms := strings.Fields(strings.ToLower(q))
 	out := make([]repoRow, 0, len(rows))
 	for _, r := range rows {
-		if strings.Contains(strings.ToLower(r.label), needle) {
+		if matchesAllTerms(strings.ToLower(r.label), terms) {
 			out = append(out, r)
 		}
 	}
