@@ -84,6 +84,56 @@ func TestLaunchArgvFor_InsideTmux_NestsNotSwitchClient(t *testing.T) {
 	}
 }
 
+func TestLaunchArgvFor_BaseRow_BareSlotInRepoRoot(t *testing.T) {
+	t.Setenv("TMUX", "") // deterministic non-nested LaunchArgv path
+	m := initialModel(Config{DefaultAgent: "claude"})
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	row := dashRow{isBase: true, worktree: "", path: "/r"} // no live session
+	argv, err := m.launchArgvFor(row)
+	if err != nil {
+		t.Fatalf("launchArgvFor: %v", err)
+	}
+	joined := strings.Join(argv, " ")
+	if argv[0] != "tmux" || argv[1] != "new-session" {
+		t.Fatalf("argv = %v, want a tmux new-session launch", argv)
+	}
+	// Launches in the repo root, not a worktree dir.
+	if !strings.Contains(joined, "/r") || strings.Contains(joined, ".worktrees") {
+		t.Errorf("argv = %v, want repo root /r and no worktree dir", argv)
+	}
+	// Bare "<repo>" session name — same as `bridge open bridge` (no -w).
+	if !strings.Contains(joined, "bridge") || strings.Contains(joined, "bridge-wt-") {
+		t.Errorf("argv = %v, want bare session name bridge (not bridge-wt-…)", argv)
+	}
+}
+
+func TestLaunchPlan_BaseRow_SlotIsBareRepo(t *testing.T) {
+	t.Setenv("TMUX", "")
+	m := initialModel(Config{DefaultAgent: "claude"})
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	_, slot, _, err := m.launchPlan(dashRow{isBase: true, worktree: "", path: "/r"})
+	if err != nil {
+		t.Fatalf("launchPlan: %v", err)
+	}
+	if slot != core.SlotID("bridge", "") || slot != "bridge" {
+		t.Errorf("base slot = %q, want bare %q", slot, core.SlotID("bridge", ""))
+	}
+}
+
+func TestLaunchArgvFor_BaseRow_LiveSession_Attaches(t *testing.T) {
+	m := initialModel(Config{})
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	row := dashRow{isBase: true, worktree: "", path: "/r", hasSession: true, slotID: "bridge"}
+	argv, err := m.launchArgvFor(row)
+	if err != nil {
+		t.Fatalf("launchArgvFor: %v", err)
+	}
+	want := []string{"tmux", "attach-session", "-t", "bridge"}
+	if strings.Join(argv, " ") != strings.Join(want, " ") {
+		t.Errorf("argv = %v, want attach to bare session %v", argv, want)
+	}
+}
+
 func TestTmuxUnset_RemovesTmuxVars(t *testing.T) {
 	got := tmuxUnset([]string{"PATH=/bin", "TMUX=/tmp/x,1,0", "HOME=/h", "TMUX_PANE=%3"})
 	for _, e := range got {
