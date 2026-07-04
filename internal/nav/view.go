@@ -185,7 +185,7 @@ func (m Model) recentBlock() (string, int) {
 		}
 	}
 	s := b.String()
-	return s + "\n", lipgloss.Height(s) + 1
+	return s + "\n", lipgloss.Height(s)
 }
 
 func (m Model) viewPicker() string {
