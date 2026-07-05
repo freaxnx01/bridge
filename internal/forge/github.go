@@ -57,6 +57,7 @@ type ghRepo struct {
 	DefaultBranch string    `json:"default_branch"`
 	Description   string    `json:"description"`
 	Topics        []string  `json:"topics"`
+	Archived      bool      `json:"archived"`
 	Visibility    string    `json:"visibility"`
 	HTMLURL       string    `json:"html_url"`
 	SSHURL        string    `json:"ssh_url"`
@@ -147,6 +148,9 @@ func (c *GithubClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
+		if r.Archived {
+			continue
+		}
 		o := r.Owner.Login
 		if o == "" {
 			o = owner

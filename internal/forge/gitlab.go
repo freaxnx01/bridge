@@ -52,6 +52,7 @@ type glRepo struct {
 	Visibility     string    `json:"visibility"`
 	WebURL         string    `json:"web_url"`
 	SSHURLToRepo   string    `json:"ssh_url_to_repo"`
+	Archived       bool      `json:"archived"`
 	LastActivityAt time.Time `json:"last_activity_at"`
 }
 
@@ -62,6 +63,9 @@ func (c *GitlabClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
+		if r.Archived {
+			continue
+		}
 		out = append(out, RepoRef{
 			Forge: "gitlab", Owner: owner, Name: r.Name,
 			DefaultBranch: r.DefaultBranch, Description: r.Description,

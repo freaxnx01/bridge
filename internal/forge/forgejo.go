@@ -47,6 +47,7 @@ type fjRepo struct {
 	DefaultBranch string    `json:"default_branch"`
 	Description   string    `json:"description"`
 	Private       bool      `json:"private"`
+	Archived      bool      `json:"archived"`
 	HTMLURL       string    `json:"html_url"`
 	SSHURL        string    `json:"ssh_url"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -128,6 +129,9 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
+		if r.Archived {
+			continue
+		}
 		vis := "public"
 		if r.Private {
 			vis = "private"

@@ -18,7 +18,7 @@ func TestForgejoListRepos(t *testing.T) {
 		if r.Header.Get("Authorization") != "token tok" {
 			t.Errorf("auth %q", r.Header.Get("Authorization"))
 		}
-		w.Write([]byte(`[{"name":"fj","default_branch":"main","description":"d","private":false,"html_url":"u","ssh_url":"s","updated_at":"2026-05-01T00:00:00Z"}]`))
+		w.Write([]byte(`[{"name":"fj","default_branch":"main","description":"d","private":false,"html_url":"u","ssh_url":"s","updated_at":"2026-05-01T00:00:00Z"},{"name":"archived-repo","archived":true,"private":false}]`))
 	}))
 	defer srv.Close()
 	c := NewForgejoClient("tok", srv.URL)
@@ -28,6 +28,11 @@ func TestForgejoListRepos(t *testing.T) {
 	}
 	if len(repos) != 1 || repos[0].Forge != "forgejo" || repos[0].Visibility != "public" {
 		t.Errorf("%+v", repos)
+	}
+	for _, r := range repos {
+		if r.Name == "archived-repo" {
+			t.Errorf("archived repo should be filtered out: %+v", repos)
+		}
 	}
 }
 
