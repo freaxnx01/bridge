@@ -9,7 +9,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/overview"
 )
 
-// fakeForge is a hand-rolled forgeClient. Each field is the canned result for
+// fakeForge is a hand-rolled ForgeClient. Each field is the canned result for
 // the corresponding method; nil funcs mean "not expected".
 type fakeForge struct {
 	name         string
@@ -38,7 +38,7 @@ func (f *fakeForge) CreateIssue(_ context.Context, owner, repo, title, _ string)
 func depsWith(clients map[string]*fakeForge, owners []Target) Deps {
 	return Deps{
 		DefaultOwners: owners,
-		ClientFor: func(forgeName, _ string) forgeClient {
+		ClientFor: func(forgeName, _ string) ForgeClient {
 			c, ok := clients[forgeName]
 			if !ok {
 				return nil

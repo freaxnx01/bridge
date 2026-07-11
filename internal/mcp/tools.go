@@ -19,9 +19,9 @@ type Target struct {
 	Owner string
 }
 
-// forgeClient is the consumer-side interface the MCP tools need. Both
+// ForgeClient is the consumer-side interface the MCP tools need. Both
 // *forge.GithubClient and *forge.ForgejoClient satisfy it structurally.
-type forgeClient interface {
+type ForgeClient interface {
 	Name() string
 	ListRepos(ctx context.Context, owner string) ([]forge.RepoRef, error)
 	GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error)
@@ -34,7 +34,7 @@ type forgeClient interface {
 type Deps struct {
 	ReadOnly      bool
 	DefaultOwners []Target
-	ClientFor     func(forgeName, owner string) forgeClient
+	ClientFor     func(forgeName, owner string) ForgeClient
 	BuildOverview func(ctx context.Context) (overview.Snapshot, error)
 }
 
