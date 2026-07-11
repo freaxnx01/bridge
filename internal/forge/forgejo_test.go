@@ -123,3 +123,34 @@ func TestForgejoCreateIssue(t *testing.T) {
 		t.Errorf("issue: %+v", is)
 	}
 }
+
+func TestForgejoGetFile_FoundAndAbsent(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/repos/freax/notes/contents/ideas.md" {
+			if r.Header.Get("Authorization") != "token tok" {
+				t.Errorf("auth %q", r.Header.Get("Authorization"))
+			}
+			w.Header().Set("Content-Type", "application/json")
+			// base64 of "# Ideas\n\n- one\n"
+			w.Write([]byte(`{"sha":"fj123","encoding":"base64","content":"IyBJZGVhcwoKLSBvbmUK"}`))
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	content, sha, found, err := c.GetFile(context.Background(), "freax", "notes", "ideas.md")
+	if err != nil || !found {
+		t.Fatalf("GetFile: found=%v err=%v", found, err)
+	}
+	if sha != "fj123" || string(content) != "# Ideas\n\n- one\n" {
+		t.Errorf("got sha=%q content=%q", sha, string(content))
+	}
+
+	_, _, found, err = c.GetFile(context.Background(), "freax", "notes", "missing.md")
+	if err != nil || found {
+		t.Errorf("absent file: found=%v err=%v (want found=false, nil err)", found, err)
+	}
+}

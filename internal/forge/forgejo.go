@@ -3,10 +3,12 @@ package forge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 )
 
@@ -144,6 +146,44 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 		})
 	}
 	return out, nil
+}
+
+// GetFile fetches a file's decoded content and blob sha via the Forgejo/Gitea
+// Contents API. found is false (with nil error) when the file does not exist
+// (404). Content is read from the repository's default branch.
+func (c *ForgejoClient) GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error) {
+	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s", c.baseURL, owner, repo, path)
+	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	if err != nil {
+		return nil, "", false, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "token "+c.token)
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, "", false, nil
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, "", false, fmt.Errorf("forgejo get %s: %s: %s", path, resp.Status, string(b))
+	}
+	var fc struct {
+		Content string `json:"content"`
+		SHA     string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&fc); err != nil {
+		return nil, "", false, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(fc.Content, "\n", ""))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return raw, fc.SHA, true, nil
 }
 
 type fjIssue struct {
