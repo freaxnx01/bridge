@@ -28,12 +28,22 @@ func NewForgejoClient(token, baseURL string) *ForgejoClient {
 
 func (c *ForgejoClient) Name() string { return "forgejo" }
 
-func (c *ForgejoClient) get(ctx context.Context, path string, out any) error {
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
+// doGet issues an authenticated GET request against path and returns the raw
+// response. Callers are responsible for closing the body and interpreting
+// the status code (get() and GetFile diverge only in what they do with it).
+func (c *ForgejoClient) doGet(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "token "+c.token)
 	}
-	resp, err := c.http.Do(req)
+	return c.http.Do(req)
+}
+
+func (c *ForgejoClient) get(ctx context.Context, path string, out any) error {
+	resp, err := c.doGet(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -153,15 +163,8 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 // Contents API. found is false (with nil error) when the file does not exist
 // (404). Content is read from the repository's default branch.
 func (c *ForgejoClient) GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error) {
-	endpoint := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s", c.baseURL, url.PathEscape(owner), url.PathEscape(repo), escapePathSegments(path))
-	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
-	if err != nil {
-		return nil, "", false, err
-	}
-	if c.token != "" {
-		req.Header.Set("Authorization", "token "+c.token)
-	}
-	resp, err := c.http.Do(req)
+	endpoint := fmt.Sprintf("/api/v1/repos/%s/%s/contents/%s", url.PathEscape(owner), url.PathEscape(repo), escapePathSegments(path))
+	resp, err := c.doGet(ctx, endpoint)
 	if err != nil {
 		return nil, "", false, err
 	}
