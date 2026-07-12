@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- WebUI: static **Architecture** section showing how `ai-instructions`, `bridge`, and `agent-pipeline` relate (convention sync + issue-label-to-PR flow), with an inline SVG diagram.
+
 ### Changed
 
 - Default repo-discovery base is now **`~/repos`** (was `~/projects/repos`). Only affects setups relying on the built-in default with no override; the precedence chain is unchanged (`-B`/`--base` → `BRIDGE_BASE` → `BRIDGE_REPOS_ROOT` → `$XDG_CONFIG_HOME/bridge/base` → default), so anyone pointing bridge elsewhere via env/flag/config file is unaffected.
