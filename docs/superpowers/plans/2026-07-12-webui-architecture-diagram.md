@@ -2,6 +2,14 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+## Status (2026-07-12)
+
+- **Task 1:** implemented + task-reviewed clean (commit `f95ac52`). Ledger: `.superpowers/sdd/progress.md`.
+- **Task 2:** implemented (commit `5de67a3`), **not yet task-reviewed**. Implementer reported `DONE_WITH_CONCERNS` — two deviations from this plan's verbatim code need review/adjudication before the task can be marked complete:
+  1. `web/src/App.test.js` uses `expect(heading).toBeTruthy()` instead of the plan's `toBeInTheDocument()` — `@testing-library/jest-dom` isn't installed and adding it would violate the "no new dependency" constraint. `getByRole` already throws if the element is missing, so this is likely equivalent, but a reviewer should confirm.
+  2. `web/vite.config.js` was modified (not in this plan's file list) to add `resolve: { conditions: process.env.VITEST ? ['browser'] : [] }` — needed to make Svelte 5 components mount under Vitest/jsdom at all (`lifecycle_function_unavailable` error otherwise). Full report: `.superpowers/sdd/task-2-report.md`.
+- **Next step:** dispatch the Task 2 reviewer subagent (spec + quality) per `superpowers:subagent-driven-development`'s `task-reviewer-prompt.md`, using brief `.superpowers/sdd/task-2-brief.md`, report `.superpowers/sdd/task-2-report.md`, and a review package generated via `scripts/review-package f95ac52 5de67a3`. Resolve the two concerns above through that review loop (dispatch a fix subagent if the reviewer finds issues). Then run the final whole-branch review, then `superpowers:finishing-a-development-branch`. This work is also part of `/gh:enrich 200` (issue #200) — after the branch is finished, push spec+plan and rewrite issue #200's body with AC + links to this spec/plan, per `.claude/handoff.md`.
+
 **Goal:** Add a static "Architecture" section to the Bridge WebUI (`web/src/App.svelte`) with an inline SVG diagram showing how `ai-instructions`, `bridge`, and `agent-pipeline` relate (convention sync + issue-label-to-PR flow).
 
 **Architecture:** A hand-authored SVG file (`web/src/lib/architecture.svg`) is read at build time and inlined directly into `App.svelte`'s markup via Vite's `?raw` import (so it's real inline `<svg>` markup, not an `<img src>`, and inherits page text color via `currentColor`). A new `<section>` with an `<h2>Architecture</h2>` heading is added below the existing "Agents" section.
@@ -25,7 +33,7 @@
 **Interfaces:**
 - Produces: a static SVG file with a top-level `<svg>` element, imported as a raw string by Task 2 via `import architectureSvg from './lib/architecture.svg?raw'`.
 
-- [ ] **Step 1: Write the SVG file**
+- [x] **Step 1: Write the SVG file**
 
 Create `web/src/lib/architecture.svg`:
 
@@ -75,12 +83,12 @@ Create `web/src/lib/architecture.svg`:
 </svg>
 ```
 
-- [ ] **Step 2: Verify the file is well-formed XML**
+- [x] **Step 2: Verify the file is well-formed XML**
 
 Run: `node -e "require('fs').readFileSync('web/src/lib/architecture.svg','utf8').match(/<svg[\s\S]*<\/svg>/) ? console.log('ok') : process.exit(1)"`
 Expected: prints `ok`
 
-- [ ] **Step 3: Commit**
+- [x] **Step 3: Commit**
 
 ```bash
 git add web/src/lib/architecture.svg
@@ -99,7 +107,7 @@ git commit -m "feat(web): add architecture diagram SVG asset"
 - Consumes: `web/src/lib/architecture.svg` (raw string import from Task 1) via `import architectureSvg from './lib/architecture.svg?raw'`.
 - Produces: a `<section>` in `App.svelte`'s rendered output containing an `<h2>` with text `Architecture` followed by the inlined `<svg>` markup — this is the full surface other tasks/tests rely on; there are no further tasks in this plan.
 
-- [ ] **Step 1: Write the failing test**
+- [x] **Step 1: Write the failing test** (see concern 1 above re: toBeInTheDocument)
 
 Create `web/src/App.test.js`:
 
@@ -132,12 +140,12 @@ describe('App', () => {
 })
 ```
 
-- [ ] **Step 2: Run test to verify it fails**
+- [x] **Step 2: Run test to verify it fails**
 
 Run: `cd web && npx vitest run App.test.js`
 Expected: FAIL — no element with role "heading" and name "Architecture" found
 
-- [ ] **Step 3: Add the Architecture section to App.svelte**
+- [x] **Step 3: Add the Architecture section to App.svelte**
 
 Edit `web/src/App.svelte` — add the import at the top of the `<script>` block (after the existing imports):
 
@@ -155,22 +163,22 @@ Add a new `<section>` after the closing `</section>` of the Agents section (befo
   </section>
 ```
 
-- [ ] **Step 4: Run test to verify it passes**
+- [x] **Step 4: Run test to verify it passes**
 
 Run: `cd web && npx vitest run App.test.js`
 Expected: PASS
 
-- [ ] **Step 5: Run the full web test suite**
+- [x] **Step 5: Run the full web test suite**
 
 Run: `cd web && npx vitest run`
 Expected: all tests pass (including the pre-existing `sse.test.js`)
 
-- [ ] **Step 6: Manual visual verification**
+- [x] **Step 6: Manual visual verification** (verified via dev-server module fetch, not an interactive browser)
 
 Run: `cd web && npm run dev`, open the printed local URL in a browser.
 Expected: an "Architecture" section renders below "Agents" showing the four-box diagram (ai-instructions, bridge, agent-pipeline, GitHub/Forgejo) with labeled arrows, using the page's default text color; the existing Agents section layout is unchanged.
 
-- [ ] **Step 7: Commit**
+- [x] **Step 7: Commit** (also touched `web/vite.config.js` — see concern 2 above)
 
 ```bash
 git add web/src/App.svelte web/src/App.test.js
