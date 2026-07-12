@@ -115,8 +115,9 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		WriteTimeout:      120 * time.Second,
-		IdleTimeout:       120 * time.Second,
+		// WriteTimeout is intentionally 0: SSE connections are long-lived streams
+		// and a write deadline would terminate them prematurely.
+		IdleTimeout: 120 * time.Second,
 	}
 
 	slog.Info("Bridge MCP", "addr", "http://"+addr, "read_only", deps.ReadOnly, "auth", !mcpNoAuth)
