@@ -8,8 +8,64 @@ import (
 
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/freaxnx01/bridge/internal/forge"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
 )
+
+// fakeResolvedClient is a minimal forge.Client/imcp.ForgeClient double used to
+// verify newCachingClientResolver's caching behavior without touching real
+// tokens or the filesystem.
+type fakeResolvedClient struct{}
+
+func (fakeResolvedClient) Name() string { return "fake" }
+func (fakeResolvedClient) ListRepos(context.Context, string) ([]forge.RepoRef, error) {
+	return nil, nil
+}
+func (fakeResolvedClient) ListOpenIssues(context.Context, string, string) ([]forge.Issue, error) {
+	return nil, nil
+}
+func (fakeResolvedClient) GetFile(context.Context, string, string, string) ([]byte, string, bool, error) {
+	return nil, "", false, nil
+}
+func (fakeResolvedClient) CreateIssue(context.Context, string, string, string, string) (forge.Issue, error) {
+	return forge.Issue{}, nil
+}
+
+func TestNewCachingClientResolver_ResolvesOncePerKey(t *testing.T) {
+	calls := 0
+	resolve := func(forgeName, owner string) forge.Client {
+		calls++
+		if forgeName == "github" && owner == "acme" {
+			return fakeResolvedClient{}
+		}
+		return nil
+	}
+	cached := newCachingClientResolver(resolve)
+
+	if c := cached("github", "acme"); c == nil {
+		t.Fatal("want non-nil client for configured target")
+	}
+	if c := cached("github", "acme"); c == nil {
+		t.Fatal("want non-nil client on second call")
+	}
+	if calls != 1 {
+		t.Fatalf("want resolve called once for a repeated key, got %d", calls)
+	}
+
+	if c := cached("forgejo", "freax"); c != nil {
+		t.Fatalf("want nil client for unconfigured target, got %v", c)
+	}
+	if calls != 2 {
+		t.Fatalf("want resolve called for a new key, got %d", calls)
+	}
+
+	if c := cached("forgejo", "freax"); c != nil {
+		t.Fatalf("want nil client on repeated call, got %v", c)
+	}
+	if calls != 2 {
+		t.Fatalf("want a nil result cached too (no repeat resolve), got %d calls", calls)
+	}
+}
 
 func TestParseOwners(t *testing.T) {
 	tests := []struct {

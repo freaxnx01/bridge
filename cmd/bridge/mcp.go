@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -111,18 +112,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	deps := imcp.Deps{
 		ReadOnly:      mcpReadOnly || os.Getenv("BRIDGE_MCP_READONLY") == "1",
 		DefaultOwners: parseOwners(os.Getenv("BRIDGE_MCP_OWNERS")),
-		ClientFor: func(forgeName, owner string) imcp.ForgeClient {
-			c := clientForMCP(roots)(forgeName, owner)
-			if c == nil {
-				return nil // typed-nil pitfall: return untyped nil, not a nil *forge.GithubClient
-			}
-			// c is a forge.Client; both concrete forge clients also implement imcp.ForgeClient.
-			fc, ok := c.(imcp.ForgeClient)
-			if !ok {
-				return nil
-			}
-			return fc
-		},
+		ClientFor:     newCachingClientResolver(clientForMCP(roots)),
 		BuildOverview: buildOverviewSnapshot,
 	}
 
@@ -179,6 +169,44 @@ func clientForMCP(roots []string) func(forgeName, owner string) forge.Client {
 			return forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API"))
 		}
 		return nil
+	}
+}
+
+// newCachingClientResolver wraps resolve (typically clientForMCP(roots)) with
+// a resolve-once-per-(forge,owner) cache and adapts the returned forge.Client
+// to imcp.ForgeClient. Token resolution walks the filesystem and spawns a
+// direnv subprocess per call, so caching (including caching an unconfigured
+// target's nil result) avoids paying that cost on every tool invocation for
+// the life of the process.
+func newCachingClientResolver(resolve func(forgeName, owner string) forge.Client) func(forgeName, owner string) imcp.ForgeClient {
+	var (
+		mu    sync.Mutex
+		cache = map[string]imcp.ForgeClient{}
+	)
+	return func(forgeName, owner string) imcp.ForgeClient {
+		key := forgeName + ":" + owner
+
+		mu.Lock()
+		if fc, ok := cache[key]; ok {
+			mu.Unlock()
+			return fc
+		}
+		mu.Unlock()
+
+		var fc imcp.ForgeClient
+		if c := resolve(forgeName, owner); c != nil {
+			// c is a forge.Client; the concrete forge clients also implement
+			// imcp.ForgeClient. Assign only on a successful assertion so a nil
+			// concrete pointer never gets boxed into a non-nil interface.
+			if asserted, ok := c.(imcp.ForgeClient); ok {
+				fc = asserted
+			}
+		}
+
+		mu.Lock()
+		cache[key] = fc
+		mu.Unlock()
+		return fc
 	}
 }
 
