@@ -3,6 +3,9 @@ import { svelte } from '@sveltejs/vite-plugin-svelte'
 
 export default defineConfig({
   plugins: [svelte()],
+  resolve: {
+    conditions: process.env.VITEST ? ['browser'] : [],
+  },
   build: {
     // Output goes to internal/web/dist so go:embed picks it up.
     // Vite will NOT empty the outDir because it's outside the Vite root (web/).

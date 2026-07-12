@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { loadRepos, repos } from './lib/stores/repos.js';
   import { loadAgents, agents } from './lib/stores/agents.js';
+  import architectureSvg from './lib/architecture.svg?raw';
 
   onMount(() => { loadRepos(); loadAgents(); });
 
@@ -40,5 +41,11 @@
         {/each}
       </ul>
     {/if}
+  </section>
+
+  <section>
+    <h2>Architecture</h2>
+    <p>How ai-instructions, bridge, and agent-pipeline fit together:</p>
+    {@html architectureSvg}
   </section>
 </main>
