@@ -1,5 +1,12 @@
 # Bridge TODO
 
+## Bridge MCP endpoint (#195, merged 2026-07-12)
+
+- [ ] Cheat sheet for starting/operating `bridge mcp serve` and integrating
+      it with Claude Code / Claude Desktop: [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md)
+- [ ] `bridge mcp serve` systemd unit for always-on access (same follow-up as
+      the WebUI one below — could share a unit-file pattern)
+
 ## Bridge WebUI — Plan 2 (Svelte UI Components)
 
 Plan 1 (backend + scaffold) is merged on `main` as of 2026-06-25.
