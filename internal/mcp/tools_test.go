@@ -18,7 +18,6 @@ type fakeForge struct {
 	file         []byte
 	sha          string
 	found        bool
-	created      forge.Issue
 	createCalled *int
 }
 
