@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **`bridge mcp serve`** — a self-hosted, remote (Streamable HTTP) MCP endpoint exposing four cross-forge tools (`list_repos`, `read_file`, `create_issue`, `cross_forge_status`) over GitHub + Forgejo, guarded by a static `BRIDGE_MCP_TOKEN` bearer. `--read-only` omits the write tool by construction; `create_issue` returns a draft unless called with `confirm: true`. `list_repos` degrades gracefully — a target that's unconfigured or fails is reported in a `warnings` field rather than failing the whole call. `--no-auth` requires a loopback `--host`. (#195)
+
 ### Changed
 
 - Default repo-discovery base is now **`~/repos`** (was `~/projects/repos`). Only affects setups relying on the built-in default with no override; the precedence chain is unchanged (`-B`/`--base` → `BRIDGE_BASE` → `BRIDGE_REPOS_ROOT` → `$XDG_CONFIG_HOME/bridge/base` → default), so anyone pointing bridge elsewhere via env/flag/config file is unaffected.

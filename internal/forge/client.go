@@ -3,11 +3,24 @@ package forge
 import (
 	"context"
 	"errors"
+	"net/url"
+	"strings"
 	"time"
 )
 
 // ErrRepoExists is returned by CreateRepo when the repo already exists.
 var ErrRepoExists = errors.New("repo already exists")
+
+// escapePathSegments percent-escapes each "/"-delimited segment of p so a
+// segment cannot reinterpret the request URL (inject a query string,
+// fragment, or extra path segment) while preserving p's directory structure.
+func escapePathSegments(p string) string {
+	segments := strings.Split(p, "/")
+	for i, s := range segments {
+		segments[i] = url.PathEscape(s)
+	}
+	return strings.Join(segments, "/")
+}
 
 type RepoRef struct {
 	Forge         string    `json:"forge"`

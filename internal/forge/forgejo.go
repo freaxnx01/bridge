@@ -3,10 +3,13 @@ package forge
 import (
 	"bytes"
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strings"
 	"time"
 )
 
@@ -25,12 +28,22 @@ func NewForgejoClient(token, baseURL string) *ForgejoClient {
 
 func (c *ForgejoClient) Name() string { return "forgejo" }
 
-func (c *ForgejoClient) get(ctx context.Context, path string, out any) error {
-	req, _ := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
+// doGet issues an authenticated GET request against path and returns the raw
+// response. Callers are responsible for closing the body and interpreting
+// the status code (get() and GetFile diverge only in what they do with it).
+func (c *ForgejoClient) doGet(ctx context.Context, path string) (*http.Response, error) {
+	req, err := http.NewRequestWithContext(ctx, "GET", c.baseURL+path, nil)
+	if err != nil {
+		return nil, err
+	}
 	if c.token != "" {
 		req.Header.Set("Authorization", "token "+c.token)
 	}
-	resp, err := c.http.Do(req)
+	return c.http.Do(req)
+}
+
+func (c *ForgejoClient) get(ctx context.Context, path string, out any) error {
+	resp, err := c.doGet(ctx, path)
 	if err != nil {
 		return err
 	}
@@ -124,7 +137,7 @@ func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, bod
 
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
 	var raw []fjRepo
-	if err := c.get(ctx, "/api/v1/users/"+owner+"/repos?limit=50", &raw); err != nil {
+	if err := c.get(ctx, "/api/v1/users/"+url.PathEscape(owner)+"/repos?limit=50", &raw); err != nil {
 		return nil, err
 	}
 	out := make([]RepoRef, 0, len(raw))
@@ -144,6 +157,37 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 		})
 	}
 	return out, nil
+}
+
+// GetFile fetches a file's decoded content and blob sha via the Forgejo/Gitea
+// Contents API. found is false (with nil error) when the file does not exist
+// (404). Content is read from the repository's default branch.
+func (c *ForgejoClient) GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error) {
+	endpoint := fmt.Sprintf("/api/v1/repos/%s/%s/contents/%s", url.PathEscape(owner), url.PathEscape(repo), escapePathSegments(path))
+	resp, err := c.doGet(ctx, endpoint)
+	if err != nil {
+		return nil, "", false, err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, "", false, nil
+	}
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, "", false, fmt.Errorf("forgejo get %s: %s: %s", path, resp.Status, string(b))
+	}
+	var fc struct {
+		Content string `json:"content"`
+		SHA     string `json:"sha"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&fc); err != nil {
+		return nil, "", false, err
+	}
+	raw, err := base64.StdEncoding.DecodeString(strings.ReplaceAll(fc.Content, "\n", ""))
+	if err != nil {
+		return nil, "", false, fmt.Errorf("decode %s: %w", path, err)
+	}
+	return raw, fc.SHA, true, nil
 }
 
 type fjIssue struct {
