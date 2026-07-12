@@ -4,6 +4,8 @@
 
 - [ ] Cheat sheet for starting/operating `bridge mcp serve` and integrating
       it with Claude Code / Claude Desktop: [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md)
+- [ ] Spin up `bridge mcp serve` and test it end to end (real client
+      connect, all four tools, read-only + write/confirm paths)
 - [ ] `bridge mcp serve` systemd unit for always-on access (same follow-up as
       the WebUI one below — could share a unit-file pattern)
 
