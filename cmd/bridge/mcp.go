@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -82,7 +83,29 @@ func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handle
 	return middleware(streamable), nil
 }
 
+// validateNoAuthHost fails fast when --no-auth is combined with a
+// non-loopback --host: skipping bearer auth is only safe when the server is
+// unreachable from outside the machine.
+func validateNoAuthHost(host string, noAuth bool) error {
+	if !noAuth || isLoopbackHost(host) {
+		return nil
+	}
+	return fmt.Errorf("--no-auth requires a loopback --host (127.0.0.1, ::1, or localhost); got %q", host)
+}
+
+func isLoopbackHost(host string) bool {
+	if host == "localhost" {
+		return true
+	}
+	ip := net.ParseIP(host)
+	return ip != nil && ip.IsLoopback()
+}
+
 func runMCPServe(cmd *cobra.Command, _ []string) error {
+	if err := validateNoAuthHost(mcpHost, mcpNoAuth); err != nil {
+		return err
+	}
+
 	roots := reposRoots()
 
 	deps := imcp.Deps{

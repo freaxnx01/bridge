@@ -41,6 +41,30 @@ func TestParseOwners(t *testing.T) {
 	}
 }
 
+func TestValidateNoAuthHost(t *testing.T) {
+	tests := []struct {
+		name    string
+		host    string
+		noAuth  bool
+		wantErr bool
+	}{
+		{"auth required, non-loopback host ok", "0.0.0.0", false, false},
+		{"no-auth loopback ipv4", "127.0.0.1", true, false},
+		{"no-auth localhost", "localhost", true, false},
+		{"no-auth loopback ipv6", "::1", true, false},
+		{"no-auth non-loopback ip", "0.0.0.0", true, true},
+		{"no-auth hostname", "example.com", true, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateNoAuthHost(tt.host, tt.noAuth)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateNoAuthHost(%q, %v) error = %v, wantErr %v", tt.host, tt.noAuth, err, tt.wantErr)
+			}
+		})
+	}
+}
+
 func TestBuildMCPHandler_FailFastWithoutToken(t *testing.T) {
 	srv := imcp.NewServer(imcp.Deps{ReadOnly: true})
 	_, err := buildMCPHandler(srv, "", false)
