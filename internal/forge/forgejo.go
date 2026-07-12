@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 )
@@ -126,7 +127,7 @@ func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, bod
 
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
 	var raw []fjRepo
-	if err := c.get(ctx, "/api/v1/users/"+owner+"/repos?limit=50", &raw); err != nil {
+	if err := c.get(ctx, "/api/v1/users/"+url.PathEscape(owner)+"/repos?limit=50", &raw); err != nil {
 		return nil, err
 	}
 	out := make([]RepoRef, 0, len(raw))
@@ -152,8 +153,8 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 // Contents API. found is false (with nil error) when the file does not exist
 // (404). Content is read from the repository's default branch.
 func (c *ForgejoClient) GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error) {
-	url := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s", c.baseURL, owner, repo, path)
-	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
+	endpoint := fmt.Sprintf("%s/api/v1/repos/%s/%s/contents/%s", c.baseURL, url.PathEscape(owner), url.PathEscape(repo), escapePathSegments(path))
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
 	if err != nil {
 		return nil, "", false, err
 	}

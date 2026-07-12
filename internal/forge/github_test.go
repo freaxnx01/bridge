@@ -179,6 +179,25 @@ func TestGithubGetFile_FoundAndAbsent(t *testing.T) {
 	}
 }
 
+func TestGithubGetFile_EscapesPathAgainstQueryInjection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Errorf("path leaked into query string: %q", r.URL.RawQuery)
+		}
+		if want := "/repos/freaxnx01/bridge/contents/a/file.md?ref=evil"; r.URL.Path != want {
+			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		}
+		w.WriteHeader(404)
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, _, found, err := c.GetFile(context.Background(), "freaxnx01", "bridge", "a/file.md?ref=evil")
+	if err != nil || found {
+		t.Errorf("found=%v err=%v", found, err)
+	}
+}
+
 func TestGithubPutFile_CreateAndUpdate(t *testing.T) {
 	var gotBodies []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

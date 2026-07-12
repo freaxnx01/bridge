@@ -36,6 +36,23 @@ func TestForgejoListRepos(t *testing.T) {
 	}
 }
 
+func TestForgejoListRepos_EscapesOwnerAgainstQueryInjection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "limit=50" {
+			t.Errorf("owner leaked into query string: %q", r.URL.RawQuery)
+		}
+		if want := "/api/v1/users/evil?token=x/repos"; r.URL.Path != want {
+			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		}
+		w.Write([]byte(`[]`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+	if _, err := c.ListRepos(context.Background(), "evil?token=x"); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestForgejoListIssues(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/freax/fj/issues" {
@@ -152,5 +169,24 @@ func TestForgejoGetFile_FoundAndAbsent(t *testing.T) {
 	_, _, found, err = c.GetFile(context.Background(), "freax", "notes", "missing.md")
 	if err != nil || found {
 		t.Errorf("absent file: found=%v err=%v (want found=false, nil err)", found, err)
+	}
+}
+
+func TestForgejoGetFile_EscapesPathAgainstQueryInjection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Errorf("path leaked into query string: %q", r.URL.RawQuery)
+		}
+		if want := "/api/v1/repos/freax/notes/contents/a/file.md?ref=evil"; r.URL.Path != want {
+			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	_, _, found, err := c.GetFile(context.Background(), "freax", "notes", "a/file.md?ref=evil")
+	if err != nil || found {
+		t.Errorf("found=%v err=%v", found, err)
 	}
 }
