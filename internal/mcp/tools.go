@@ -45,6 +45,10 @@ type listReposInput struct {
 
 type listReposOutput struct {
 	Repos []forge.RepoRef `json:"repos"`
+	// Warnings reports targets that were skipped (forge unconfigured) or
+	// failed (e.g. an expired token) instead of failing the whole call —
+	// results from any other, healthy target are still returned in Repos.
+	Warnings []string `json:"warnings,omitempty"`
 }
 
 type readFileInput struct {
@@ -82,15 +86,16 @@ type createIssueOutput struct {
 type crossForgeStatusInput struct{}
 
 // targets returns the (forge, owner) pairs list_repos should query for the
-// given input: an explicit owner (with optional forge) overrides the defaults;
-// otherwise the configured defaults are used, narrowed by an optional forge.
-func (d Deps) targets(in listReposInput) []Target {
+// given input: an explicit owner requires an explicit forge (an owner given
+// without a forge is ambiguous across github/forgejo and is rejected rather
+// than silently guessed); otherwise the configured defaults are used,
+// narrowed by an optional forge.
+func (d Deps) targets(in listReposInput) ([]Target, error) {
 	if in.Owner != "" {
-		forgeName := in.Forge
-		if forgeName == "" {
-			forgeName = "github"
+		if in.Forge == "" {
+			return nil, fmt.Errorf("owner %q given without forge: specify forge (github or forgejo)", in.Owner)
 		}
-		return []Target{{Forge: forgeName, Owner: in.Owner}}
+		return []Target{{Forge: in.Forge, Owner: in.Owner}}, nil
 	}
 	var out []Target
 	for _, t := range d.DefaultOwners {
@@ -99,26 +104,40 @@ func (d Deps) targets(in listReposInput) []Target {
 		}
 		out = append(out, t)
 	}
-	return out
+	return out, nil
 }
 
+// handleListRepos aggregates repos across all matching targets concurrently.
+// A target that is unconfigured (ClientFor returns nil) or whose ListRepos
+// call fails does not fail the whole call: it is recorded in Warnings and
+// the results from any other, healthy target are still returned.
 func (d Deps) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, listReposOutput, error) {
-	targets := d.targets(in)
+	targets, err := d.targets(in)
+	if err != nil {
+		return nil, listReposOutput{}, err
+	}
 	var (
-		mu  sync.Mutex
-		all []forge.RepoRef
+		mu       sync.Mutex
+		all      []forge.RepoRef
+		warnings []string
 	)
-	g, gctx := errgroup.WithContext(ctx)
+	var g errgroup.Group
 	for _, t := range targets {
 		t := t
-		client := d.ClientFor(t.Forge, t.Owner)
-		if client == nil {
-			continue
-		}
 		g.Go(func() error {
-			repos, err := client.ListRepos(gctx, t.Owner)
+			client := d.ClientFor(t.Forge, t.Owner)
+			if client == nil {
+				mu.Lock()
+				warnings = append(warnings, fmt.Sprintf("%s:%s not configured (missing token or forge unavailable)", t.Forge, t.Owner))
+				mu.Unlock()
+				return nil
+			}
+			repos, err := client.ListRepos(ctx, t.Owner)
 			if err != nil {
-				return fmt.Errorf("list repos %s/%s: %w", t.Forge, t.Owner, err)
+				mu.Lock()
+				warnings = append(warnings, fmt.Sprintf("list repos %s/%s: %v", t.Forge, t.Owner, err))
+				mu.Unlock()
+				return nil
 			}
 			mu.Lock()
 			all = append(all, repos...)
@@ -126,10 +145,8 @@ func (d Deps) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in li
 			return nil
 		})
 	}
-	if err := g.Wait(); err != nil {
-		return nil, listReposOutput{}, err
-	}
-	return nil, listReposOutput{Repos: all}, nil
+	_ = g.Wait() // per-target failures are captured as warnings above; Go funcs always return nil
+	return nil, listReposOutput{Repos: all, Warnings: warnings}, nil
 }
 
 func (d Deps) handleReadFile(ctx context.Context, _ *mcp.CallToolRequest, in readFileInput) (*mcp.CallToolResult, readFileOutput, error) {

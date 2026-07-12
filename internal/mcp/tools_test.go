@@ -14,6 +14,7 @@ import (
 type fakeForge struct {
 	name         string
 	repos        []forge.RepoRef
+	listErr      error
 	file         []byte
 	sha          string
 	found        bool
@@ -23,6 +24,9 @@ type fakeForge struct {
 
 func (f *fakeForge) Name() string { return f.name }
 func (f *fakeForge) ListRepos(_ context.Context, _ string) ([]forge.RepoRef, error) {
+	if f.listErr != nil {
+		return nil, f.listErr
+	}
 	return f.repos, nil
 }
 func (f *fakeForge) GetFile(_ context.Context, _, _, _ string) ([]byte, string, bool, error) {
@@ -90,6 +94,50 @@ func TestHandleListRepos_OwnerInputOverridesDefaults(t *testing.T) {
 	}
 	if len(out.Repos) != 1 || out.Repos[0].Owner != "acme" {
 		t.Fatalf("owner override not honoured: %+v", out.Repos)
+	}
+}
+
+func TestHandleListRepos_OwnerWithoutForgeIsRejected(t *testing.T) {
+	d := depsWith(map[string]*fakeForge{}, nil)
+	_, _, err := d.handleListRepos(context.Background(), nil, listReposInput{Owner: "acme"})
+	if err == nil {
+		t.Fatal("want error when owner is given without forge, got nil")
+	}
+}
+
+func TestHandleListRepos_UnconfiguredTargetReportsWarningNotSilentDrop(t *testing.T) {
+	clients := map[string]*fakeForge{
+		"github": {name: "github", repos: []forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "bridge"}}},
+		// "forgejo" deliberately absent from clients: ClientFor(forgejo, ...) resolves to nil.
+	}
+	d := depsWith(clients, []Target{{"github", "freaxnx01"}, {"forgejo", "freax"}})
+	_, out, err := d.handleListRepos(context.Background(), nil, listReposInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Repos) != 1 || out.Repos[0].Forge != "github" {
+		t.Fatalf("want the configured github target's repo despite forgejo being unconfigured: %+v", out.Repos)
+	}
+	if len(out.Warnings) != 1 {
+		t.Fatalf("want 1 warning for the unconfigured forgejo target, got %+v", out.Warnings)
+	}
+}
+
+func TestHandleListRepos_PartialFailureReturnsWarningAndSuccessfulResults(t *testing.T) {
+	clients := map[string]*fakeForge{
+		"github":  {name: "github", repos: []forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "bridge"}}},
+		"forgejo": {name: "forgejo", listErr: errors.New("token expired")},
+	}
+	d := depsWith(clients, []Target{{"github", "freaxnx01"}, {"forgejo", "freax"}})
+	_, out, err := d.handleListRepos(context.Background(), nil, listReposInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Repos) != 1 || out.Repos[0].Forge != "github" {
+		t.Fatalf("want the successful github target's repo despite forgejo failing: %+v", out.Repos)
+	}
+	if len(out.Warnings) != 1 {
+		t.Fatalf("want 1 warning for the failing forgejo target, got %+v", out.Warnings)
 	}
 }
 
