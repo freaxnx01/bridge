@@ -8,6 +8,7 @@
       connect, all four tools, read-only + write/confirm paths)
 - [ ] `bridge mcp serve` systemd unit for always-on access (same follow-up as
       the WebUI one below — could share a unit-file pattern)
+- [ ] MCP test with Claude App
 
 ## Bridge WebUI — Plan 2 (Svelte UI Components)
 
