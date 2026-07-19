@@ -4,7 +4,7 @@
 
 - [ ] Cheat sheet for starting/operating `bridge mcp serve` and integrating
       it with Claude Code / Claude Desktop: [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md)
-- [ ] Spin up `bridge mcp serve` and test it end to end (real client
+- [x] Spin up `bridge mcp serve` and test it end to end (real client
       connect, all four tools, read-only + write/confirm paths)
 - [ ] `bridge mcp serve` systemd unit for always-on access (same follow-up as
       the WebUI one below — could share a unit-file pattern)
@@ -51,3 +51,4 @@ Plan 2 covers the actual Svelte pages and components.
 - [ ] #169 — stale issue detector (>30 days, AI nudge)
 - [ ] #170 — `bridge agents` nav/WebUI panel
 - [ ] #171 — wire agent ping in Radar viz from real `claude agents` data
+- [ ] Test starting a new Claude Code session via the Telegram bot
