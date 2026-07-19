@@ -53,3 +53,4 @@ Plan 2 covers the actual Svelte pages and components.
 - [ ] #170 — `bridge agents` nav/WebUI panel
 - [ ] #171 — wire agent ping in Radar viz from real `claude agents` data
 - [ ] Test starting a new Claude Code session via the Telegram bot
+- [ ] Add support for Hermes Agent
