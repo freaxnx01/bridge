@@ -41,6 +41,14 @@ Plan 2 covers the actual Svelte pages and components.
 - [ ] `bridge serve` systemd unit for always-on homelab access
 - [ ] Auth via Traefik middleware (BasicAuth / ForwardAuth) — no app changes needed
 
+**Overview/Dashboard ideas (uncommitted, not yet in Plan 2 wireframes):**
+
+- [ ] RC sessions
+- [ ] Open Issues (filter label)
+- [ ] PRs to review
+- [ ] Todos, Ideas
+- [ ] GH Actions
+
 ## Agent / Bot Integration (ideas captured 2026-06-24, GitHub issues #163–#171)
 
 - [ ] #163 — bot `/ask <question>` (repo/issue summary)
