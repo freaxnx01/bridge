@@ -2,6 +2,7 @@
 
 Date: 2026-07-20
 Status: approved, not yet implemented
+Depends on: `2026-07-20-mcp-capability-interfaces-design.md` (land that first)
 
 ## Problem
 
@@ -61,7 +62,9 @@ No inputs.
 ```json
 {
   "forges": [
-    {"forge": "github",  "owner": "freaxnx01", "configured": true},
+    {"forge": "github",  "owner": "freaxnx01", "configured": true,
+     "capabilities": ["list_repos", "list_issues", "read_file",
+                      "create_issue", "create_repo"]},
     {"forge": "forgejo", "owner": "freax",     "configured": false,
      "reason": "missing token or forge unavailable"}
   ],
@@ -73,6 +76,14 @@ Behaviour: iterate `Deps.DefaultOwners`, call `Deps.ClientFor` for each, and
 report whether a client resolved. `reason` is set only when `configured` is
 false, reusing the wording already used in `handleListRepos`'s warnings so the
 two tools describe the same condition identically.
+
+`capabilities` comes from the `Capabilities` helper introduced by the
+prerequisite spec, so the reported set is derived from the same assertions the
+handlers use rather than restated here. It is omitted when `configured` is
+false. When `ReadOnly` is set, write capabilities are filtered out — the tools
+are not registered, so advertising them would be a lie. The field lists tool
+names rather than method names so a client can map it directly onto what it is
+allowed to call.
 
 The call makes **no network requests**. `ClientFor` is wrapped by
 `newCachingClientResolver`, so after the first resolution per target this is a
@@ -114,29 +125,16 @@ instead of a generic wrap.
 
 ## Interface change
 
-`imcp.ForgeClient` gains two methods:
+None. The prerequisite spec already puts `ListOpenIssues` on `ForgeReader` and
+declares `repoCreator` for `CreateRepo`, so this change consumes interfaces
+that already exist. **No changes to `internal/forge` are required either** —
+`*forge.GithubClient` and `*forge.ForgejoClient` satisfy every capability
+these tools assert.
 
-```go
-ListOpenIssues(ctx context.Context, owner, repo string) ([]forge.Issue, error)
-CreateRepo(ctx context.Context, name string, private bool) (forge.RepoRef, error)
-```
-
-`*forge.GithubClient` and `*forge.ForgejoClient` already satisfy both
-structurally. **No changes to `internal/forge` are required.**
-
-### Known limitation (accepted, not fixed here)
-
-`newCachingClientResolver` (`cmd/bridge/mcp.go:201`) adapts a `forge.Client` to
-an `imcp.ForgeClient` with a type assertion, and a failed assertion yields
-`nil` — which `list_git_forges` will report as `configured: false` with a
-"missing token" reason. Widening the interface widens what can fail this way.
-
-This is inert today: only GitHub and Forgejo are wired and both satisfy the
-full interface. It becomes a real constraint the moment a read-only forge is
-wired, since GitLab and ADO implement neither `GetFile`, `CreateIssue`, nor
-`CreateRepo` and would be silently reported as unconfigured. The fix is
-splitting `ForgeClient` into reader and writer interfaces so `ReadOnly` mode
-can accept read-only clients. Deferred to its own PR.
+`list_issues` needs only `ForgeReader`, so it works against any wired forge
+including GitLab and ADO once those are connected. `create_repo` asserts
+`repoCreator` and fails with *does not support creating repositories* on a
+forge that lacks it.
 
 ## File layout
 
@@ -146,7 +144,7 @@ gates:
 
 | File | Contents |
 |---|---|
-| `tools.go` | `Target`, `ForgeClient`, `Deps`, `targets()` |
+| `tools.go` | `Target`, `ForgeReader`, the capability interfaces, `Capabilities`, `Deps`, `targets()` |
 | `tools_read.go` | `list_repos`, `read_file`, `cross_forge_status`, `list_issues`, `list_git_forges` handlers + their I/O types |
 | `tools_write.go` | `create_issue`, `create_repo` handlers + their I/O types |
 
@@ -170,7 +168,9 @@ returns an error naming the forge; a client error propagates wrapped.
 **`list_git_forges`** — mixed configured/unconfigured targets produce correct
 `configured` flags and a `reason` only on the false ones; empty
 `DefaultOwners` yields an empty list, not an error; `read_only` reflects
-`Deps.ReadOnly` in both states.
+`Deps.ReadOnly` in both states; `capabilities` is omitted for unconfigured
+targets, reports the tier-1 set for a partial client, and drops write
+capabilities when `ReadOnly` is set.
 
 **`create_repo`** — `confirm: false` returns `draft: true` **and the fake
 records zero calls** (the assertion that matters); `confirm: true` creates and
