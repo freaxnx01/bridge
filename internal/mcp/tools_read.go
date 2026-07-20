@@ -132,3 +132,74 @@ func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in l
 	}
 	return nil, listIssuesOutput{Issues: issues}, nil
 }
+
+type listGitForgesInput struct{}
+
+// forgeStatus describes one configured (forge, owner) target. Capabilities and
+// Reason are mutually exclusive: an unconfigured target has a reason and no
+// capabilities, a configured one the reverse.
+type forgeStatus struct {
+	Forge        string   `json:"forge"`
+	Owner        string   `json:"owner"`
+	Configured   bool     `json:"configured"`
+	Capabilities []string `json:"capabilities,omitempty"`
+	Reason       string   `json:"reason,omitempty"`
+}
+
+type listGitForgesOutput struct {
+	Forges   []forgeStatus `json:"forges"`
+	ReadOnly bool          `json:"read_only"`
+}
+
+// isWriteTool reports whether a tool name is registered only when
+// Deps.ReadOnly is false. A function rather than a package-level map so there
+// is no mutable global state.
+func isWriteTool(name string) bool {
+	switch name {
+	case "create_issue", "create_repo":
+		return true
+	default:
+		return false
+	}
+}
+
+// advertisedCapabilities is Capabilities narrowed to what this server actually
+// registered. Capabilities reports write tools regardless of ReadOnly by
+// design, so filtering them here keeps list_git_forges from advertising a tool
+// a read-only server never registered.
+func (d Deps) advertisedCapabilities(r ForgeReader) []string {
+	all := Capabilities(r)
+	if !d.ReadOnly {
+		return all
+	}
+	reads := make([]string, 0, len(all))
+	for _, c := range all {
+		if !isWriteTool(c) {
+			reads = append(reads, c)
+		}
+	}
+	return reads
+}
+
+// handleListGitForges reports the configured targets so a client does not have
+// to guess a (forge, owner) pair. It makes no network requests: ClientFor is
+// wrapped by a resolve-once cache, so after the first resolution per target
+// this is a map lookup. A live API probe was rejected — it would turn
+// discovery into N round-trips and conflate "not configured" with a transient
+// API failure.
+func (d Deps) handleListGitForges(_ context.Context, _ *mcp.CallToolRequest, _ listGitForgesInput) (*mcp.CallToolResult, listGitForgesOutput, error) {
+	forges := make([]forgeStatus, 0, len(d.DefaultOwners))
+	for _, t := range d.DefaultOwners {
+		status := forgeStatus{Forge: t.Forge, Owner: t.Owner}
+		if client := d.ClientFor(t.Forge, t.Owner); client != nil {
+			status.Configured = true
+			status.Capabilities = d.advertisedCapabilities(client)
+		} else {
+			// Same wording as handleListRepos's warning, so the two tools
+			// describe the same condition identically.
+			status.Reason = "missing token or forge unavailable"
+		}
+		forges = append(forges, status)
+	}
+	return nil, listGitForgesOutput{Forges: forges, ReadOnly: d.ReadOnly}, nil
+}

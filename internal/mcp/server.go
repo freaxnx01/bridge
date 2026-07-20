@@ -26,6 +26,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleListIssues)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_git_forges",
+		Description: "List the configured forge targets, whether each is configured, and which tools it supports. Makes no network requests.",
+	}, deps.handleListGitForges)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "cross_forge_status",
 		Description: "Return the cross-forge overview snapshot (ranked items, inbox, roadmap).",
 	}, deps.handleCrossForgeStatus)

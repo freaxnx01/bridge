@@ -248,3 +248,125 @@ func TestHandleListIssues_ClientErrorPropagatesWrapped(t *testing.T) {
 		t.Errorf("want the repo path in the wrap, got %v", err)
 	}
 }
+
+func TestHandleListGitForges_ReportsConfiguredAndUnconfiguredTargets(t *testing.T) {
+	// "forgejo" is deliberately absent from clients, so ClientFor returns nil.
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, []Target{
+		{Forge: "github", Owner: "freaxnx01"},
+		{Forge: "forgejo", Owner: "freax"},
+	})
+
+	_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Forges) != 2 {
+		t.Fatalf("want 2 targets, got %+v", out.Forges)
+	}
+
+	configured := out.Forges[0]
+	if configured.Forge != "github" || configured.Owner != "freaxnx01" || !configured.Configured {
+		t.Errorf("github target wrong: %+v", configured)
+	}
+	if configured.Reason != "" {
+		t.Errorf("a configured target must carry no reason, got %q", configured.Reason)
+	}
+	if len(configured.Capabilities) != 5 {
+		t.Errorf("a fully capable client must report 5 tools, got %v", configured.Capabilities)
+	}
+
+	unconfigured := out.Forges[1]
+	if unconfigured.Configured {
+		t.Errorf("forgejo must report configured=false: %+v", unconfigured)
+	}
+	if unconfigured.Reason != "missing token or forge unavailable" {
+		t.Errorf("unexpected reason %q", unconfigured.Reason)
+	}
+	if unconfigured.Capabilities != nil {
+		t.Errorf("an unconfigured target must omit capabilities, got %v", unconfigured.Capabilities)
+	}
+}
+
+func TestHandleListGitForges_TierOneClientReportsOnlyTierOneTools(t *testing.T) {
+	d := Deps{
+		DefaultOwners: []Target{{Forge: "gitlab", Owner: "acme"}},
+		ClientFor:     func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} },
+	}
+
+	_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"list_repos", "list_issues"}
+	got := out.Forges[0].Capabilities
+	if len(got) != len(want) {
+		t.Fatalf("want %v, got %v", want, got)
+	}
+	for i := range want {
+		if got[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, got)
+		}
+	}
+}
+
+func TestHandleListGitForges_ReadOnlyDropsWriteCapabilities(t *testing.T) {
+	gh := newFakeFull("github")
+	d := Deps{
+		ReadOnly:      true,
+		DefaultOwners: []Target{{Forge: "github", Owner: "freaxnx01"}},
+		ClientFor:     func(string, string) ForgeReader { return gh },
+	}
+
+	_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.ReadOnly {
+		t.Error("read_only must reflect Deps.ReadOnly")
+	}
+	for _, c := range out.Forges[0].Capabilities {
+		if c == "create_issue" || c == "create_repo" {
+			t.Errorf("read-only must not advertise write tools, got %v", out.Forges[0].Capabilities)
+		}
+	}
+	if len(out.Forges[0].Capabilities) != 3 {
+		t.Errorf("want the 3 read tools, got %v", out.Forges[0].Capabilities)
+	}
+}
+
+func TestHandleListGitForges_ReadOnlyFalseKeepsWriteCapabilities(t *testing.T) {
+	gh := newFakeFull("github")
+	d := Deps{
+		DefaultOwners: []Target{{Forge: "github", Owner: "freaxnx01"}},
+		ClientFor:     func(string, string) ForgeReader { return gh },
+	}
+
+	_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.ReadOnly {
+		t.Error("read_only must be false when Deps.ReadOnly is false")
+	}
+	if len(out.Forges[0].Capabilities) != 5 {
+		t.Errorf("want all 5 tools, got %v", out.Forges[0].Capabilities)
+	}
+}
+
+func TestHandleListGitForges_EmptyDefaultOwnersReturnsEmptyListNotNil(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+
+	_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+	if err != nil {
+		t.Fatal("empty DefaultOwners is an empty result, not an error:", err)
+	}
+	if len(out.Forges) != 0 {
+		t.Fatalf("want no targets, got %+v", out.Forges)
+	}
+	// Must be non-nil: a nil slice marshals to JSON null, but the contract
+	// says the field is an empty array.
+	if out.Forges == nil {
+		t.Error("Forges must be an empty slice, not nil, so it marshals to [] not null")
+	}
+}
