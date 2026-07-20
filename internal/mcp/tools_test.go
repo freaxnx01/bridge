@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/freaxnx01/bridge/internal/forge"
@@ -105,7 +106,7 @@ func newFakeFull(name string) *fakeFull {
 func depsWith(clients map[string]*fakeFull, owners []Target) Deps {
 	return Deps{
 		DefaultOwners: owners,
-		ClientFor: func(forgeName, _ string) ForgeClient {
+		ClientFor: func(forgeName, _ string) ForgeReader {
 			c, ok := clients[forgeName]
 			if !ok {
 				return nil
@@ -307,6 +308,61 @@ func TestHandleCrossForgeStatus_PropagatesError(t *testing.T) {
 	_, _, err := d.handleCrossForgeStatus(context.Background(), nil, crossForgeStatusInput{})
 	if !errors.Is(err, sentinel) {
 		t.Fatalf("want sentinel error, got %v", err)
+	}
+}
+
+func TestHandleReadFile_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	// A tier-1-only client is the GitLab/ADO shape: resolves fine, has no GetFile.
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleReadFile(context.Background(), nil,
+		readFileInput{Forge: "gitlab", Owner: "o", Repo: "r", Path: "f.md"})
+
+	if err == nil {
+		t.Fatal("want an error for a client without GetFile, got nil")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a resolved but incapable client must not be reported as unconfigured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleCreateIssue_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleCreateIssue(context.Background(), nil,
+		createIssueInput{Forge: "gitlab", Owner: "o", Repo: "r", Title: "t", Confirm: true})
+
+	if err == nil {
+		t.Fatal("want an error for a client without CreateIssue, got nil")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a resolved but incapable client must not be reported as unconfigured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleListRepos_TierOneClientIsFullyUsable(t *testing.T) {
+	// The payoff: a client with only tier-1 capabilities still serves list_repos.
+	reader := &fakeReader{name: "gitlab", repos: []forge.RepoRef{{Forge: "gitlab", Owner: "acme", Name: "widget"}}}
+	d := Deps{
+		DefaultOwners: []Target{{"gitlab", "acme"}},
+		ClientFor:     func(string, string) ForgeReader { return reader },
+	}
+
+	_, out, err := d.handleListRepos(context.Background(), nil, listReposInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Repos) != 1 || out.Repos[0].Name != "widget" {
+		t.Fatalf("tier-1 client must serve list_repos: %+v", out)
+	}
+	if len(out.Warnings) != 0 {
+		t.Fatalf("a capable tier-1 target must not warn: %+v", out.Warnings)
 	}
 }
 

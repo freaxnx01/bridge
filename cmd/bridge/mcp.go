@@ -174,39 +174,39 @@ func clientForMCP(roots []string) func(forgeName, owner string) forge.Client {
 
 // newCachingClientResolver wraps resolve (typically clientForMCP(roots)) with
 // a resolve-once-per-(forge,owner) cache and adapts the returned forge.Client
-// to imcp.ForgeClient. Token resolution walks the filesystem and spawns a
+// to imcp.ForgeReader. Token resolution walks the filesystem and spawns a
 // direnv subprocess per call, so caching (including caching an unconfigured
 // target's nil result) avoids paying that cost on every tool invocation for
 // the life of the process.
-func newCachingClientResolver(resolve func(forgeName, owner string) forge.Client) func(forgeName, owner string) imcp.ForgeClient {
+func newCachingClientResolver(resolve func(forgeName, owner string) forge.Client) func(forgeName, owner string) imcp.ForgeReader {
 	var (
 		mu    sync.Mutex
-		cache = map[string]imcp.ForgeClient{}
+		cache = map[string]imcp.ForgeReader{}
 	)
-	return func(forgeName, owner string) imcp.ForgeClient {
+	return func(forgeName, owner string) imcp.ForgeReader {
 		key := forgeName + ":" + owner
 
 		mu.Lock()
-		if fc, ok := cache[key]; ok {
+		if reader, ok := cache[key]; ok {
 			mu.Unlock()
-			return fc
+			return reader
 		}
 		mu.Unlock()
 
-		var fc imcp.ForgeClient
+		var reader imcp.ForgeReader
+		// imcp.ForgeReader's method set is a subset of forge.Client's, so a
+		// non-nil client is assignable directly — no type assertion, and so no
+		// path where a capable client silently degrades to nil. Assign only
+		// when non-nil so a nil concrete pointer is never boxed into a
+		// non-nil interface.
 		if c := resolve(forgeName, owner); c != nil {
-			// c is a forge.Client; the concrete forge clients also implement
-			// imcp.ForgeClient. Assign only on a successful assertion so a nil
-			// concrete pointer never gets boxed into a non-nil interface.
-			if asserted, ok := c.(imcp.ForgeClient); ok {
-				fc = asserted
-			}
+			reader = c
 		}
 
 		mu.Lock()
-		cache[key] = fc
+		cache[key] = reader
 		mu.Unlock()
-		return fc
+		return reader
 	}
 }
 

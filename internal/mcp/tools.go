@@ -19,15 +19,6 @@ type Target struct {
 	Owner string
 }
 
-// ForgeClient is the consumer-side interface the MCP tools need. Both
-// *forge.GithubClient and *forge.ForgejoClient satisfy it structurally.
-type ForgeClient interface {
-	Name() string
-	ListRepos(ctx context.Context, owner string) ([]forge.RepoRef, error)
-	GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error)
-	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
-}
-
 // ForgeReader is the tier-1 surface every forge client satisfies. Deps.ClientFor
 // returns this, and handlers needing more assert for one of the capability
 // interfaces below.
@@ -76,12 +67,12 @@ func Capabilities(r ForgeReader) []string {
 }
 
 // Deps are the injected dependencies of the MCP server. ClientFor returns a
-// ready per-(forge, owner) client (token baked in) or nil when that forge is
+// ready per-(forge, owner) reader (token baked in) or nil when that forge is
 // unconfigured. BuildOverview produces the cross-forge status snapshot.
 type Deps struct {
 	ReadOnly      bool
 	DefaultOwners []Target
-	ClientFor     func(forgeName, owner string) ForgeClient
+	ClientFor     func(forgeName, owner string) ForgeReader
 	BuildOverview func(ctx context.Context) (overview.Snapshot, error)
 }
 
@@ -201,7 +192,11 @@ func (d Deps) handleReadFile(ctx context.Context, _ *mcp.CallToolRequest, in rea
 	if client == nil {
 		return nil, readFileOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
 	}
-	content, sha, found, err := client.GetFile(ctx, in.Owner, in.Repo, in.Path)
+	files, ok := client.(fileReader)
+	if !ok {
+		return nil, readFileOutput{}, fmt.Errorf("forge %q does not support reading files", in.Forge)
+	}
+	content, sha, found, err := files.GetFile(ctx, in.Owner, in.Repo, in.Path)
 	if err != nil {
 		return nil, readFileOutput{}, fmt.Errorf("read %s/%s/%s: %w", in.Owner, in.Repo, in.Path, err)
 	}
@@ -220,7 +215,11 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if client == nil {
 		return nil, createIssueOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
 	}
-	issue, err := client.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body)
+	issues, ok := client.(issueCreator)
+	if !ok {
+		return nil, createIssueOutput{}, fmt.Errorf("forge %q does not support creating issues", in.Forge)
+	}
+	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body)
 	if err != nil {
 		return nil, createIssueOutput{}, fmt.Errorf("create issue %s/%s: %w", in.Owner, in.Repo, err)
 	}

@@ -12,7 +12,7 @@ import (
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
 )
 
-// fakeResolvedClient is a minimal forge.Client/imcp.ForgeClient double used to
+// fakeResolvedClient is a minimal forge.Client/imcp.ForgeReader double used to
 // verify newCachingClientResolver's caching behavior without touching real
 // tokens or the filesystem.
 type fakeResolvedClient struct{}
@@ -64,6 +64,28 @@ func TestNewCachingClientResolver_ResolvesOncePerKey(t *testing.T) {
 	}
 	if calls != 2 {
 		t.Fatalf("want a nil result cached too (no repeat resolve), got %d calls", calls)
+	}
+}
+
+// readerOnlyClient satisfies forge.Client — and therefore imcp.ForgeReader —
+// while implementing none of the capability interfaces. This is the GitLab/ADO
+// shape.
+type readerOnlyClient struct{}
+
+func (readerOnlyClient) Name() string { return "readeronly" }
+func (readerOnlyClient) ListRepos(context.Context, string) ([]forge.RepoRef, error) {
+	return nil, nil
+}
+func (readerOnlyClient) ListOpenIssues(context.Context, string, string) ([]forge.Issue, error) {
+	return nil, nil
+}
+
+func TestNewCachingClientResolver_ReaderOnlyClientResolvesNonNil(t *testing.T) {
+	cached := newCachingClientResolver(func(string, string) forge.Client { return readerOnlyClient{} })
+
+	if c := cached("gitlab", "acme"); c == nil {
+		t.Fatal("a client with only tier-1 capabilities must resolve non-nil; " +
+			"the old type assertion dropped it to nil, which callers misreported as unconfigured")
 	}
 }
 
