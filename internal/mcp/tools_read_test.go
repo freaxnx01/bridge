@@ -193,3 +193,58 @@ func TestHandleListRepos_TierOneClientIsFullyUsable(t *testing.T) {
 		t.Fatalf("a capable tier-1 target must not warn: %+v", out.Warnings)
 	}
 }
+
+func TestHandleListIssues_ReturnsIssuesFromConfiguredForge(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.issues = []forge.Issue{
+		{Forge: "github", Repo: "freaxnx01/bridge", Number: 7, Title: "flaky test"},
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "freaxnx01", Repo: "bridge"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Issues) != 1 {
+		t.Fatalf("want 1 issue, got %+v", out.Issues)
+	}
+	if out.Issues[0].Number != 7 || out.Issues[0].Title != "flaky test" {
+		t.Errorf("unexpected issue: %+v", out.Issues[0])
+	}
+}
+
+func TestHandleListIssues_UnconfiguredForgeErrors(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+
+	_, _, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "gitlab", Owner: "acme", Repo: "widget"})
+	if err == nil {
+		t.Fatal("want an error for an unconfigured forge, got nil")
+	}
+	if !strings.Contains(err.Error(), "gitlab") {
+		t.Errorf("error must name the forge, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("want a not-configured error, got %v", err)
+	}
+}
+
+func TestHandleListIssues_ClientErrorPropagatesWrapped(t *testing.T) {
+	sentinel := errors.New("token expired")
+	gh := newFakeFull("github")
+	gh.issuesErr = sentinel
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "freaxnx01", Repo: "bridge"})
+	if err == nil {
+		t.Fatal("want the client error to propagate, got nil")
+	}
+	if !errors.Is(err, sentinel) {
+		t.Errorf("want the sentinel preserved via %%w, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "freaxnx01/bridge") {
+		t.Errorf("want the repo path in the wrap, got %v", err)
+	}
+}

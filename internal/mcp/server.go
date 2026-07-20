@@ -21,6 +21,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleReadFile)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_issues",
+		Description: "List open issues for a single repository (live).",
+	}, deps.handleListIssues)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "cross_forge_status",
 		Description: "Return the cross-forge overview snapshot (ranked items, inbox, roadmap).",
 	}, deps.handleCrossForgeStatus)

@@ -105,3 +105,30 @@ func (d Deps) handleCrossForgeStatus(ctx context.Context, _ *mcp.CallToolRequest
 	}
 	return nil, snap, nil
 }
+
+type listIssuesInput struct {
+	Forge string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner string `json:"owner" jsonschema:"repository owner"`
+	Repo  string `json:"repo" jsonschema:"repository name"`
+}
+
+type listIssuesOutput struct {
+	Issues []forge.Issue `json:"issues"`
+}
+
+// handleListIssues returns the open issues of a single repo. Scope is
+// deliberately one repo rather than a fan-out across configured targets:
+// cross_forge_status already aggregates, and fanning out here would multiply
+// to repos × issues per call. Needs no capability assertion — ListOpenIssues
+// is part of ForgeReader.
+func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in listIssuesInput) (*mcp.CallToolResult, listIssuesOutput, error) {
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return nil, listIssuesOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+	issues, err := client.ListOpenIssues(ctx, in.Owner, in.Repo)
+	if err != nil {
+		return nil, listIssuesOutput{}, fmt.Errorf("list issues %s/%s: %w", in.Owner, in.Repo, err)
+	}
+	return nil, listIssuesOutput{Issues: issues}, nil
+}
