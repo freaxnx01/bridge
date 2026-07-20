@@ -40,7 +40,7 @@ func advertisedTools(t *testing.T, deps Deps) []string {
 
 func TestNewServer_RegistersExpectedToolSet(t *testing.T) {
 	names := advertisedTools(t, Deps{})
-	want := []string{"create_issue", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "read_file"}
+	want := []string{"create_issue", "create_repo", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "read_file"}
 	if len(names) != len(want) {
 		t.Fatalf("want %v, got %v", want, names)
 	}
@@ -51,14 +51,20 @@ func TestNewServer_RegistersExpectedToolSet(t *testing.T) {
 	}
 }
 
-func TestNewServer_ReadOnlyOmitsCreateIssue(t *testing.T) {
+func TestNewServer_ReadOnlyOmitsBothWriteTools(t *testing.T) {
 	names := advertisedTools(t, Deps{ReadOnly: true})
-	for _, n := range names {
-		if n == "create_issue" {
-			t.Fatalf("read-only server must not advertise create_issue: %v", names)
+	want := []string{"cross_forge_status", "list_git_forges", "list_issues", "list_repos", "read_file"}
+	if len(names) != len(want) {
+		t.Fatalf("want %v, got %v", want, names)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, names)
 		}
 	}
-	if len(names) != 5 {
-		t.Fatalf("want 5 tools in read-only mode, got %v", names)
+	for _, n := range names {
+		if n == "create_issue" || n == "create_repo" {
+			t.Fatalf("read-only server must not advertise write tools: %v", names)
+		}
 	}
 }
