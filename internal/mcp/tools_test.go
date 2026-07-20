@@ -309,3 +309,40 @@ func TestHandleCrossForgeStatus_PropagatesError(t *testing.T) {
 		t.Fatalf("want sentinel error, got %v", err)
 	}
 }
+
+func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
+	tests := []struct {
+		name   string
+		client ForgeReader
+		want   []string
+	}{
+		{
+			name:   "nil reader reports nothing",
+			client: nil,
+			want:   nil,
+		},
+		{
+			name:   "tier-1 only client reports tier-1 tools",
+			client: &fakeReader{name: "gitlab"},
+			want:   []string{"list_repos", "list_issues"},
+		},
+		{
+			name:   "fully capable client reports every tool",
+			client: newFakeFull("github"),
+			want:   []string{"list_repos", "list_issues", "read_file", "create_issue", "create_repo"},
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := Capabilities(tt.client)
+			if len(got) != len(tt.want) {
+				t.Fatalf("Capabilities() = %v, want %v", got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Errorf("Capabilities()[%d] = %q, want %q", i, got[i], tt.want[i])
+				}
+			}
+		})
+	}
+}
