@@ -197,8 +197,7 @@ func newCachingClientResolver(resolve func(forgeName, owner string) forge.Client
 		// imcp.ForgeReader's method set is a subset of forge.Client's, so a
 		// non-nil client is assignable directly — no type assertion, and so no
 		// path where a capable client silently degrades to nil. Assign only
-		// when non-nil so a nil concrete pointer is never boxed into a
-		// non-nil interface.
+		// when non-nil so an unconfigured target caches a nil interface.
 		if c := resolve(forgeName, owner); c != nil {
 			reader = c
 		}
