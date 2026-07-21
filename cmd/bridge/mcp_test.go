@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -221,11 +222,29 @@ func TestBuildMCPHandler_ValidBearerListsTools(t *testing.T) {
 	}
 }
 
+// fakeDiscovery serves a minimal OIDC discovery document over httptest so
+// buildOAuthHandler's startup discovery never touches the real network or
+// resolves a real DNS name.
+func fakeDiscovery(t *testing.T) *httptest.Server {
+	t.Helper()
+	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_ = json.NewEncoder(w).Encode(map[string]string{
+			"authorization_endpoint": "https://auth.example.com/authorize",
+			"token_endpoint":         "https://auth.example.com/token",
+			"userinfo_endpoint":      "https://auth.example.com/userinfo",
+		})
+	}))
+	t.Cleanup(ts.Close)
+	return ts
+}
+
 func TestBuildOAuthHandler_RoutesAndMiddlewarePlacement(t *testing.T) {
+	discovery := fakeDiscovery(t)
+
 	dir := t.TempDir()
 	cfg := imcpoauth.Config{
 		Issuer:          "https://bridge-mcp.example.com",
-		AuthentikIssuer: "https://auth.example.com/application/o/bridge/",
+		AuthentikIssuer: discovery.URL,
 		ClientID:        "cid",
 		ClientSecret:    "secret",
 		AllowedSubject:  "sub-123",
@@ -233,27 +252,50 @@ func TestBuildOAuthHandler_RoutesAndMiddlewarePlacement(t *testing.T) {
 	}
 	srv := imcp.NewServer(imcp.Deps{})
 
-	handler, closeFn, err := buildOAuthHandler(srv, cfg)
+	handler, closeFn, err := buildOAuthHandler(srv, cfg, discovery.Client())
 	if err != nil {
 		t.Fatalf("buildOAuthHandler: %v", err)
 	}
-	defer closeFn()
+	defer func() { _ = closeFn() }() // best-effort release; test process is exiting regardless
 
 	tests := []struct {
 		name       string
+		method     string
 		path       string
 		wantStatus int
 	}{
-		{"AS metadata is unauthenticated", "/.well-known/oauth-authorization-server", http.StatusOK},
-		{"resource metadata is unauthenticated", "/.well-known/oauth-protected-resource", http.StatusOK},
-		{"MCP root requires a token", "/", http.StatusUnauthorized},
+		{"AS metadata is unauthenticated", http.MethodGet, "/.well-known/oauth-authorization-server", http.StatusOK},
+		{"resource metadata is unauthenticated", http.MethodGet, "/.well-known/oauth-protected-resource", http.StatusOK},
+		{"MCP root requires a token", http.MethodGet, "/", http.StatusUnauthorized},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			rec := httptest.NewRecorder()
-			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			handler.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
 			if rec.Code != tt.wantStatus {
-				t.Errorf("GET %s = %d, want %d", tt.path, rec.Code, tt.wantStatus)
+				t.Errorf("%s %s = %d, want %d", tt.method, tt.path, rec.Code, tt.wantStatus)
+			}
+		})
+	}
+
+	// The OAuth flow endpoints must be reachable without a bearer token: a
+	// client cannot present a token it has not yet obtained. These requests
+	// carry no Authorization header; a 401 here would mean the route got
+	// mounted behind the bearer-token guard instead of beside it.
+	unguarded := []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{"register is reachable without a bearer token", http.MethodPost, "/oauth/register"},
+		{"authorize is reachable without a bearer token", http.MethodGet, "/oauth/authorize"},
+	}
+	for _, tt := range unguarded {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(tt.method, tt.path, nil))
+			if rec.Code == http.StatusUnauthorized {
+				t.Errorf("%s %s = 401: route is mounted behind the bearer-token guard; OAuth flow endpoints must stay outside it since a client cannot present a token it has not yet obtained", tt.method, tt.path)
 			}
 		})
 	}

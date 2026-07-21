@@ -93,7 +93,7 @@ func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handle
 // authorization-server endpoints beside it. The OAuth and metadata routes sit
 // outside the bearer middleware: a client cannot present a token it has not yet
 // obtained. Returns a close func releasing the state-directory lock.
-func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config) (http.Handler, func() error, error) {
+func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config, discoveryClient *http.Client) (http.Handler, func() error, error) {
 	if err := cfg.Validate(); err != nil {
 		return nil, nil, err
 	}
@@ -108,7 +108,7 @@ func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config) (http.Handler, func
 	// bridge from serving already-issued tokens.
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if eps, err := oauth.DiscoverAuthentik(ctx, cfg.AuthentikIssuer, http.DefaultClient); err != nil {
+	if eps, err := oauth.DiscoverAuthentik(ctx, cfg.AuthentikIssuer, discoveryClient); err != nil {
 		slog.Warn("authentik discovery failed; new logins will be unavailable until it recovers", "err", err)
 	} else {
 		authServer.SetAuthentik(eps)
@@ -134,16 +134,18 @@ func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config) (http.Handler, func
 }
 
 // mcpStateDir resolves the OAuth state directory: the env override wins,
-// otherwise ~/.local/state/bridge-mcp.
-func mcpStateDir() string {
+// otherwise ~/.local/state/bridge-mcp. A home-resolution failure is returned
+// as an error rather than surfacing downstream as a misleading "missing
+// BRIDGE_MCP_STATE_DIR" diagnostic.
+func mcpStateDir() (string, error) {
 	if dir := os.Getenv("BRIDGE_MCP_STATE_DIR"); dir != "" {
-		return dir
+		return dir, nil
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("resolve home directory for default OAuth state dir: %w", err)
 	}
-	return filepath.Join(home, ".local", "state", "bridge-mcp")
+	return filepath.Join(home, ".local", "state", "bridge-mcp"), nil
 }
 
 // validateNoAuthHost fails fast when --no-auth is combined with a
@@ -165,6 +167,9 @@ func isLoopbackHost(host string) bool {
 }
 
 func runMCPServe(cmd *cobra.Command, _ []string) error {
+	if mcpNoAuth && mcpAuthMode == "oauth" {
+		return fmt.Errorf("--no-auth is incompatible with --auth=oauth: OAuth mode always requires a bearer token")
+	}
 	if err := validateNoAuthHost(mcpHost, mcpNoAuth); err != nil {
 		return err
 	}
@@ -189,14 +194,19 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	case "static":
 		handler, err = buildMCPHandler(srv, os.Getenv("BRIDGE_MCP_TOKEN"), mcpNoAuth)
 	case "oauth":
+		var stateDir string
+		stateDir, err = mcpStateDir()
+		if err != nil {
+			return err
+		}
 		handler, cleanup, err = buildOAuthHandler(srv, oauth.Config{
 			Issuer:          os.Getenv("BRIDGE_MCP_ISSUER"),
 			AuthentikIssuer: os.Getenv("BRIDGE_OIDC_ISSUER"),
 			ClientID:        os.Getenv("BRIDGE_OIDC_CLIENT_ID"),
 			ClientSecret:    os.Getenv("BRIDGE_OIDC_CLIENT_SECRET"),
 			AllowedSubject:  os.Getenv("BRIDGE_OIDC_ALLOWED_SUB"),
-			StateDir:        mcpStateDir(),
-		})
+			StateDir:        stateDir,
+		}, http.DefaultClient)
 	default:
 		return fmt.Errorf("--auth must be static or oauth, got %q", mcpAuthMode)
 	}
@@ -218,7 +228,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	slog.Info("Bridge MCP", "addr", "http://"+addr, "read_only", deps.ReadOnly, "auth", !mcpNoAuth)
+	slog.Info("Bridge MCP", "addr", "http://"+addr, "read_only", deps.ReadOnly, "auth", !mcpNoAuth, "auth_mode", mcpAuthMode)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
