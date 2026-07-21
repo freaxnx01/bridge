@@ -3,19 +3,26 @@ package oauth
 import (
 	"encoding/json"
 	"net/http"
+	"time"
 )
 
 // Server exposes bridge's authorization-server endpoints. It is constructed by
 // cmd/bridge and mounted outside the bearer middleware: a client cannot present
 // a token it has not yet obtained.
 type Server struct {
-	cfg   Config
-	store *Store
+	cfg        Config
+	store      *Store
+	httpClient *http.Client
+	authentik  *authentikEndpoints
 }
 
 // NewServer returns a Server backed by store.
 func NewServer(cfg Config, store *Store) *Server {
-	return &Server{cfg: cfg, store: store}
+	return &Server{
+		cfg:        cfg,
+		store:      store,
+		httpClient: &http.Client{Timeout: 15 * time.Second},
+	}
 }
 
 // Handler returns the mux for the OAuth subtree and metadata documents.
