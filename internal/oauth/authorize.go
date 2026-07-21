@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -70,6 +71,7 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		// gate also covers a registration that predates a tightened
 		// allowlist, or one loaded from a persisted state file written under
 		// an older config. Byte-exact, same discipline as above.
+		slog.Warn("authorization rejected: redirect_uri not in allowlist", "client_id", q.Get("client_id"), "redirect_uri", redirectURI)
 		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri is not in the configured allowlist")
 		return
 	}

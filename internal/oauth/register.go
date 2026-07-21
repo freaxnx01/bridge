@@ -2,6 +2,7 @@ package oauth
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"slices"
@@ -36,6 +37,7 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			// attacker could otherwise register a redirect_uri they control
 			// and steal an authorization code by borrowing the authorized
 			// user's login. Only pre-configured destinations are accepted.
+			slog.Warn("registration rejected: redirect_uri not in allowlist", "redirect_uri", raw)
 			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri is not in the configured allowlist")
 			return
 		}
