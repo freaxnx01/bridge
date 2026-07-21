@@ -101,6 +101,49 @@ A binary can't change its parent shell's working directory. So `~/.local/share/b
 
 The shim is ≤20 lines of logic on purpose. All real work lives in the binary.
 
+## MCP server
+
+`bridge mcp serve` runs a self-hosted, remote (Streamable HTTP) MCP endpoint exposing four cross-forge tools (`list_repos`, `read_file`, `create_issue`, `cross_forge_status`) over GitHub + Forgejo. `--read-only` omits the write tool by construction. `--host`/`--port` bind the listener (default `127.0.0.1:7788`); `--no-auth` skips bearer auth entirely and requires a loopback `--host`.
+
+The `--auth` flag selects how callers authenticate:
+
+| `--auth` value | Behavior |
+|---|---|
+| `static` (default) | A single static bearer token from `BRIDGE_MCP_TOKEN`, checked on every request. This is what's in live use today. |
+| `oauth` | Bridge acts as its own OAuth 2.1 authorization server so Claude custom connectors (web and mobile) can authenticate — see below. |
+
+`--no-auth` combined with `--auth=oauth` is a startup error, not a silent downgrade: OAuth mode always requires a bearer token.
+
+### `--auth=oauth`
+
+Claude connectors are dialled from Anthropic's servers and can't send a static bearer token — only OAuth, including Dynamic Client Registration (RFC 7591) and PKCE. authentik (this deployment's identity provider) advertises no `registration_endpoint` and supports no public clients, so it can't serve as the authorization server for Claude directly. Bridge therefore acts as the authorization server itself, and delegates only the human login step to authentik via OIDC. Access and refresh tokens are opaque random values, stored hashed — bridge is both sole issuer and sole verifier, so nothing is gained from JWTs.
+
+`--auth=oauth` requires six environment variables (`internal/oauth/config.go`):
+
+| Env var | Purpose |
+|---|---|
+| `BRIDGE_MCP_ISSUER` | Bridge's own public base URL (the OAuth issuer). Must be `https://`, except `http://` on loopback for local development. |
+| `BRIDGE_OIDC_ISSUER` | The authentik issuer URL bridge discovers its OIDC endpoints from. |
+| `BRIDGE_OIDC_CLIENT_ID` | Bridge's own client ID registered with authentik. |
+| `BRIDGE_OIDC_CLIENT_SECRET` | Bridge's own client secret registered with authentik. |
+| `BRIDGE_OIDC_ALLOWED_SUB` | The single authentik `sub` permitted to complete a login; any other subject is rejected. |
+| `BRIDGE_MCP_STATE_DIR` | Directory for the OAuth state file (registered clients, codes, tokens). Defaults to `~/.local/state/bridge-mcp` when unset. |
+
+Startup fails fast, reporting every missing variable at once, rather than one restart per missing value. Discovering authentik's endpoints at startup is best-effort: if authentik is unreachable, bridge still starts and serves already-issued tokens — only new logins are unavailable until it recovers.
+
+Access tokens live 1 hour, refresh tokens 30 days (with rotation and reuse-detected revocation of the whole chain). Authorization codes are single-use and expire after 60 seconds. Registered clients are capped at 100, with unused registrations pruned after 24 hours. In-flight login sessions (between `/oauth/authorize` and the authentik callback) are capped at 2000 concurrent; once full, new authorize requests are shed with a 503 rather than evicting a legitimate in-flight login.
+
+> `--auth=oauth` is only reachable by Claude connectors if the endpoint is
+> published to the internet. Doing so means the `read_file` tool is exposed to
+> the public network, guarded solely by this OAuth implementation. Review the
+> threat model in the design doc before enabling it.
+
+Design doc: [`docs/superpowers/specs/2026-07-20-mcp-oauth-resource-server-design.md`](docs/superpowers/specs/2026-07-20-mcp-oauth-resource-server-design.md).
+
+**Deployment is a separate, not-yet-made decision.** Wiring this up so Claude connectors can actually reach it additionally requires dropping the `internal-secured` IP whitelist from the Traefik dispatcher route for this endpoint and adding a Cloudflare DNS record — neither has been done. Until then, `--auth=oauth` is only reachable on the local network.
+
+**Windows note:** the single-instance state-directory lock is `flock`-based (self-releasing on process exit) on Linux, where the MCP server actually deploys. The Windows build uses exclusive file creation instead, compile-verified only (no Windows host was available to exercise it); a stale lock file left behind by a crash on Windows needs manual removal.
+
 ## Credential flow
 
 Forge API calls run with tokens loaded from each target dir's `.envrc` (direnv → Passbolt). HTTPS clones use an inline `credential.helper` (GitHub). Forgejo clone uses SSH (port 222) via `~/.ssh/config`. GitLab clone uses HTTPS via the `GIT_CONFIG_*` helpers the dir's `.envrc` wires.
