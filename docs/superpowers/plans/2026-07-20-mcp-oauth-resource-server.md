@@ -10,6 +10,37 @@
 
 **Spec:** `docs/superpowers/specs/2026-07-20-mcp-oauth-resource-server-design.md`
 
+## Status (as of 2026-07-20)
+
+**Nothing in this plan has been implemented.** `internal/oauth/` does not exist; no
+Go file has been created or modified for #205. Task 1 is the next step.
+
+Done:
+- Spec written, reviewed, approved, committed (`bfb1bf9`).
+- This plan written and committed (`10755c9`). Both pushed to branch `worktree-mcp`.
+- Issue [#205](https://github.com/freaxnx01/bridge/issues/205) body updated with the
+  acceptance criteria and links to both documents.
+
+Key decision this plan rests on, established during enrichment by querying the live
+provider discovery documents: **authentik cannot be the authorization server.** It
+advertises no `registration_endpoint` (no RFC 7591 DCR) and only
+`client_secret_post`/`client_secret_basic` (no public clients); Claude requires both.
+Bridge is therefore the authorization server itself and delegates only the human
+login to authentik via OIDC. Do not "simplify" the design back to pointing Claude
+directly at authentik — that was tried and disproved.
+
+Before starting, consider:
+- **#204** (Forgejo client falls back to codeberg.org and leaks the token) should be
+  fixed first, since #205 only pays off once this endpoint is internet-facing.
+- **Deployment is out of scope here.** Making connectors work additionally requires
+  dropping the `internal-secured` IP whitelist from the Traefik dispatcher route and
+  adding a Cloudflare DNS record — a separate, deliberate decision.
+
+Current deployment (unchanged by this work): `bridge mcp serve` runs as the
+`bridge-mcp.service` systemd **user** unit on agent-dev, LAN-only behind
+`https://bridge-mcp.home.freaxnx01.ch`, using `--auth=static` with a bearer token in
+`~/.config/bridge-mcp/env`. That mode must keep working untouched.
+
 ## Global Constraints
 
 - **No new Go modules.** Everything uses the stdlib plus the already-present `go-sdk`. Do not add a JWT, OAuth, assertion, or mocking library.
