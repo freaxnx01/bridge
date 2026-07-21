@@ -157,10 +157,3 @@ func (s *Store) save() error {
 	}
 	return nil
 }
-
-// Temporary stubs for fileLock/acquireLock/release (from Task 2).
-// These will be deleted and replaced with real implementations in Task 2.
-type fileLock struct{}
-
-func acquireLock(string) (*fileLock, error) { return &fileLock{}, nil }
-func (*fileLock) release() error            { return nil }
