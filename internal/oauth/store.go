@@ -97,11 +97,13 @@ func OpenStore(dir string) (*Store, error) {
 		return s, nil
 	}
 	if err != nil {
-		lock.release()
+		// best-effort unlock; the primary error below is the actionable one
+		_ = lock.release()
 		return nil, fmt.Errorf("read state %s: %w", s.path, err)
 	}
 	if err := json.Unmarshal(data, &s.st); err != nil {
-		lock.release()
+		// best-effort unlock; the primary error below is the actionable one
+		_ = lock.release()
 		return nil, fmt.Errorf("parse state %s: %w", s.path, err)
 	}
 	if s.st.Clients == nil {
@@ -133,15 +135,18 @@ func (s *Store) save() error {
 	defer os.Remove(tmpName) // no-op once the rename succeeds
 
 	if err := tmp.Chmod(0o600); err != nil {
-		tmp.Close()
+		// best-effort close; the primary error below is the actionable one
+		_ = tmp.Close()
 		return fmt.Errorf("chmod temp state: %w", err)
 	}
 	if _, err := tmp.Write(data); err != nil {
-		tmp.Close()
+		// best-effort close; the primary error below is the actionable one
+		_ = tmp.Close()
 		return fmt.Errorf("write temp state: %w", err)
 	}
 	if err := tmp.Sync(); err != nil {
-		tmp.Close()
+		// best-effort close; the primary error below is the actionable one
+		_ = tmp.Close()
 		return fmt.Errorf("sync temp state: %w", err)
 	}
 	if err := tmp.Close(); err != nil {
