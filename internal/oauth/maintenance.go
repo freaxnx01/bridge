@@ -15,6 +15,15 @@ const (
 )
 
 // prune deletes expired codes and tokens. The caller must hold s.mu.
+//
+// This deletes consumed refresh records once they pass their own ExpiresAt,
+// even if the chain they belong to is still actively rotating (each rotation
+// mints a fresh 30-day refresh, so a live chain outlives the original
+// token's expiry). A replay of a token that old therefore looks like
+// "unknown refresh token" rather than reuse, and the live chain is not
+// revoked. Bounded, low-likelihood gap; see handleRefreshGrant's reuse
+// branch for the full trade-off — closing it needs tombstoning consumed
+// tokens past expiry, a design change beyond this task.
 func (s *Store) prune(now time.Time) {
 	for k, c := range s.st.Codes {
 		if !c.ExpiresAt.After(now) {

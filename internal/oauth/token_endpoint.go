@@ -118,12 +118,22 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "unknown refresh token")
 		return
 	case rec.Consumed:
+		// Bounded gap: prune (maintenance.go) deletes tokens past ExpiresAt,
+		// including consumed refresh records, once the original 30-day TTL
+		// passes — even though the chain may still be actively rotating past
+		// that point. A thief who replays a stolen token after that window
+		// gets "unknown refresh token" instead of triggering this branch, so
+		// the live chain is never revoked. Considered and accepted as a
+		// low-likelihood gap; closing it needs consumed-token tombstones
+		// retained past expiry, which is a design change beyond this task.
 		chain := rec.ChainID
+		clientID, subject := rec.ClientID, rec.Subject
 		s.store.revokeChain(chain)
 		saveErr := s.store.save()
 		s.store.mu.Unlock()
-		slog.Warn("refresh token reuse detected; chain revoked", "client_id", rec.ClientID, "sub", rec.Subject)
+		slog.Warn("refresh token reuse detected; chain revoked", "client_id", clientID, "sub", subject)
 		if saveErr != nil {
+			slog.Error("persist chain revocation failed", "client_id", clientID, "sub", subject)
 			writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not revoke chain")
 			return
 		}
@@ -142,9 +152,16 @@ func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request) {
 	rec.Consumed = true
 	subject, chainID := rec.Subject, rec.ChainID
 	saveErr := s.store.save()
+	if saveErr != nil {
+		// Revert the flag: the client never received a new pair, so the same
+		// refresh token must remain usable on retry rather than looking like
+		// reuse (which would falsely revoke the whole chain as theft).
+		rec.Consumed = false
+	}
 	s.store.mu.Unlock()
 
 	if saveErr != nil {
+		slog.Error("persist consumed refresh token failed", "client_id", clientID, "sub", subject)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not rotate token")
 		return
 	}

@@ -325,6 +325,33 @@ func TestHandleRefreshGrant_ReuseRevokesWholeChain(t *testing.T) {
 	}
 }
 
+// assertRejectedInvalidGrant asserts the exact status and error body a
+// rejected refresh grant must return.
+func assertRejectedInvalidGrant(t *testing.T, rec *httptest.ResponseRecorder) {
+	t.Helper()
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d (body %s)", rec.Code, http.StatusBadRequest, rec.Body)
+	}
+	var body oauthErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body.Error != "invalid_grant" {
+		t.Errorf("error = %q, want invalid_grant", body.Error)
+	}
+}
+
+// assertChainIntact asserts that refresh still rotates successfully — i.e.
+// the chain was not revoked by whatever rejection just happened.
+func assertChainIntact(t *testing.T, srv *Server, cid, refresh string) {
+	t.Helper()
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(refreshForm(cid, refresh)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("chain was revoked by the rejection: rotation status = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+}
+
 func TestHandleRefreshGrant_ExpiredTokenRejected(t *testing.T) {
 	srv := newTestServer(t)
 	cid := registerClient(t, srv, registeredRedirect)
@@ -336,9 +363,14 @@ func TestHandleRefreshGrant_ExpiredTokenRejected(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.handleToken(rec, tokenRequest(refreshForm(cid, refresh)))
-	if rec.Code == http.StatusOK {
-		t.Error("expired refresh token was accepted")
-	}
+	assertRejectedInvalidGrant(t, rec)
+
+	// Un-expire it and confirm the chain is still intact, i.e. the rejection
+	// did not revoke anything.
+	srv.store.mu.Lock()
+	srv.store.st.Tokens[hashSecret(refresh)].ExpiresAt = time.Now().Add(refreshTokenTTL)
+	srv.store.mu.Unlock()
+	assertChainIntact(t, srv, cid, refresh)
 }
 
 func TestHandleRefreshGrant_ClientIDMismatchRejected(t *testing.T) {
@@ -348,9 +380,11 @@ func TestHandleRefreshGrant_ClientIDMismatchRejected(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.handleToken(rec, tokenRequest(refreshForm("another-client", refresh)))
-	if rec.Code == http.StatusOK {
-		t.Error("refresh token accepted with mismatched client_id")
-	}
+	assertRejectedInvalidGrant(t, rec)
+
+	// The legitimate client's own refresh must still work afterward — the
+	// mismatched attempt must not have revoked the chain.
+	assertChainIntact(t, srv, cid, refresh)
 }
 
 func TestHandleRefreshGrant_UnknownTokenRejected(t *testing.T) {
@@ -359,21 +393,21 @@ func TestHandleRefreshGrant_UnknownTokenRejected(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.handleToken(rec, tokenRequest(refreshForm(cid, "no-such-refresh-token")))
-	if rec.Code == http.StatusOK {
-		t.Error("unknown refresh token was accepted")
-	}
+	assertRejectedInvalidGrant(t, rec)
 }
 
 func TestHandleRefreshGrant_AccessTokenRejectedAsRefresh(t *testing.T) {
 	srv := newTestServer(t)
 	cid := registerClient(t, srv, registeredRedirect)
-	access, _ := exchangeCode(t, srv, cid)
+	access, refresh := exchangeCode(t, srv, cid)
 
 	rec := httptest.NewRecorder()
 	srv.handleToken(rec, tokenRequest(refreshForm(cid, access)))
-	if rec.Code == http.StatusOK {
-		t.Error("access token was accepted as a refresh token")
-	}
+	assertRejectedInvalidGrant(t, rec)
+
+	// Presenting the access token as a refresh token must not disturb the
+	// real refresh token's chain.
+	assertChainIntact(t, srv, cid, refresh)
 }
 
 func TestHandleToken_UnsupportedGrantType(t *testing.T) {
