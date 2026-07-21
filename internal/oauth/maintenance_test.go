@@ -81,3 +81,43 @@ func TestEnforceClientCap_DropsRegistrationsNeverUsed(t *testing.T) {
 		t.Error("old but used registration was dropped")
 	}
 }
+
+func TestEnforceClientCap_NeverUsedButRecentSurvivesInEviction(t *testing.T) {
+	now := time.Now()
+	s := &Store{st: state{Clients: map[string]*Client{}, Codes: map[string]*Code{}, Tokens: map[string]*Token{}}}
+
+	// Create maxClients+4 used clients. The first 5 have the oldest LastUsedAt.
+	for i := 0; i < maxClients+4; i++ {
+		s.st.Clients[fmt.Sprintf("c%03d", i)] = &Client{
+			CreatedAt:  now.Add(-time.Duration(maxClients+5-i) * time.Minute),
+			LastUsedAt: now.Add(-time.Duration(maxClients+5-i) * time.Minute),
+		}
+	}
+
+	// Add a recent client that was never used (LastUsedAt zero).
+	// Phase 1 does not drop it (CreatedAt is within unusedClientTTL).
+	// Phase 2 must sort by the CreatedAt fallback to keep it alive;
+	// without the fallback, time.Time zero would sort as far-past and be evicted first.
+	s.st.Clients["recent-never-used"] = &Client{
+		CreatedAt:  now.Add(-time.Minute),
+		LastUsedAt: time.Time{},
+	}
+
+	s.enforceClientCap(now)
+
+	if len(s.st.Clients) != maxClients {
+		t.Fatalf("client count = %d, want %d", len(s.st.Clients), maxClients)
+	}
+
+	// Recent never-used client must survive; it sorts as recent via CreatedAt fallback.
+	if _, ok := s.st.Clients["recent-never-used"]; !ok {
+		t.Error("recent never-used client was evicted; CreatedAt fallback not working")
+	}
+
+	// The oldest 5 used clients should be evicted to make room.
+	for i := 0; i < 5; i++ {
+		if _, ok := s.st.Clients[fmt.Sprintf("c%03d", i)]; ok {
+			t.Errorf("c%03d survived eviction", i)
+		}
+	}
+}
