@@ -99,8 +99,64 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	})
 }
 
-// handleRefreshGrant is a placeholder; Task 12 replaces it with refresh-token
-// rotation and reuse detection.
-func (s *Server) handleRefreshGrant(w http.ResponseWriter, _ *http.Request) {
-	writeOAuthError(w, http.StatusBadRequest, "unsupported_grant_type", "not implemented yet")
+// handleRefreshGrant rotates a refresh token. Presenting one that has already
+// been consumed means the token leaked, so the entire chain is revoked rather
+// than just refusing the request.
+func (s *Server) handleRefreshGrant(w http.ResponseWriter, r *http.Request) {
+	var (
+		clientID = r.PostForm.Get("client_id")
+		raw      = r.PostForm.Get("refresh_token")
+		now      = time.Now()
+	)
+
+	s.store.mu.Lock()
+	rec, ok := s.store.st.Tokens[hashSecret(raw)]
+	switch {
+	case !ok || rec.Kind != KindRefresh:
+		s.store.mu.Unlock()
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "unknown refresh token")
+		return
+	case rec.Consumed:
+		chain := rec.ChainID
+		s.store.revokeChain(chain)
+		saveErr := s.store.save()
+		s.store.mu.Unlock()
+		slog.Warn("refresh token reuse detected; chain revoked", "client_id", rec.ClientID, "sub", rec.Subject)
+		if saveErr != nil {
+			writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not revoke chain")
+			return
+		}
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token reuse detected; re-authorization required")
+		return
+	case !rec.ExpiresAt.After(now):
+		s.store.mu.Unlock()
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token expired")
+		return
+	case rec.ClientID != clientID:
+		s.store.mu.Unlock()
+		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "refresh token was not issued to this client")
+		return
+	}
+
+	rec.Consumed = true
+	subject, chainID := rec.Subject, rec.ChainID
+	saveErr := s.store.save()
+	s.store.mu.Unlock()
+
+	if saveErr != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not rotate token")
+		return
+	}
+
+	access, refresh, err := s.store.IssueTokenPair(clientID, subject, chainID, now)
+	if err != nil {
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue tokens")
+		return
+	}
+	writeJSON(w, http.StatusOK, map[string]any{
+		"access_token":  access,
+		"refresh_token": refresh,
+		"token_type":    "Bearer",
+		"expires_in":    int(accessTokenTTL.Seconds()),
+	})
 }

@@ -28,6 +28,15 @@ func (s *Store) prune(now time.Time) {
 	}
 }
 
+// revokeChain deletes every token sharing chainID. The caller must hold s.mu.
+func (s *Store) revokeChain(chainID string) {
+	for k, tok := range s.st.Tokens {
+		if tok.ChainID == chainID {
+			delete(s.st.Tokens, k)
+		}
+	}
+}
+
 // enforceClientCap drops never-used registrations past their TTL, then evicts
 // the oldest-used clients until the table is within maxClients. The caller
 // must hold s.mu.

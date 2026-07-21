@@ -1,6 +1,7 @@
 package oauth
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
@@ -232,4 +233,199 @@ func TestHandleToken_CodeIsSingleUseAndExpires(t *testing.T) {
 			t.Errorf("retry error = %q, want invalid_grant", secondBody.Error)
 		}
 	})
+}
+
+func refreshForm(clientID, refresh string) url.Values {
+	f := url.Values{}
+	f.Set("grant_type", "refresh_token")
+	f.Set("client_id", clientID)
+	f.Set("refresh_token", refresh)
+	return f
+}
+
+// exchangeCode runs a full code grant and returns the token pair.
+func exchangeCode(t *testing.T, srv *Server, cid string) (string, string) {
+	t.Helper()
+	const verifier = "the-verifier-value-must-be-long-enough"
+	code := seedCode(t, srv, cid, registeredRedirect, challengeFor(verifier), time.Now().Add(authCodeTTL))
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(codeGrantForm(cid, code, verifier, registeredRedirect)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("code grant failed: %d %s", rec.Code, rec.Body)
+	}
+	var resp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	return resp.AccessToken, resp.RefreshToken
+}
+
+func TestHandleRefreshGrant_RotatesTokens(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	_, refresh := exchangeCode(t, srv, cid)
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(refreshForm(cid, refresh)))
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	var resp struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.RefreshToken == refresh {
+		t.Error("refresh token was not rotated")
+	}
+	if resp.AccessToken == "" {
+		t.Error("no access token issued")
+	}
+}
+
+func TestHandleRefreshGrant_ReuseRevokesWholeChain(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	_, original := exchangeCode(t, srv, cid)
+
+	// Legitimate rotation.
+	first := httptest.NewRecorder()
+	srv.handleToken(first, tokenRequest(refreshForm(cid, original)))
+	if first.Code != http.StatusOK {
+		t.Fatalf("rotation failed: %d %s", first.Code, first.Body)
+	}
+	var rotated struct {
+		AccessToken  string `json:"access_token"`
+		RefreshToken string `json:"refresh_token"`
+	}
+	if err := json.Unmarshal(first.Body.Bytes(), &rotated); err != nil {
+		t.Fatal(err)
+	}
+
+	// Replaying the consumed token indicates theft.
+	replay := httptest.NewRecorder()
+	srv.handleToken(replay, tokenRequest(refreshForm(cid, original)))
+	if replay.Code == http.StatusOK {
+		t.Fatal("consumed refresh token was accepted")
+	}
+
+	// The whole chain must now be dead, including the freshly rotated tokens.
+	after := httptest.NewRecorder()
+	srv.handleToken(after, tokenRequest(refreshForm(cid, rotated.RefreshToken)))
+	if after.Code == http.StatusOK {
+		t.Error("rotated refresh token still works after a reuse was detected")
+	}
+	if _, err := srv.store.Verifier()(context.Background(), rotated.AccessToken, nil); err == nil {
+		t.Error("access token from the revoked chain still verifies")
+	}
+}
+
+func TestHandleRefreshGrant_ExpiredTokenRejected(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	_, refresh := exchangeCode(t, srv, cid)
+
+	srv.store.mu.Lock()
+	srv.store.st.Tokens[hashSecret(refresh)].ExpiresAt = time.Now().Add(-time.Second)
+	srv.store.mu.Unlock()
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(refreshForm(cid, refresh)))
+	if rec.Code == http.StatusOK {
+		t.Error("expired refresh token was accepted")
+	}
+}
+
+func TestHandleRefreshGrant_ClientIDMismatchRejected(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	_, refresh := exchangeCode(t, srv, cid)
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(refreshForm("another-client", refresh)))
+	if rec.Code == http.StatusOK {
+		t.Error("refresh token accepted with mismatched client_id")
+	}
+}
+
+func TestHandleRefreshGrant_UnknownTokenRejected(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(refreshForm(cid, "no-such-refresh-token")))
+	if rec.Code == http.StatusOK {
+		t.Error("unknown refresh token was accepted")
+	}
+}
+
+func TestHandleRefreshGrant_AccessTokenRejectedAsRefresh(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	access, _ := exchangeCode(t, srv, cid)
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(refreshForm(cid, access)))
+	if rec.Code == http.StatusOK {
+		t.Error("access token was accepted as a refresh token")
+	}
+}
+
+func TestHandleToken_UnsupportedGrantType(t *testing.T) {
+	srv := newTestServer(t)
+
+	f := url.Values{}
+	f.Set("grant_type", "client_credentials")
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(f))
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body)
+	}
+	var body oauthErrorBody
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal error body: %v", err)
+	}
+	if body.Error != "unsupported_grant_type" {
+		t.Errorf("error = %q, want unsupported_grant_type", body.Error)
+	}
+}
+
+func TestHandleToken_OversizeBodyRejected(t *testing.T) {
+	srv := newTestServer(t)
+
+	huge := strings.Repeat("a", 17<<10)
+	form := "grant_type=" + huge
+	r := httptest.NewRequest(http.MethodPost, "/oauth/token", strings.NewReader(form))
+	r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, r)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400 (body %s)", rec.Code, rec.Body)
+	}
+}
+
+func TestHandleToken_SuccessResponseHasNoStoreCacheControl(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	const verifier = "the-verifier-value-must-be-long-enough"
+	code := seedCode(t, srv, cid, registeredRedirect, challengeFor(verifier), time.Now().Add(authCodeTTL))
+
+	rec := httptest.NewRecorder()
+	srv.handleToken(rec, tokenRequest(codeGrantForm(cid, code, verifier, registeredRedirect)))
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200 (body %s)", rec.Code, rec.Body)
+	}
+	if got := rec.Header().Get("Cache-Control"); got != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store", got)
+	}
 }
