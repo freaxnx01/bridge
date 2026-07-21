@@ -17,6 +17,12 @@ func TestAuthServerMetadata_AdvertisesWhatClaudeNeeds(t *testing.T) {
 	if rec.Code != http.StatusOK {
 		t.Fatalf("status = %d, want 200", rec.Code)
 	}
+	if cacheControl := rec.Header().Get("Cache-Control"); cacheControl != "no-store" {
+		t.Errorf("Cache-Control = %q, want no-store (responses must not be cached by intermediaries)", cacheControl)
+	}
+	if contentType := rec.Header().Get("Content-Type"); contentType != "application/json" {
+		t.Errorf("Content-Type = %q, want application/json", contentType)
+	}
 	var meta struct {
 		Issuer                 string   `json:"issuer"`
 		Authorization          string   `json:"authorization_endpoint"`
