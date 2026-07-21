@@ -7,4 +7,4 @@
 │   github/public/bridge                                                                                               │
 │   gitlab/o/agent                                                                                                     │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend · ctrl+f forge · q quit
+↑↓ move · g/G first/last · ⏎ open/attach · / filter · r/^r refresh · ctrl+n new · tab panes · ? legend · ctrl+f forge · q quit

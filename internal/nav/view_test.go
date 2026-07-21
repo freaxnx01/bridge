@@ -418,3 +418,15 @@ func TestView_Dash_HintMentionsLegend(t *testing.T) {
 		t.Errorf("dashboard hint should mention ? legend:\n%s", out)
 	}
 }
+
+func TestViewPicker_HintLine_AdvertisesCtrlRRefresh(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{{label: "github/public/bridge"}}
+
+	out := m.View()
+
+	if !strings.Contains(out, "r/^r refresh") {
+		t.Errorf("picker hint should advertise both r and ^r for refresh; got:\n%s", out)
+	}
+}

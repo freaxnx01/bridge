@@ -1356,3 +1356,67 @@ func TestUpdate_RemoteMsg_KeepsForgeFilterWhenStillPresent(t *testing.T) {
 		t.Errorf("forgeFilter should be kept while its forge is still present, got %q", got)
 	}
 }
+
+func TestUpdatePicker_CtrlR_FilterFocused_RefetchesFromForge(t *testing.T) {
+	m := initialModel(Config{
+		FetchRemote: func(_ context.Context) ([]forge.RepoRef, error) {
+			return []forge.RepoRef{{Forge: "github", Owner: "acme", Name: "alpha"}}, nil
+		},
+	})
+	if m.pickerFocus != focusFilter {
+		t.Fatalf("precondition: the picker should start focused on the filter")
+	}
+
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+
+	if got := out.(Model).remoteState; got != loadPending {
+		t.Fatalf("remoteState = %d, want loadPending while fetching", got)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+r should return a fetch Cmd from filter focus")
+	}
+	rm, ok := cmd().(remoteMsg)
+	if !ok {
+		t.Fatalf("cmd msg = %T, want remoteMsg", cmd())
+	}
+	if len(rm.rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rm.rows))
+	}
+}
+
+func TestUpdatePicker_CtrlR_ListFocused_RefetchesFromForge(t *testing.T) {
+	m := initialModel(Config{
+		FetchRemote: func(_ context.Context) ([]forge.RepoRef, error) {
+			return []forge.RepoRef{{Forge: "github", Owner: "acme", Name: "alpha"}}, nil
+		},
+	})
+	m.pickerFocus = focusList
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+
+	if cmd == nil {
+		t.Fatal("ctrl+r should return a fetch Cmd from list focus")
+	}
+	if _, ok := cmd().(remoteMsg); !ok {
+		t.Fatalf("cmd msg = %T, want remoteMsg", cmd())
+	}
+}
+
+func TestUpdatePicker_R_FilterFocused_StillTypesIntoFilter(t *testing.T) {
+	fetched := false
+	m := initialModel(Config{
+		FetchRemote: func(_ context.Context) ([]forge.RepoRef, error) {
+			fetched = true
+			return nil, nil
+		},
+	})
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	if got := out.(Model).filter.Value(); got != "r" {
+		t.Errorf("filter = %q, want %q — bare r must stay typeable for filtering", got, "r")
+	}
+	if fetched {
+		t.Error("bare r in the filter must not trigger a forge fetch")
+	}
+}
