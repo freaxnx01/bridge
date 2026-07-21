@@ -297,7 +297,7 @@ func (m Model) viewPicker() string {
 	}
 	sections = append(sections, panel(w, title, strings.TrimRight(rb.String(), "\n")))
 
-	hint := "↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend"
+	hint := "↑↓ move · g/G first/last · ⏎ open/attach · / filter · r/^r refresh · ctrl+n new · tab panes · ? legend"
 	if m.forgeSubfilterVisible() {
 		hint += " · ctrl+f forge"
 	}

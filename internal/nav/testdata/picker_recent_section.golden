@@ -10,4 +10,4 @@
 │   github/public/bridge                                                                                               │
 │   github/public/agent-os                                                                                             │
 ╰──────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
-↑↓ move · g/G first/last · ⏎ open/attach · / filter · r refresh · ctrl+n new · tab panes · ? legend · q quit
+↑↓ move · g/G first/last · ⏎ open/attach · / filter · r/^r refresh · ctrl+n new · tab panes · ? legend · q quit

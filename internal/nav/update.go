@@ -403,6 +403,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.cycleForge(1)
 		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
 		return m, nil
+	case "ctrl+r":
+		// Picker-global twin of the focusList 'r' below, so refresh is reachable
+		// from focusFilter — where the picker starts and a bare 'r' has to stay
+		// typeable for filtering.
+		m.remoteState = loadPending
+		return m, m.refreshRemoteCmd()
 	}
 
 	if m.pickerFocus == focusSessions {
