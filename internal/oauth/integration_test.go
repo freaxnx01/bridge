@@ -8,12 +8,79 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+
+	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 )
 
 // TestEndToEnd_FullConnectorFlow walks the path a Claude connector takes:
 // discovery, dynamic registration, authorization, the authentik login, the
 // token exchange, and finally an authenticated call.
 func TestEndToEnd_FullConnectorFlow(t *testing.T) {
+	store, accessToken := obtainAccessTokenViaFlow(t)
+
+	// The access token authenticates at the resource server.
+	info, err := store.Verifier()(context.Background(), accessToken, nil)
+	if err != nil {
+		t.Fatalf("issued access token rejected: %v", err)
+	}
+	if info.UserID != "sub-123" {
+		t.Errorf("UserID = %q, want sub-123", info.UserID)
+	}
+}
+
+// TestEndToEnd_BearerMiddlewareGuardsProtectedRoute drives a token minted by
+// the real flow through the same auth.RequireBearerToken middleware
+// production wires in front of the MCP transport (cmd/bridge/mcp.go's
+// buildOAuthHandler). It exists because every other test either checks the
+// unauthenticated 401 path or calls store.Verifier() directly, so nothing
+// asserted that a real, valid token actually reaches the protected handler
+// through the middleware.
+func TestEndToEnd_BearerMiddlewareGuardsProtectedRoute(t *testing.T) {
+	store, accessToken := obtainAccessTokenViaFlow(t)
+
+	protected := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	})
+	guarded := sdkauth.RequireBearerToken(store.Verifier(), nil)(protected)
+	front := httptest.NewServer(guarded)
+	defer front.Close()
+
+	tests := []struct {
+		name       string
+		authHeader string
+		wantStatus int
+	}{
+		{"valid token reaches the handler", "Bearer " + accessToken, http.StatusOK},
+		{"no header is rejected", "", http.StatusUnauthorized},
+		{"garbage token is rejected", "Bearer not-a-real-token", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, front.URL, nil)
+			if err != nil {
+				t.Fatalf("build request: %v", err)
+			}
+			if tt.authHeader != "" {
+				req.Header.Set("Authorization", tt.authHeader)
+			}
+			resp, err := front.Client().Do(req)
+			if err != nil {
+				t.Fatalf("do request: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != tt.wantStatus {
+				t.Errorf("status = %d, want %d", resp.StatusCode, tt.wantStatus)
+			}
+		})
+	}
+}
+
+// obtainAccessTokenViaFlow runs the full connector flow (discovery, dynamic
+// registration, authorization, the authentik login, and the token exchange)
+// and returns the resulting store and the minted access token, so tests that
+// need a real token don't hand-mint one.
+func obtainAccessTokenViaFlow(t *testing.T) (*Store, string) {
+	t.Helper()
 	fake := newFakeAuthentik(t, "sub-123")
 
 	store, err := OpenStore(t.TempDir())
@@ -141,12 +208,5 @@ func TestEndToEnd_FullConnectorFlow(t *testing.T) {
 		t.Fatalf("decode tokens: %v", err)
 	}
 
-	// 6. The access token authenticates at the resource server.
-	info, err := store.Verifier()(context.Background(), tokens.AccessToken, nil)
-	if err != nil {
-		t.Fatalf("issued access token rejected: %v", err)
-	}
-	if info.UserID != "sub-123" {
-		t.Errorf("UserID = %q, want sub-123", info.UserID)
-	}
+	return store, tokens.AccessToken
 }

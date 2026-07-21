@@ -132,7 +132,7 @@ func (s *Store) save() error {
 		return fmt.Errorf("create temp state: %w", err)
 	}
 	tmpName := tmp.Name()
-	defer os.Remove(tmpName) // no-op once the rename succeeds
+	defer func() { _ = os.Remove(tmpName) }() // no-op once the rename succeeds
 
 	if err := tmp.Chmod(0o600); err != nil {
 		// best-effort close; the primary error below is the actionable one
