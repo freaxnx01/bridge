@@ -3,6 +3,7 @@ package oauth
 import (
 	"encoding/json"
 	"net/http"
+	"sync"
 	"time"
 )
 
@@ -14,6 +15,9 @@ type Server struct {
 	store      *Store
 	httpClient *http.Client
 	authentik  *authentikEndpoints
+
+	sessMu   sync.Mutex
+	sessions map[string]*loginSession
 }
 
 // NewServer returns a Server backed by store.
@@ -22,6 +26,7 @@ func NewServer(cfg Config, store *Store) *Server {
 		cfg:        cfg,
 		store:      store,
 		httpClient: &http.Client{Timeout: 15 * time.Second},
+		sessions:   map[string]*loginSession{},
 	}
 }
 
@@ -47,6 +52,5 @@ func writeOAuthError(w http.ResponseWriter, status int, code, desc string) {
 	writeJSON(w, status, map[string]string{"error": code, "error_description": desc})
 }
 
-func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
-func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request)  { http.NotFound(w, r) }
-func (s *Server) handleToken(w http.ResponseWriter, r *http.Request)     { http.NotFound(w, r) }
+func (s *Server) handleCallback(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
+func (s *Server) handleToken(w http.ResponseWriter, r *http.Request)    { http.NotFound(w, r) }
