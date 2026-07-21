@@ -82,42 +82,54 @@ func TestHandleToken_CodeGrantIssuesTokens(t *testing.T) {
 	}
 }
 
+// oauthErrorBody mirrors the shape written by writeOAuthError.
+type oauthErrorBody struct {
+	Error string `json:"error"`
+}
+
 func TestHandleToken_CodeGrantRejections(t *testing.T) {
 	const verifier = "the-verifier-value-must-be-long-enough"
 
 	tests := []struct {
-		name    string
-		mutate  func(t *testing.T, srv *Server, cid string, form url.Values)
-		wantErr bool
+		name       string
+		mutate     func(t *testing.T, srv *Server, cid string, form url.Values)
+		wantStatus int
+		wantErr    string
 	}{
 		{
-			name:   "happy path",
-			mutate: func(*testing.T, *Server, string, url.Values) {},
+			name:       "happy path",
+			mutate:     func(*testing.T, *Server, string, url.Values) {},
+			wantStatus: http.StatusOK,
 		},
 		{
-			name:    "wrong verifier",
-			mutate:  func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("code_verifier", "wrong-verifier") },
-			wantErr: true,
+			name:       "wrong verifier",
+			mutate:     func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("code_verifier", "wrong-verifier") },
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "invalid_grant",
 		},
 		{
-			name:    "missing verifier",
-			mutate:  func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Del("code_verifier") },
-			wantErr: true,
+			name:       "missing verifier",
+			mutate:     func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Del("code_verifier") },
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "invalid_grant",
 		},
 		{
-			name:    "redirect_uri mismatch",
-			mutate:  func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("redirect_uri", "https://evil.com/cb") },
-			wantErr: true,
+			name:       "redirect_uri mismatch",
+			mutate:     func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("redirect_uri", "https://evil.com/cb") },
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "invalid_grant",
 		},
 		{
-			name:    "client_id mismatch",
-			mutate:  func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("client_id", "another-client") },
-			wantErr: true,
+			name:       "client_id mismatch",
+			mutate:     func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("client_id", "another-client") },
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "invalid_grant",
 		},
 		{
-			name:    "unknown code",
-			mutate:  func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("code", "no-such-code") },
-			wantErr: true,
+			name:       "unknown code",
+			mutate:     func(_ *testing.T, _ *Server, _ string, f url.Values) { f.Set("code", "no-such-code") },
+			wantStatus: http.StatusBadRequest,
+			wantErr:    "invalid_grant",
 		},
 	}
 	for _, tt := range tests {
@@ -131,11 +143,18 @@ func TestHandleToken_CodeGrantRejections(t *testing.T) {
 			rec := httptest.NewRecorder()
 			srv.handleToken(rec, tokenRequest(form))
 
-			if tt.wantErr && rec.Code == http.StatusOK {
-				t.Errorf("request accepted; want rejection (body %s)", rec.Body)
+			if rec.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body %s)", rec.Code, tt.wantStatus, rec.Body)
 			}
-			if !tt.wantErr && rec.Code != http.StatusOK {
-				t.Errorf("status = %d, want 200 (body %s)", rec.Code, rec.Body)
+			if tt.wantErr == "" {
+				return
+			}
+			var body oauthErrorBody
+			if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+				t.Fatalf("unmarshal error body: %v", err)
+			}
+			if body.Error != tt.wantErr {
+				t.Errorf("error = %q, want %q", body.Error, tt.wantErr)
 			}
 		})
 	}
@@ -171,6 +190,46 @@ func TestHandleToken_CodeIsSingleUseAndExpires(t *testing.T) {
 		srv.handleToken(rec, tokenRequest(codeGrantForm(cid, code, verifier, registeredRedirect)))
 		if rec.Code == http.StatusOK {
 			t.Error("expired code accepted")
+		}
+	})
+
+	// The code must be burned on the very first attempt, even when that
+	// attempt fails validation (e.g. a wrong PKCE verifier) — otherwise an
+	// attacker holding a stolen code gets a free retry with the correct
+	// verifier. This guards the delete-before-validate ordering in
+	// handleAuthorizationCodeGrant: moving the delete below the PKCE check
+	// would make the second attempt below succeed.
+	t.Run("code burned even when first attempt fails PKCE", func(t *testing.T) {
+		srv := newTestServer(t)
+		cid := registerClient(t, srv, registeredRedirect)
+		code := seedCode(t, srv, cid, registeredRedirect, challengeFor(verifier), time.Now().Add(authCodeTTL))
+
+		badForm := codeGrantForm(cid, code, "wrong-verifier", registeredRedirect)
+		first := httptest.NewRecorder()
+		srv.handleToken(first, tokenRequest(badForm))
+		if first.Code != http.StatusBadRequest {
+			t.Fatalf("first (bad verifier) status = %d, want %d (body %s)", first.Code, http.StatusBadRequest, first.Body)
+		}
+		var firstBody oauthErrorBody
+		if err := json.Unmarshal(first.Body.Bytes(), &firstBody); err != nil {
+			t.Fatalf("unmarshal first error body: %v", err)
+		}
+		if firstBody.Error != "invalid_grant" {
+			t.Errorf("first error = %q, want invalid_grant", firstBody.Error)
+		}
+
+		goodForm := codeGrantForm(cid, code, verifier, registeredRedirect)
+		second := httptest.NewRecorder()
+		srv.handleToken(second, tokenRequest(goodForm))
+		if second.Code != http.StatusBadRequest {
+			t.Fatalf("retry with correct verifier status = %d, want %d (body %s) — code was not burned on first failure", second.Code, http.StatusBadRequest, second.Body)
+		}
+		var secondBody oauthErrorBody
+		if err := json.Unmarshal(second.Body.Bytes(), &secondBody); err != nil {
+			t.Fatalf("unmarshal second error body: %v", err)
+		}
+		if secondBody.Error != "invalid_grant" {
+			t.Errorf("retry error = %q, want invalid_grant", secondBody.Error)
 		}
 	})
 }

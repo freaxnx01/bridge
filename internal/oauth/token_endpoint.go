@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/base64"
+	"log/slog"
 	"net/http"
 	"time"
 )
@@ -46,14 +47,24 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 		now         = time.Now()
 	)
 
+	codeHash := hashSecret(rawCode)
+
 	s.store.mu.Lock()
-	rec, ok := s.store.st.Codes[hashSecret(rawCode)]
+	rec, ok := s.store.st.Codes[codeHash]
 	if ok {
 		// Single-use: consume it regardless of whether validation passes, so a
 		// failed attempt cannot be retried against the same code.
-		delete(s.store.st.Codes, hashSecret(rawCode))
+		delete(s.store.st.Codes, codeHash)
 	}
+	s.store.prune(now)
+	saveErr := s.store.save()
 	s.store.mu.Unlock()
+
+	if saveErr != nil {
+		slog.Error("persist consumed authorization code failed", "err", saveErr)
+		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not persist code consumption")
+		return
+	}
 
 	if !ok || !rec.ExpiresAt.After(now) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_grant", "authorization code is unknown or expired")
@@ -75,6 +86,7 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 	}
 	access, refresh, err := s.store.IssueTokenPair(rec.ClientID, rec.Subject, chainID, now)
 	if err != nil {
+		slog.Error("issue token pair failed", "err", err)
 		writeOAuthError(w, http.StatusInternalServerError, "server_error", "could not issue tokens")
 		return
 	}
