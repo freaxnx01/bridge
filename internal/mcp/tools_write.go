@@ -106,7 +106,7 @@ func (d Deps) handleCreateRepo(ctx context.Context, _ *mcp.CallToolRequest, in c
 	}
 	return nil, createRepoOutput{
 		Draft: false,
-		Forge: in.Forge, Owner: repo.Owner, Name: repo.Name, Private: in.Private,
+		Forge: in.Forge, Owner: repo.Owner, Name: repo.Name, Private: repo.Visibility == "private",
 		Repo: &repo,
 	}, nil
 }

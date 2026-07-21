@@ -65,6 +65,10 @@ type fakeRepos struct {
 	forgeName        string
 	createRepoCalled *int
 	createRepoErr    error
+	// visibilityOverride, when non-empty, is returned as the RepoRef's
+	// Visibility regardless of the requested private flag — the only way to
+	// drive a forge response that disagrees with the request.
+	visibilityOverride string
 }
 
 func (f *fakeRepos) CreateRepo(_ context.Context, name string, private bool) (forge.RepoRef, error) {
@@ -77,6 +81,9 @@ func (f *fakeRepos) CreateRepo(_ context.Context, name string, private bool) (fo
 	visibility := "public"
 	if private {
 		visibility = "private"
+	}
+	if f.visibilityOverride != "" {
+		visibility = f.visibilityOverride
 	}
 	return forge.RepoRef{Forge: f.forgeName, Owner: "token-owner", Name: name, Visibility: visibility}, nil
 }

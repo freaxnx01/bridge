@@ -131,6 +131,29 @@ func TestHandleCreateRepo_ConfirmCreatesAndTakesOwnerFromRepoRef(t *testing.T) {
 	}
 }
 
+func TestHandleCreateRepo_ConfirmDerivesPrivateFromRepoRefNotRequest(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.createRepoCalled = &calls
+	// The forge downgrades the request: caller asked for private, the
+	// returned RepoRef says public. The response must report the forge's
+	// answer, not echo the request.
+	gh.visibilityOverride = "public"
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleCreateRepo(context.Background(), nil,
+		createRepoInput{Forge: "github", Owner: "freaxnx01", Name: "widget", Private: true, Confirm: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Private {
+		t.Errorf("Private must be derived from the returned RepoRef, not the request: got true, RepoRef.Visibility=%q", out.Repo.Visibility)
+	}
+	if out.Repo == nil || out.Repo.Visibility != "public" {
+		t.Fatalf("want the forge's visibility preserved in Repo, got %+v", out.Repo)
+	}
+}
+
 func TestHandleCreateRepo_UnconfiguredForgeErrors(t *testing.T) {
 	d := depsWith(map[string]*fakeFull{}, nil)
 

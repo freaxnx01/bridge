@@ -194,6 +194,25 @@ func TestHandleListRepos_TierOneClientIsFullyUsable(t *testing.T) {
 	}
 }
 
+func TestHandleListIssues_TierOneClientIsFullyUsable(t *testing.T) {
+	// The payoff: a client with only tier-1 capabilities still serves
+	// list_issues — ListOpenIssues is part of ForgeReader itself, so no
+	// capability assertion is needed (GitLab, ADO once wired).
+	reader := &fakeReader{name: "gitlab", issues: []forge.Issue{
+		{Forge: "gitlab", Repo: "acme/widget", Number: 3, Title: "flaky test"},
+	}}
+	d := Deps{ClientFor: func(string, string) ForgeReader { return reader }}
+
+	_, out, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "gitlab", Owner: "acme", Repo: "widget"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Issues) != 1 || out.Issues[0].Number != 3 {
+		t.Fatalf("tier-1 client must serve list_issues: %+v", out)
+	}
+}
+
 func TestHandleListIssues_ReturnsIssuesFromConfiguredForge(t *testing.T) {
 	gh := newFakeFull("github")
 	gh.issues = []forge.Issue{
