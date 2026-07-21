@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -18,9 +19,11 @@ import (
 
 	sdkauth "github.com/modelcontextprotocol/go-sdk/auth"
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
+	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
 	"github.com/freaxnx01/bridge/internal/forge"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
+	"github.com/freaxnx01/bridge/internal/oauth"
 	"github.com/freaxnx01/bridge/internal/overview"
 	"github.com/freaxnx01/bridge/internal/remote"
 )
@@ -30,6 +33,7 @@ var (
 	mcpHost     string
 	mcpReadOnly bool
 	mcpNoAuth   bool
+	mcpAuthMode string
 )
 
 func init() {
@@ -50,6 +54,7 @@ func newMCPCmd() *cobra.Command {
 	serveCmd.Flags().StringVar(&mcpHost, "host", "127.0.0.1", "host to bind to")
 	serveCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "disable write tools (create_issue is not registered)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
+	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
 	mcpCmd.AddCommand(serveCmd)
 	return mcpCmd
 }
@@ -82,6 +87,63 @@ func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handle
 	}
 	middleware := sdkauth.RequireBearerToken(imcp.StaticBearerVerifier(token), nil)
 	return middleware(streamable), nil
+}
+
+// buildOAuthHandler mounts the MCP transport behind OAuth bearer auth and the
+// authorization-server endpoints beside it. The OAuth and metadata routes sit
+// outside the bearer middleware: a client cannot present a token it has not yet
+// obtained. Returns a close func releasing the state-directory lock.
+func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config) (http.Handler, func() error, error) {
+	if err := cfg.Validate(); err != nil {
+		return nil, nil, err
+	}
+	store, err := oauth.OpenStore(cfg.StateDir)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	authServer := oauth.NewServer(cfg, store)
+
+	// Discovery is best-effort at startup: an authentik outage must not stop
+	// bridge from serving already-issued tokens.
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	if eps, err := oauth.DiscoverAuthentik(ctx, cfg.AuthentikIssuer, http.DefaultClient); err != nil {
+		slog.Warn("authentik discovery failed; new logins will be unavailable until it recovers", "err", err)
+	} else {
+		authServer.SetAuthentik(eps)
+	}
+
+	resourceMeta := sdkauth.ProtectedResourceMetadataHandler(&oauthex.ProtectedResourceMetadata{
+		Resource:             cfg.Issuer,
+		AuthorizationServers: []string{cfg.Issuer},
+	})
+
+	streamable := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
+	guarded := sdkauth.RequireBearerToken(store.Verifier(), &sdkauth.RequireBearerTokenOptions{
+		ResourceMetadataURL: strings.TrimRight(cfg.Issuer, "/") + "/.well-known/oauth-protected-resource",
+	})(streamable)
+
+	mux := http.NewServeMux()
+	mux.Handle("/.well-known/oauth-protected-resource", resourceMeta)
+	mux.Handle("/.well-known/oauth-authorization-server", authServer.Handler())
+	mux.Handle("/oauth/", authServer.Handler())
+	mux.Handle("/", guarded)
+
+	return mux, store.Close, nil
+}
+
+// mcpStateDir resolves the OAuth state directory: the env override wins,
+// otherwise ~/.local/state/bridge-mcp.
+func mcpStateDir() string {
+	if dir := os.Getenv("BRIDGE_MCP_STATE_DIR"); dir != "" {
+		return dir
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+	return filepath.Join(home, ".local", "state", "bridge-mcp")
 }
 
 // validateNoAuthHost fails fast when --no-auth is combined with a
@@ -117,10 +179,33 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	srv := imcp.NewServer(deps)
-	handler, err := buildMCPHandler(srv, os.Getenv("BRIDGE_MCP_TOKEN"), mcpNoAuth)
+
+	var (
+		handler http.Handler
+		err     error
+		cleanup = func() error { return nil }
+	)
+	switch mcpAuthMode {
+	case "static":
+		handler, err = buildMCPHandler(srv, os.Getenv("BRIDGE_MCP_TOKEN"), mcpNoAuth)
+	case "oauth":
+		handler, cleanup, err = buildOAuthHandler(srv, oauth.Config{
+			Issuer:          os.Getenv("BRIDGE_MCP_ISSUER"),
+			AuthentikIssuer: os.Getenv("BRIDGE_OIDC_ISSUER"),
+			ClientID:        os.Getenv("BRIDGE_OIDC_CLIENT_ID"),
+			ClientSecret:    os.Getenv("BRIDGE_OIDC_CLIENT_SECRET"),
+			AllowedSubject:  os.Getenv("BRIDGE_OIDC_ALLOWED_SUB"),
+			StateDir:        mcpStateDir(),
+		})
+	default:
+		return fmt.Errorf("--auth must be static or oauth, got %q", mcpAuthMode)
+	}
 	if err != nil {
 		return err
 	}
+	// The store holds an OS-level single-instance lock; release it on every
+	// exit path so a restart doesn't find the state directory still locked.
+	defer func() { _ = cleanup() }() // best-effort release; process is exiting regardless
 
 	addr := fmt.Sprintf("%s:%d", mcpHost, mcpPort)
 	httpSrv := &http.Server{

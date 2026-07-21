@@ -8,9 +8,9 @@ import (
 func TestDiscoverAuthentik_ReadsEndpoints(t *testing.T) {
 	fake := newFakeAuthentik(t, "sub-123")
 
-	eps, err := discoverAuthentik(context.Background(), fake.URL, fake.Client())
+	eps, err := DiscoverAuthentik(context.Background(), fake.URL, fake.Client())
 	if err != nil {
-		t.Fatalf("discoverAuthentik: %v", err)
+		t.Fatalf("DiscoverAuthentik: %v", err)
 	}
 	if eps.Token != fake.URL+"/token" {
 		t.Errorf("Token = %q, want %q", eps.Token, fake.URL+"/token")
@@ -24,7 +24,7 @@ func TestExchangeAndIdentify(t *testing.T) {
 	fake := newFakeAuthentik(t, "sub-123")
 	srv := newTestServer(t)
 	srv.httpClient = fake.Client()
-	eps, err := discoverAuthentik(context.Background(), fake.URL, fake.Client())
+	eps, err := DiscoverAuthentik(context.Background(), fake.URL, fake.Client())
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -16,7 +16,7 @@ func startedSession(t *testing.T, subject string) (*Server, string) {
 	fake := newFakeAuthentik(t, subject)
 	srv := newTestServer(t)
 	srv.httpClient = fake.Client()
-	eps, err := discoverAuthentik(context.Background(), fake.URL, fake.Client())
+	eps, err := DiscoverAuthentik(context.Background(), fake.URL, fake.Client())
 	if err != nil {
 		t.Fatal(err)
 	}

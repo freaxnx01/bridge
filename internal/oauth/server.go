@@ -14,7 +14,7 @@ type Server struct {
 	cfg        Config
 	store      *Store
 	httpClient *http.Client
-	authentik  *authentikEndpoints
+	authentik  *AuthentikEndpoints
 
 	sessMu   sync.Mutex
 	sessions map[string]*loginSession
@@ -28,6 +28,14 @@ func NewServer(cfg Config, store *Store) *Server {
 		httpClient: &http.Client{Timeout: 15 * time.Second},
 		sessions:   map[string]*loginSession{},
 	}
+}
+
+// SetAuthentik installs the discovered authentik endpoints. It must be called
+// during startup, before the server begins handling requests: the field is
+// read unsynchronized by request handlers, so any concurrent assignment after
+// serving has started would be a data race.
+func (s *Server) SetAuthentik(eps *AuthentikEndpoints) {
+	s.authentik = eps
 }
 
 // Handler returns the mux for the OAuth subtree and metadata documents.

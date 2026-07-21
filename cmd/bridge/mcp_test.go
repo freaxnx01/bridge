@@ -10,6 +10,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/forge"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
+	imcpoauth "github.com/freaxnx01/bridge/internal/oauth"
 )
 
 // fakeResolvedClient is a minimal forge.Client/imcp.ForgeReader double used to
@@ -217,5 +218,57 @@ func TestBuildMCPHandler_ValidBearerListsTools(t *testing.T) {
 	}
 	if len(res.Tools) != 5 {
 		t.Fatalf("read-only server: want 5 tools over HTTP, got %d", len(res.Tools))
+	}
+}
+
+func TestBuildOAuthHandler_RoutesAndMiddlewarePlacement(t *testing.T) {
+	dir := t.TempDir()
+	cfg := imcpoauth.Config{
+		Issuer:          "https://bridge-mcp.example.com",
+		AuthentikIssuer: "https://auth.example.com/application/o/bridge/",
+		ClientID:        "cid",
+		ClientSecret:    "secret",
+		AllowedSubject:  "sub-123",
+		StateDir:        dir,
+	}
+	srv := imcp.NewServer(imcp.Deps{})
+
+	handler, closeFn, err := buildOAuthHandler(srv, cfg)
+	if err != nil {
+		t.Fatalf("buildOAuthHandler: %v", err)
+	}
+	defer closeFn()
+
+	tests := []struct {
+		name       string
+		path       string
+		wantStatus int
+	}{
+		{"AS metadata is unauthenticated", "/.well-known/oauth-authorization-server", http.StatusOK},
+		{"resource metadata is unauthenticated", "/.well-known/oauth-protected-resource", http.StatusOK},
+		{"MCP root requires a token", "/", http.StatusUnauthorized},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			rec := httptest.NewRecorder()
+			handler.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, tt.path, nil))
+			if rec.Code != tt.wantStatus {
+				t.Errorf("GET %s = %d, want %d", tt.path, rec.Code, tt.wantStatus)
+			}
+		})
+	}
+}
+
+func TestBuildMCPHandler_StaticModeUnchanged(t *testing.T) {
+	srv := imcp.NewServer(imcp.Deps{})
+
+	if _, err := buildMCPHandler(srv, "", false); err == nil {
+		t.Error("want an error when a token is required but empty")
+	}
+	if _, err := buildMCPHandler(srv, "tok", false); err != nil {
+		t.Errorf("static mode with a token: %v", err)
+	}
+	if _, err := buildMCPHandler(srv, "", true); err != nil {
+		t.Errorf("--no-auth mode: %v", err)
 	}
 }

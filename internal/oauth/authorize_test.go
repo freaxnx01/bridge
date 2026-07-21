@@ -77,7 +77,7 @@ func TestHandleAuthorize_RedirectURIMustMatchExactly(t *testing.T) {
 func TestHandleAuthorize_AcceptsExactMatchAndRedirectsToAuthentik(t *testing.T) {
 	srv := newTestServer(t)
 	cid := registerClient(t, srv, registeredRedirect)
-	srv.authentik = &authentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+	srv.authentik = &AuthentikEndpoints{Authorization: "https://auth.example.com/authorize"}
 	rec := httptest.NewRecorder()
 
 	srv.handleAuthorize(rec, authorizeRequest(cid, registeredRedirect, "challenge-value", "S256"))
@@ -131,7 +131,7 @@ func TestHandleAuthorize_PKCERules(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			srv := newTestServer(t)
 			cid := registerClient(t, srv, registeredRedirect)
-			srv.authentik = &authentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+			srv.authentik = &AuthentikEndpoints{Authorization: "https://auth.example.com/authorize"}
 			rec := httptest.NewRecorder()
 
 			srv.handleAuthorize(rec, authorizeRequest(cid, registeredRedirect, tt.challenge, tt.method))
@@ -154,7 +154,7 @@ func TestHandleAuthorize_PKCERules(t *testing.T) {
 func TestHandleAuthorize_SessionCapRejectsWhenFull(t *testing.T) {
 	srv := newTestServer(t)
 	cid := registerClient(t, srv, registeredRedirect)
-	srv.authentik = &authentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+	srv.authentik = &AuthentikEndpoints{Authorization: "https://auth.example.com/authorize"}
 
 	srv.sessMu.Lock()
 	for i := 0; i < maxLoginSessions; i++ {
@@ -185,7 +185,7 @@ func TestHandleAuthorize_SessionCapRejectsWhenFull(t *testing.T) {
 func TestHandleAuthorize_ExpiredSessionsDoNotConsumeCap(t *testing.T) {
 	srv := newTestServer(t)
 	cid := registerClient(t, srv, registeredRedirect)
-	srv.authentik = &authentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+	srv.authentik = &AuthentikEndpoints{Authorization: "https://auth.example.com/authorize"}
 
 	// Fill the session table to exactly maxLoginSessions with entries whose
 	// CreatedAt is well past the TTL expiry. The sweep should delete all of

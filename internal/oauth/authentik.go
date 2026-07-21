@@ -9,16 +9,16 @@ import (
 	"strings"
 )
 
-// authentikEndpoints are the OIDC endpoints bridge uses as a confidential
+// AuthentikEndpoints are the OIDC endpoints bridge uses as a confidential
 // client of authentik.
-type authentikEndpoints struct {
+type AuthentikEndpoints struct {
 	Authorization string
 	Token         string
 	UserInfo      string
 }
 
-// discoverAuthentik reads the provider's OIDC discovery document.
-func discoverAuthentik(ctx context.Context, issuer string, c *http.Client) (*authentikEndpoints, error) {
+// DiscoverAuthentik reads the provider's OIDC discovery document.
+func DiscoverAuthentik(ctx context.Context, issuer string, c *http.Client) (*AuthentikEndpoints, error) {
 	metaURL := strings.TrimRight(issuer, "/") + "/.well-known/openid-configuration"
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
 	if err != nil {
@@ -44,7 +44,7 @@ func discoverAuthentik(ctx context.Context, issuer string, c *http.Client) (*aut
 	if doc.AuthorizationEndpoint == "" || doc.TokenEndpoint == "" || doc.UserInfoEndpoint == "" {
 		return nil, fmt.Errorf("discovery %s: missing required endpoints", metaURL)
 	}
-	return &authentikEndpoints{
+	return &AuthentikEndpoints{
 		Authorization: doc.AuthorizationEndpoint,
 		Token:         doc.TokenEndpoint,
 		UserInfo:      doc.UserInfoEndpoint,
