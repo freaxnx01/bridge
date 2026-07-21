@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"strings"
@@ -671,5 +672,107 @@ func TestIssueWorktreeName_LongTitleTruncatesSlug(t *testing.T) {
 	}
 	if strings.HasSuffix(wt, "-") {
 		t.Errorf("slug should not end with a hyphen: %q", wt)
+	}
+}
+
+// --- remote refresh (r / ctrl+r) ---
+
+// fakeRefresher records whether the injected forge refetch ran.
+type fakeRefresher struct {
+	calls int
+	err   error
+}
+
+func (f *fakeRefresher) refresh(ctx context.Context) error {
+	f.calls++
+	return f.err
+}
+
+func TestUpdatePicker_CtrlR_FilterFocused_RefetchesFromForge(t *testing.T) {
+	f := &fakeRefresher{}
+	m := initialModel(Config{RefreshRemote: f.refresh, RemoteCache: filepath.Join(t.TempDir(), "remote.list")})
+	if m.pickerFocus != focusFilter {
+		t.Fatalf("precondition: picker should start focused on the filter")
+	}
+
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlR})
+
+	got := out.(Model)
+	if got.remoteState != loadPending {
+		t.Errorf("remoteState = %d, want loadPending", got.remoteState)
+	}
+	if cmd == nil {
+		t.Fatal("ctrl+r should return a refetch Cmd")
+	}
+	cmd()
+	if f.calls != 1 {
+		t.Errorf("RefreshRemote called %d times, want 1", f.calls)
+	}
+}
+
+func TestUpdatePicker_R_ListFocused_RefetchesFromForge(t *testing.T) {
+	f := &fakeRefresher{}
+	m := initialModel(Config{RefreshRemote: f.refresh, RemoteCache: filepath.Join(t.TempDir(), "remote.list")})
+	m.pickerFocus = focusList
+	m.localRepos = []repoRow{{label: "a"}}
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	if cmd == nil {
+		t.Fatal("r should return a refetch Cmd when the list is focused")
+	}
+	cmd()
+	if f.calls != 1 {
+		t.Errorf("RefreshRemote called %d times, want 1", f.calls)
+	}
+}
+
+func TestUpdatePicker_R_FilterFocused_TypesIntoFilter(t *testing.T) {
+	f := &fakeRefresher{}
+	m := initialModel(Config{RefreshRemote: f.refresh})
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+
+	got := out.(Model)
+	if got.filter.Value() != "r" {
+		t.Errorf("filter = %q, want %q — bare r must stay typeable", got.filter.Value(), "r")
+	}
+	if f.calls != 0 {
+		t.Errorf("RefreshRemote called %d times, want 0", f.calls)
+	}
+}
+
+func TestRefreshRemoteCmd_FetchFails_ReturnsRemoteErr(t *testing.T) {
+	f := &fakeRefresher{err: errFake}
+	cfg := Config{RefreshRemote: f.refresh, RemoteCache: filepath.Join(t.TempDir(), "remote.list")}
+
+	msg := refreshRemoteCmd(cfg)()
+
+	if _, ok := msg.(remoteErrMsg); !ok {
+		t.Fatalf("msg = %T, want remoteErrMsg", msg)
+	}
+}
+
+func TestRefreshRemoteCmd_FetchSucceeds_ReturnsRowsFromRewrittenCache(t *testing.T) {
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	f := &fakeRefresher{}
+	// The real RefreshRemote rewrites the cache; the fake stands in for that.
+	write := func(ctx context.Context) error {
+		f.calls++
+		return forge.WriteRepoCache(cachePath, forge.RepoCache{
+			UpdatedAt: time.Now(),
+			Repos:     []forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "agent-workflow"}},
+		})
+	}
+	cfg := Config{RefreshRemote: write, RemoteCache: cachePath}
+
+	msg := refreshRemoteCmd(cfg)()
+
+	got, ok := msg.(remoteMsg)
+	if !ok {
+		t.Fatalf("msg = %T, want remoteMsg", msg)
+	}
+	if len(got.rows) != 1 || !strings.Contains(got.rows[0].label, "agent-workflow") {
+		t.Fatalf("rows = %+v, want the freshly fetched agent-workflow row", got.rows)
 	}
 }

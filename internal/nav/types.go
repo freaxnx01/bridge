@@ -175,6 +175,11 @@ type Config struct {
 	// IssueCacheDir is the directory for per-repo issue cache files.
 	// Empty disables caching (and, combined with nil FetchIssues, skips all issue loading).
 	IssueCacheDir string
+	// RefreshRemote refetches the repo list from every configured forge and
+	// rewrites RemoteCache. Bound to r / ctrl+r in the picker. Injected by
+	// cmd/bridge so internal/nav stays forge-token-free; nil falls back to
+	// re-reading the cache from disk.
+	RefreshRemote func(ctx context.Context) error
 }
 
 // --- messages ---

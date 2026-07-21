@@ -228,3 +228,15 @@ func TestDirtyView_States(t *testing.T) {
 		})
 	}
 }
+
+func TestViewPicker_HintLine_AdvertisesRemoteRefresh(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 100, 30
+	m.localRepos = []repoRow{{label: "github/public/bridge"}}
+
+	out := m.View()
+
+	if !strings.Contains(out, "^r refresh") {
+		t.Errorf("picker hint should advertise ^r refresh; got:\n%s", out)
+	}
+}

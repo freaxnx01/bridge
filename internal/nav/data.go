@@ -73,6 +73,11 @@ func buildSessionRows(live []core.Session, slots []core.Slot, now time.Time) []s
 	return rows
 }
 
+// remoteRefreshTimeout bounds an interactive r / ctrl+r refetch. Longer than
+// the picker preflight's 5s because the user explicitly asked and is watching
+// a spinner, but still short enough that a hung forge can't wedge the TUI.
+const remoteRefreshTimeout = 30 * time.Second
+
 func loadRemoteCmd(cachePath string) tea.Cmd {
 	return func() tea.Msg {
 		c, err := forge.ReadRepoCache(cachePath)
@@ -86,6 +91,21 @@ func loadRemoteCmd(cachePath string) tea.Cmd {
 		}
 		sortRepoRows(rows)
 		return remoteMsg{rows: rows}
+	}
+}
+
+// refreshRemoteCmd refetches the repo list from the forge, then re-reads the
+// cache RefreshRemote just rewrote. A fetch failure surfaces as remoteErrMsg,
+// which keeps the previously loaded rows on screen (see Update) so a network
+// blip doesn't empty the picker.
+func refreshRemoteCmd(cfg Config) tea.Cmd {
+	return func() tea.Msg {
+		ctx, cancel := context.WithTimeout(context.Background(), remoteRefreshTimeout)
+		defer cancel()
+		if err := cfg.RefreshRemote(ctx); err != nil {
+			return remoteErrMsg{err: err}
+		}
+		return loadRemoteCmd(cfg.RemoteCache)()
 	}
 }
 

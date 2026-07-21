@@ -56,6 +56,12 @@ var navCmd = &cobra.Command{
 				return c.ListOpenIssues(ctx, owner, repo)
 			},
 			IssueCacheDir: filepath.Join(cacheRoot(), "issues"),
+			RefreshRemote: func(ctx context.Context) error {
+				// Bypasses remoteTTL: the user pressed refresh, so a cache younger
+				// than the TTL is exactly the case they want overridden.
+				_, err := loadOrFetchRemote(ctx, nil, true)
+				return err
+			},
 		}
 		return nav.Run(cfg)
 	},

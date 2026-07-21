@@ -172,6 +172,19 @@ func (m Model) dirtyCmds() tea.Cmd {
 	return tea.Batch(cmds...)
 }
 
+// startRemoteRefresh kicks off a forge refetch of the remote repo list. With no
+// RefreshRemote injected it degrades to re-reading remote.list from disk, which
+// is all this key used to do.
+func (m Model) startRemoteRefresh() (tea.Model, tea.Cmd) {
+	m.remoteState = loadPending
+	if m.cfg.RefreshRemote == nil {
+		return m, loadRemoteCmd(m.cfg.RemoteCache)
+	}
+	// No spin.Tick here: Init starts the spinner and spinner.Update
+	// re-arms it, so batching another tick would just double its rate.
+	return m, refreshRemoteCmd(m.cfg)
+}
+
 // visibleRepos is the filtered local+remote row list shown in the picker.
 // Remote rows already cloned locally are dropped so a repo isn't listed twice;
 // rows from different owners that share a name are owner-qualified so they're
@@ -196,6 +209,10 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.cyclePickerFocus(), nil
 	case "shift+tab":
 		return m.cyclePickerFocusBack(), nil
+	case "ctrl+r":
+		// Picker-global so refresh is reachable from the default focus, where a
+		// bare 'r' has to stay typeable for filtering.
+		return m.startRemoteRefresh()
 	}
 
 	if m.pickerFocus == focusSessions {
@@ -305,8 +322,7 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m.pickerFocus = focusFilter
 		m.filter.Focus()
 	case "r":
-		m.remoteState = loadPending
-		return m, loadRemoteCmd(m.cfg.RemoteCache)
+		return m.startRemoteRefresh()
 	case "enter":
 		if len(rows) == 0 {
 			return m, nil
