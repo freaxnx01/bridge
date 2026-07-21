@@ -51,5 +51,3 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func writeOAuthError(w http.ResponseWriter, status int, code, desc string) {
 	writeJSON(w, status, map[string]string{"error": code, "error_description": desc})
 }
-
-func (s *Server) handleToken(w http.ResponseWriter, r *http.Request) { http.NotFound(w, r) }
