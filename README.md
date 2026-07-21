@@ -118,7 +118,7 @@ The `--auth` flag selects how callers authenticate:
 
 Claude connectors are dialled from Anthropic's servers and can't send a static bearer token — only OAuth, including Dynamic Client Registration (RFC 7591) and PKCE. authentik (this deployment's identity provider) advertises no `registration_endpoint` and supports no public clients, so it can't serve as the authorization server for Claude directly. Bridge therefore acts as the authorization server itself, and delegates only the human login step to authentik via OIDC. Access and refresh tokens are opaque random values, stored hashed — bridge is both sole issuer and sole verifier, so nothing is gained from JWTs.
 
-`--auth=oauth` requires six environment variables (`internal/oauth/config.go`):
+`--auth=oauth` requires seven environment variables (`internal/oauth/config.go`):
 
 | Env var | Purpose |
 |---|---|
@@ -128,8 +128,11 @@ Claude connectors are dialled from Anthropic's servers and can't send a static b
 | `BRIDGE_OIDC_CLIENT_SECRET` | Bridge's own client secret registered with authentik. |
 | `BRIDGE_OIDC_ALLOWED_SUB` | The single authentik `sub` permitted to complete a login; any other subject is rejected. |
 | `BRIDGE_MCP_STATE_DIR` | Directory for the OAuth state file (registered clients, codes, tokens). Defaults to `~/.local/state/bridge-mcp` when unset. |
+| `BRIDGE_MCP_ALLOWED_REDIRECT_URIS` | Comma-separated allowlist of redirect URIs bridge will ever accept, e.g. `https://claude.ai/api/mcp/auth_callback`. Entries are trimmed of surrounding whitespace when parsed. |
 
 Startup fails fast, reporting every missing variable at once, rather than one restart per missing value. Discovering authentik's endpoints at startup is best-effort: if authentik is unreachable, bridge still starts and serves already-issued tokens — only new logins are unavailable until it recovers.
+
+`/oauth/register` is unauthenticated by spec (RFC 7591) — Claude assumes it is not pre-registered. Without `BRIDGE_MCP_ALLOWED_REDIRECT_URIS`, an attacker could register their own client pointing at a redirect URI they control, send the authorized user a crafted `/oauth/authorize` link, and have the resulting authorization code land at their own server once the user's live authentik session completes the login silently — every other check (exact redirect match, PKCE, the single allowed `sub`) still passes, because the attacker registered that redirect URI and generated their own PKCE verifier. The allowlist is checked at both `/oauth/register` and `/oauth/authorize`, so a client's own registration is never sufficient on its own — do not remove either check.
 
 Access tokens live 1 hour, refresh tokens 30 days (with rotation and reuse-detected revocation of the whole chain). Authorization codes are single-use and expire after 60 seconds. Registered clients are capped at 100, with unused registrations pruned after 24 hours. In-flight login sessions (between `/oauth/authorize` and the authentik callback) are capped at 2000 concurrent; once full, new authorize requests are shed with a 503 rather than evicting a legitimate in-flight login.
 

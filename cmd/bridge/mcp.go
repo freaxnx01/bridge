@@ -74,6 +74,24 @@ func parseOwners(s string) []imcp.Target {
 	return out
 }
 
+// parseAllowedRedirectURIs parses BRIDGE_MCP_ALLOWED_REDIRECT_URIS: a
+// comma-separated list of absolute redirect URIs bridge will accept at
+// /oauth/register and /oauth/authorize. Entries are trimmed of surrounding
+// whitespace, since a comma-separated value in a systemd unit file very often
+// has spaces after commas; Config.Validate rejects any entry that is empty
+// or not an absolute URL.
+func parseAllowedRedirectURIs(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, len(parts))
+	for i, p := range parts {
+		out[i] = strings.TrimSpace(p)
+	}
+	return out
+}
+
 // buildMCPHandler mounts srv on a Streamable HTTP handler and, unless noAuth is
 // set, wraps it in bearer-token middleware. It fails fast when a token is
 // required but empty.
@@ -200,12 +218,13 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 			return err
 		}
 		handler, cleanup, err = buildOAuthHandler(srv, oauth.Config{
-			Issuer:          os.Getenv("BRIDGE_MCP_ISSUER"),
-			AuthentikIssuer: os.Getenv("BRIDGE_OIDC_ISSUER"),
-			ClientID:        os.Getenv("BRIDGE_OIDC_CLIENT_ID"),
-			ClientSecret:    os.Getenv("BRIDGE_OIDC_CLIENT_SECRET"),
-			AllowedSubject:  os.Getenv("BRIDGE_OIDC_ALLOWED_SUB"),
-			StateDir:        stateDir,
+			Issuer:              os.Getenv("BRIDGE_MCP_ISSUER"),
+			AuthentikIssuer:     os.Getenv("BRIDGE_OIDC_ISSUER"),
+			ClientID:            os.Getenv("BRIDGE_OIDC_CLIENT_ID"),
+			ClientSecret:        os.Getenv("BRIDGE_OIDC_CLIENT_SECRET"),
+			AllowedSubject:      os.Getenv("BRIDGE_OIDC_ALLOWED_SUB"),
+			StateDir:            stateDir,
+			AllowedRedirectURIs: parseAllowedRedirectURIs(os.Getenv("BRIDGE_MCP_ALLOWED_REDIRECT_URIS")),
 		}, http.DefaultClient)
 	default:
 		return fmt.Errorf("--auth must be static or oauth, got %q", mcpAuthMode)

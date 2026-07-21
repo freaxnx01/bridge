@@ -243,12 +243,13 @@ func TestBuildOAuthHandler_RoutesAndMiddlewarePlacement(t *testing.T) {
 
 	dir := t.TempDir()
 	cfg := imcpoauth.Config{
-		Issuer:          "https://bridge-mcp.example.com",
-		AuthentikIssuer: discovery.URL,
-		ClientID:        "cid",
-		ClientSecret:    "secret",
-		AllowedSubject:  "sub-123",
-		StateDir:        dir,
+		Issuer:              "https://bridge-mcp.example.com",
+		AuthentikIssuer:     discovery.URL,
+		ClientID:            "cid",
+		ClientSecret:        "secret",
+		AllowedSubject:      "sub-123",
+		StateDir:            dir,
+		AllowedRedirectURIs: []string{"https://claude.ai/api/mcp/auth_callback"},
 	}
 	srv := imcp.NewServer(imcp.Deps{})
 

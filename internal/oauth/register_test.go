@@ -61,6 +61,8 @@ func TestHandleRegister_RejectsBadRequests(t *testing.T) {
 		{"empty redirect_uris", `{"redirect_uris":[]}`},
 		{"malformed json", `{`},
 		{"non-absolute redirect", `{"redirect_uris":["/relative"]}`},
+		{"redirect outside allowlist", `{"redirect_uris":["https://evil.example/cb"]}`},
+		{"second redirect outside allowlist", `{"redirect_uris":["https://claude.ai/api/mcp/auth_callback","https://evil.example/cb"]}`},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,7 +90,7 @@ func TestHandleRegister_EnforcesClientCap(t *testing.T) {
 
 	rec := httptest.NewRecorder()
 	srv.handleRegister(rec, httptest.NewRequest(http.MethodPost, "/oauth/register",
-		strings.NewReader(`{"redirect_uris":["https://claude.ai/cb"]}`)))
+		strings.NewReader(`{"redirect_uris":["https://claude.ai/api/mcp/auth_callback"]}`)))
 	if rec.Code != http.StatusCreated {
 		t.Fatalf("status = %d, want 201", rec.Code)
 	}

@@ -17,6 +17,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   client registration and PKCE itself, delegating the human login to authentik
   via OIDC. Tokens are opaque and stored hashed; `--auth=static` remains the
   default and is unchanged. (#205)
+- `BRIDGE_MCP_ALLOWED_REDIRECT_URIS`: a required, comma-separated allowlist of
+  redirect URIs for `--auth=oauth`, enforced at both `/oauth/register` and
+  `/oauth/authorize`. Since dynamic client registration is unauthenticated by
+  spec, without this an attacker could register a client pointing at a
+  redirect URI they control and capture an authorization code by borrowing the
+  authorized user's live login session. (#205)
 
 ### Changed
 

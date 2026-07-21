@@ -226,6 +226,31 @@ func TestHandleAuthorize_ExpiredSessionsDoNotConsumeCap(t *testing.T) {
 	}
 }
 
+// TestHandleAuthorize_RejectsRedirectURIOutsideAllowlistEvenIfRegistered pins
+// the second, defense-in-depth enforcement point: a client's own registered
+// redirect_uris are not sufficient on their own, because an attacker who
+// completes /oauth/register unauthenticated can register any URI they
+// control. The allowlist gate must reject it even though it exactly matches
+// the client's registered list — otherwise a registration that predates a
+// tightened allowlist (or one loaded from an older persisted state file)
+// stays exploitable forever.
+func TestHandleAuthorize_RejectsRedirectURIOutsideAllowlistEvenIfRegistered(t *testing.T) {
+	srv := newTestServer(t)
+	offAllowlist := "https://evil.example/cb"
+	cid := registerClient(t, srv, offAllowlist)
+	srv.authentik = &AuthentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+	rec := httptest.NewRecorder()
+
+	srv.handleAuthorize(rec, authorizeRequest(cid, offAllowlist, "challenge-value", "S256"))
+
+	if rec.Code == http.StatusFound || rec.Code == http.StatusSeeOther {
+		t.Fatalf("redirected to %q, which is registered but not in the allowlist (Location %q)", offAllowlist, rec.Header().Get("Location"))
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", rec.Code)
+	}
+}
+
 func TestHandleAuthorize_UnknownClientRejected(t *testing.T) {
 	srv := newTestServer(t)
 	rec := httptest.NewRecorder()

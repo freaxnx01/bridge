@@ -7,12 +7,13 @@ import (
 
 func validConfig() Config {
 	return Config{
-		Issuer:          "https://bridge-mcp.example.com",
-		AuthentikIssuer: "https://auth.example.com/application/o/bridge/",
-		ClientID:        "cid",
-		ClientSecret:    "secret",
-		AllowedSubject:  "sub-123",
-		StateDir:        "/tmp/state",
+		Issuer:              "https://bridge-mcp.example.com",
+		AuthentikIssuer:     "https://auth.example.com/application/o/bridge/",
+		ClientID:            "cid",
+		ClientSecret:        "secret",
+		AllowedSubject:      "sub-123",
+		StateDir:            "/tmp/state",
+		AllowedRedirectURIs: []string{"https://claude.ai/api/mcp/auth_callback"},
 	}
 }
 
@@ -24,10 +25,39 @@ func TestConfigValidate_ReportsEveryMissingValueAtOnce(t *testing.T) {
 	for _, want := range []string{
 		"BRIDGE_MCP_ISSUER", "BRIDGE_OIDC_ISSUER",
 		"BRIDGE_OIDC_CLIENT_ID", "BRIDGE_OIDC_CLIENT_SECRET", "BRIDGE_OIDC_ALLOWED_SUB",
+		"BRIDGE_MCP_ALLOWED_REDIRECT_URIS",
 	} {
 		if !strings.Contains(err.Error(), want) {
 			t.Errorf("error %q does not mention %s", err, want)
 		}
+	}
+}
+
+func TestConfigValidate_AllowedRedirectURIs(t *testing.T) {
+	tests := []struct {
+		name    string
+		uris    []string
+		wantErr bool
+	}{
+		{"absolute https url", []string{"https://claude.ai/api/mcp/auth_callback"}, false},
+		{"multiple absolute urls", []string{"https://claude.ai/api/mcp/auth_callback", "https://example.com/cb"}, false},
+		{"relative path rejected", []string{"/relative"}, true},
+		{"empty entry rejected", []string{""}, true},
+		{"malformed url rejected", []string{"://nope"}, true},
+		{"one bad entry among good ones rejected", []string{"https://claude.ai/api/mcp/auth_callback", "/relative"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := validConfig()
+			c.AllowedRedirectURIs = tt.uris
+			err := c.Validate()
+			if tt.wantErr && err == nil {
+				t.Errorf("uris %v: want error, got nil", tt.uris)
+			}
+			if !tt.wantErr && err != nil {
+				t.Errorf("uris %v: unexpected error %v", tt.uris, err)
+			}
+		})
 	}
 }
 

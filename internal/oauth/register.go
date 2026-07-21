@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"slices"
 	"time"
 )
 
@@ -28,6 +29,14 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 		u, err := url.Parse(raw)
 		if err != nil || !u.IsAbs() {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri must be an absolute URL")
+			return
+		}
+		if !slices.Contains(s.cfg.AllowedRedirectURIs, raw) {
+			// Registration is unauthenticated by spec (RFC 7591), so an
+			// attacker could otherwise register a redirect_uri they control
+			// and steal an authorization code by borrowing the authorized
+			// user's login. Only pre-configured destinations are accepted.
+			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri is not in the configured allowlist")
 			return
 		}
 	}

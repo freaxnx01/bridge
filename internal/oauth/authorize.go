@@ -63,6 +63,16 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri does not exactly match a registered value")
 		return
 	}
+	if !slices.Contains(s.cfg.AllowedRedirectURIs, redirectURI) {
+		// Defense in depth: a client's own registered redirect_uris are not
+		// sufficient on their own, since /oauth/register is unauthenticated
+		// and an attacker can register any destination they control. This
+		// gate also covers a registration that predates a tightened
+		// allowlist, or one loaded from a persisted state file written under
+		// an older config. Byte-exact, same discipline as above.
+		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri is not in the configured allowlist")
+		return
+	}
 
 	challenge := q.Get("code_challenge")
 	if challenge == "" || q.Get("code_challenge_method") != "S256" {
