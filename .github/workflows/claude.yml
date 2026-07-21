@@ -11,7 +11,7 @@ permissions:            # a reusable workflow can't be granted more than its
 jobs:
   claude:
     if: github.event.label.name == 'ai-implement'
-    uses: freaxnx01/agent-pipeline/.github/workflows/claude-implement.yml@v1
+    uses: freaxnx01/agent-workflow/.github/workflows/claude-implement.yml@v1
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
     with:
