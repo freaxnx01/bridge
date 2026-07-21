@@ -51,13 +51,14 @@ func (s *Server) handleAuthorizationCodeGrant(w http.ResponseWriter, r *http.Req
 
 	s.store.mu.Lock()
 	rec, ok := s.store.st.Codes[codeHash]
+	var saveErr error
 	if ok {
 		// Single-use: consume it regardless of whether validation passes, so a
 		// failed attempt cannot be retried against the same code.
 		delete(s.store.st.Codes, codeHash)
+		s.store.prune(now)
+		saveErr = s.store.save()
 	}
-	s.store.prune(now)
-	saveErr := s.store.save()
 	s.store.mu.Unlock()
 
 	if saveErr != nil {
