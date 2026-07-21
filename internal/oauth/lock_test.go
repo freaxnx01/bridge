@@ -9,7 +9,6 @@ func TestOpenStore_SecondInstance_IsRejected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first OpenStore: %v", err)
 	}
-	defer first.Close()
 
 	second, err := OpenStore(dir)
 	if err == nil {
