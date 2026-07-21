@@ -92,8 +92,25 @@ func TestHandleAuthorize_AcceptsExactMatchAndRedirectsToAuthentik(t *testing.T) 
 	if loc.Host != "auth.example.com" {
 		t.Errorf("redirected to %q, want authentik", loc.Host)
 	}
-	if loc.Query().Get("state") == "" {
-		t.Error("no state on the authentik leg; the callback could not be correlated")
+	sessionID := loc.Query().Get("state")
+	if sessionID == "" {
+		t.Fatal("no state on the authentik leg; the callback could not be correlated")
+	}
+
+	srv.sessMu.Lock()
+	sess, ok := srv.sessions[sessionID]
+	srv.sessMu.Unlock()
+	if !ok {
+		t.Fatalf("no session stored for id %q", sessionID)
+	}
+	if sess.RedirectURI != registeredRedirect {
+		t.Errorf("session RedirectURI = %q, want the registered value %q", sess.RedirectURI, registeredRedirect)
+	}
+	if sess.ClientState != "client-state" {
+		t.Errorf("session ClientState = %q, want %q", sess.ClientState, "client-state")
+	}
+	if sess.CodeChallenge != "challenge-value" {
+		t.Errorf("session CodeChallenge = %q, want %q", sess.CodeChallenge, "challenge-value")
 	}
 }
 
@@ -119,13 +136,49 @@ func TestHandleAuthorize_PKCERules(t *testing.T) {
 
 			srv.handleAuthorize(rec, authorizeRequest(cid, registeredRedirect, tt.challenge, tt.method))
 
-			if tt.wantErr && rec.Code == http.StatusFound {
-				t.Errorf("PKCE %q/%q accepted; want rejection", tt.challenge, tt.method)
+			if tt.wantErr {
+				if rec.Code == http.StatusFound {
+					t.Fatalf("PKCE %q/%q accepted; want rejection (Location %q)", tt.challenge, tt.method, rec.Header().Get("Location"))
+				}
+				if rec.Code != http.StatusBadRequest {
+					t.Errorf("status = %d, want 400 for PKCE %q/%q", rec.Code, tt.challenge, tt.method)
+				}
 			}
 			if !tt.wantErr && rec.Code != http.StatusFound {
 				t.Errorf("status = %d, want 302", rec.Code)
 			}
 		})
+	}
+}
+
+func TestHandleAuthorize_SessionCapRejectsWhenFull(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	srv.authentik = &authentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+
+	srv.sessMu.Lock()
+	for i := 0; i < maxLoginSessions; i++ {
+		id, err := newSecret()
+		if err != nil {
+			srv.sessMu.Unlock()
+			t.Fatal(err)
+		}
+		srv.sessions[id] = &loginSession{CreatedAt: time.Now()}
+	}
+	srv.sessMu.Unlock()
+
+	rec := httptest.NewRecorder()
+	srv.handleAuthorize(rec, authorizeRequest(cid, registeredRedirect, "challenge-value", "S256"))
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d, want 503 when the session table is at capacity", rec.Code)
+	}
+
+	srv.sessMu.Lock()
+	n := len(srv.sessions)
+	srv.sessMu.Unlock()
+	if n > maxLoginSessions {
+		t.Errorf("sessions grew to %d, want capped at %d", n, maxLoginSessions)
 	}
 }
 

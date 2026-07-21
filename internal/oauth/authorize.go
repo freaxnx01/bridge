@@ -20,6 +20,17 @@ type loginSession struct {
 
 const loginSessionTTL = 10 * time.Minute
 
+// maxLoginSessions bounds the in-flight login table. /oauth/register is
+// unauthenticated dynamic client registration (RFC 7591), so an
+// unauthenticated caller can register once and then insert one session per
+// authorize request, bounded only by request rate x loginSessionTTL. Without
+// a cap, the per-request expiry sweep below is itself an amplifier: every
+// extra entry raises the cost of the sweep for every subsequent request,
+// all while holding sessMu. A few thousand comfortably exceeds any plausible
+// number of genuinely concurrent in-flight logins for a personal deployment
+// while still bounding memory.
+const maxLoginSessions = 2000
+
 // handleAuthorize validates the client's request and hands the user off to
 // authentik. Every failure here is reported locally rather than by redirecting:
 // an unvalidated redirect_uri must never be used as a redirect target, since
@@ -77,6 +88,13 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 			delete(s.sessions, id)
 		}
 	}
+	if len(s.sessions) >= maxLoginSessions {
+		s.sessMu.Unlock()
+		// The table is full even after expiring stale entries: shed load
+		// rather than evict a legitimate in-flight login to make room.
+		writeOAuthError(w, http.StatusServiceUnavailable, "temporarily_unavailable", "too many in-flight logins, try again shortly")
+		return
+	}
 	s.sessions[sessionID] = &loginSession{
 		ClientID:      q.Get("client_id"),
 		RedirectURI:   redirectURI,
@@ -99,5 +117,8 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 	uq.Set("state", sessionID)
 	upstream.RawQuery = uq.Encode()
 
+	// The Location carries the session id, a correlation secret for the
+	// callback leg — it must never be cached.
+	w.Header().Set("Cache-Control", "no-store")
 	http.Redirect(w, r, upstream.String(), http.StatusFound)
 }
