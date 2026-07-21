@@ -182,6 +182,50 @@ func TestHandleAuthorize_SessionCapRejectsWhenFull(t *testing.T) {
 	}
 }
 
+func TestHandleAuthorize_ExpiredSessionsDoNotConsumeCap(t *testing.T) {
+	srv := newTestServer(t)
+	cid := registerClient(t, srv, registeredRedirect)
+	srv.authentik = &authentikEndpoints{Authorization: "https://auth.example.com/authorize"}
+
+	// Fill the session table to exactly maxLoginSessions with entries whose
+	// CreatedAt is well past the TTL expiry. The sweep should delete all of
+	// them before checking the cap, so a new valid request should succeed.
+	expiredTime := time.Now().Add(-2 * loginSessionTTL)
+	srv.sessMu.Lock()
+	for i := 0; i < maxLoginSessions; i++ {
+		id, err := newSecret()
+		if err != nil {
+			srv.sessMu.Unlock()
+			t.Fatal(err)
+		}
+		srv.sessions[id] = &loginSession{CreatedAt: expiredTime}
+	}
+	lenBefore := len(srv.sessions)
+	srv.sessMu.Unlock()
+
+	// Issue a valid authorize request against a table full of expired sessions.
+	// The sweep must reclaim the expired entries before checking the cap.
+	rec := httptest.NewRecorder()
+	srv.handleAuthorize(rec, authorizeRequest(cid, registeredRedirect, "challenge-value", "S256"))
+
+	if rec.Code != http.StatusFound {
+		t.Fatalf("status = %d, want 302 (sweep should have cleared expired entries)", rec.Code)
+	}
+
+	srv.sessMu.Lock()
+	lenAfter := len(srv.sessions)
+	srv.sessMu.Unlock()
+
+	if lenAfter > maxLoginSessions {
+		t.Errorf("sessions grew to %d, want at most %d", lenAfter, maxLoginSessions)
+	}
+	// After the sweep, we should have far fewer entries (just the new one).
+	// Before the fix, this would be full of expired corpses.
+	if lenAfter >= lenBefore {
+		t.Errorf("sweep did not reclaim expired entries: before %d, after %d", lenBefore, lenAfter)
+	}
+}
+
 func TestHandleAuthorize_UnknownClientRejected(t *testing.T) {
 	srv := newTestServer(t)
 	rec := httptest.NewRecorder()
