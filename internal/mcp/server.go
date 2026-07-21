@@ -4,9 +4,9 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// NewServer builds the Bridge MCP server with the four cross-forge tools
-// registered. In read-only mode the write tool (create_issue) is not
-// registered at all, so there is nothing to bypass.
+// NewServer builds the Bridge MCP server with the seven cross-forge tools
+// registered. In read-only mode the write tools (create_issue, create_repo)
+// are not registered at all, so there is nothing to bypass.
 func NewServer(deps Deps) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "bridge", Version: "v1"}, nil)
 
@@ -21,6 +21,16 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleReadFile)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_issues",
+		Description: "List open issues for a single repository (live).",
+	}, deps.handleListIssues)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_git_forges",
+		Description: "List the configured forge targets, whether each is configured, and which tools it supports. Makes no network requests.",
+	}, deps.handleListGitForges)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "cross_forge_status",
 		Description: "Return the cross-forge overview snapshot (ranked items, inbox, roadmap).",
 	}, deps.handleCrossForgeStatus)
@@ -30,6 +40,11 @@ func NewServer(deps Deps) *mcp.Server {
 			Name:        "create_issue",
 			Description: "Create an issue. Without confirm=true this returns a draft and creates nothing.",
 		}, deps.handleCreateIssue)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "create_repo",
+			Description: "Create a repository. The owner input selects which account's token to use — the repo is created under that token's account, which may differ. Without confirm=true this returns a draft and creates nothing.",
+		}, deps.handleCreateRepo)
 	}
 
 	return srv

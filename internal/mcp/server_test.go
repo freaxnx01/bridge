@@ -38,9 +38,9 @@ func advertisedTools(t *testing.T, deps Deps) []string {
 	return names
 }
 
-func TestNewServer_RegistersFourToolsByDefault(t *testing.T) {
+func TestNewServer_RegistersExpectedToolSet(t *testing.T) {
 	names := advertisedTools(t, Deps{})
-	want := []string{"create_issue", "cross_forge_status", "list_repos", "read_file"}
+	want := []string{"create_issue", "create_repo", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "read_file"}
 	if len(names) != len(want) {
 		t.Fatalf("want %v, got %v", want, names)
 	}
@@ -51,14 +51,58 @@ func TestNewServer_RegistersFourToolsByDefault(t *testing.T) {
 	}
 }
 
-func TestNewServer_ReadOnlyOmitsCreateIssue(t *testing.T) {
+// TestListGitForges_AdvertisesOnlyRegisteredTools asserts the real invariant
+// behind the read/normal-mode capability tests above: every tool name
+// list_git_forges advertises in a forge's capabilities must be a tool the
+// server actually registered. A future write tool added to Capabilities but
+// forgotten in isWriteTool would previously only be caught by a count
+// mismatch (want 3, got 4) that doesn't name the offending tool; this fails
+// on the specific name instead.
+func TestListGitForges_AdvertisesOnlyRegisteredTools(t *testing.T) {
+	for _, readOnly := range []bool{false, true} {
+		name := "normal"
+		if readOnly {
+			name = "read-only"
+		}
+		t.Run(name, func(t *testing.T) {
+			d := Deps{
+				ReadOnly:      readOnly,
+				DefaultOwners: []Target{{Forge: "github", Owner: "o"}},
+				ClientFor:     func(string, string) ForgeReader { return newFakeFull("github") },
+			}
+			registered := advertisedTools(t, d)
+			registeredSet := make(map[string]bool, len(registered))
+			for _, n := range registered {
+				registeredSet[n] = true
+			}
+
+			_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, c := range out.Forges[0].Capabilities {
+				if !registeredSet[c] {
+					t.Errorf("list_git_forges advertised %q, but the server never registered it (registered: %v)", c, registered)
+				}
+			}
+		})
+	}
+}
+
+func TestNewServer_ReadOnlyOmitsBothWriteTools(t *testing.T) {
 	names := advertisedTools(t, Deps{ReadOnly: true})
-	for _, n := range names {
-		if n == "create_issue" {
-			t.Fatalf("read-only server must not advertise create_issue: %v", names)
+	want := []string{"cross_forge_status", "list_git_forges", "list_issues", "list_repos", "read_file"}
+	if len(names) != len(want) {
+		t.Fatalf("want %v, got %v", want, names)
+	}
+	for i := range want {
+		if names[i] != want[i] {
+			t.Fatalf("want %v, got %v", want, names)
 		}
 	}
-	if len(names) != 3 {
-		t.Fatalf("want 3 tools in read-only mode, got %v", names)
+	for _, n := range names {
+		if n == "create_issue" || n == "create_repo" {
+			t.Fatalf("read-only server must not advertise write tools: %v", names)
+		}
 	}
 }

@@ -12,14 +12,17 @@ implementation notes, see:
 
 ## What it is
 
-`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing four
-cross-forge tools over GitHub + Forgejo:
+`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing seven
+cross-forge tools over GitHub + Forgejo (five in `--read-only` mode):
 
 | Tool | Purpose | Notes |
 |---|---|---|
 | `list_repos` | List repos across configured (or requested) owners | Concurrent fan-out; partial failures land in a `warnings` field instead of failing the whole call |
 | `read_file` | Read a file's content + blob sha | Default branch only (no `ref` pinning in this slice) |
+| `list_issues` | List open issues for a single repo | Needs no capability assertion — part of the tier-1 `ForgeReader` surface, so it works on any wired forge |
+| `list_git_forges` | List the configured `(forge, owner)` targets, whether each is configured, and which tools it supports | Read-only, no network requests — resolution is cached per process |
 | `create_issue` | Create an issue | **Draft by default** — nothing is created unless called with `confirm: true`. Not registered at all when `--read-only` |
+| `create_repo` | Create a repository | **Draft by default**, same `confirm: true` gate. Not registered at all when `--read-only`. The `owner` input selects which account's **token** to use, not the destination — both clients POST to `/user/repos`, so the repo is created under whichever account the token belongs to, which may differ from the requested owner |
 | `cross_forge_status` | The same cross-forge overview snapshot `bridge nav`/WebUI use | Read-only |
 
 The endpoint is guarded by a **static bearer token** (`BRIDGE_MCP_TOKEN`),
@@ -45,7 +48,7 @@ and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 |---|---|---|
 | `--port` | `7788` | Port to listen on |
 | `--host` | `127.0.0.1` | Host to bind. Combining `--no-auth` with a non-loopback host is rejected at startup |
-| `--read-only` | `false` | Omits `create_issue` entirely (not just gated — never registered) |
+| `--read-only` | `false` | Omits `create_issue` and `create_repo` entirely (not just gated — never registered) |
 | `--no-auth` | `false` | Skips the bearer check. **Loopback only** — the server refuses to start otherwise |
 
 ### Environment variables
