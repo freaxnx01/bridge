@@ -151,7 +151,7 @@ func createAndClone(ctx context.Context, name, forgeName string, private bool) (
 		return core.Repo{}, forge.RepoRef{}, fmt.Errorf("unknown forge %q (use forgejo or github)", forgeName)
 	}
 	if err := cloneFn(ref.SSHURL, targetDir); err != nil {
-		return core.Repo{}, forge.RepoRef{}, fmt.Errorf("created %s but clone failed: %v\nclone manually: git clone %s %s",
+		return core.Repo{}, forge.RepoRef{}, fmt.Errorf("created %s but clone failed: %w\nclone manually: git clone %s %s",
 			ref.HTMLURL, err, ref.SSHURL, targetDir)
 	}
 	return core.Repo{

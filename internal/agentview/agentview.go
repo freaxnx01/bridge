@@ -60,7 +60,7 @@ type dto struct {
 func List(ctx context.Context, run Runner) ([]Session, error) {
 	out, err := run.Output(ctx, "claude", "agents", "--json")
 	if err != nil {
-		return nil, fmt.Errorf("%w: %v", ErrUnavailable, err)
+		return nil, fmt.Errorf("%w: %w", ErrUnavailable, err)
 	}
 	var raw []dto
 	if err := json.Unmarshal(out, &raw); err != nil {

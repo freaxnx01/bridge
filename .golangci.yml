@@ -2,7 +2,10 @@
 # .github/workflows/go.yml) and branch protection require this to pass.
 #
 # Policy: the standard linter set (errcheck, govet, ineffassign, staticcheck,
-# unused). errcheck stays meaningful for resource handles (Close/Release/Remove)
+# unused) plus three low-noise, high-value additions — bodyclose (net/http
+# bodies are closed), errorlint (correct %w wrapping and errors.Is/As usage, per
+# CLAUDE.md) and unconvert (redundant type conversions). errcheck stays
+# meaningful for resource handles (Close/Release/Remove)
 # but excludes user-facing CLI writes (fmt.Fprint*) — per the Go stack overlay,
 # CLI notices go to stderr via fmt.Fprintln and their write errors are not
 # actionable — and excludes test files (I/O errors in tests are noise). The
@@ -11,6 +14,10 @@ version: "2"
 
 linters:
   default: standard
+  enable:
+    - bodyclose   # response/request bodies are closed (net/http)
+    - errorlint   # correct %w wrapping and errors.Is/As usage (see CLAUDE.md)
+    - unconvert   # redundant type conversions
   settings:
     errcheck:
       exclude-functions:

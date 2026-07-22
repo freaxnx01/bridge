@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -53,7 +54,8 @@ func TestRmUnknownExits2(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected exit 2")
 	}
-	if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() != 2 {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) && ee.ExitCode() != 2 {
 		t.Errorf("exit %d", ee.ExitCode())
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -42,7 +43,7 @@ func runSyncAuto(cmd *cobra.Command) error {
 	pidPath := filepath.Join(cacheRoot(), "sync.pid")
 	release, err := store.AcquirePIDFile(pidPath)
 	if err != nil {
-		if err == store.ErrAlreadyRunning {
+		if errors.Is(err, store.ErrAlreadyRunning) {
 			existing, _ := store.ReadPIDFile(pidPath)
 			return fmt.Errorf("sync --auto already running (PID %d)", existing)
 		}

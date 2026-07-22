@@ -40,7 +40,8 @@ func pickRepo(repos []core.Repo) (core.Repo, bool, error) {
 	cmd.Stdout = &out
 	err := cmd.Run()
 	if err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 130 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 130 {
 			return core.Repo{}, false, nil
 		}
 		return core.Repo{}, false, err

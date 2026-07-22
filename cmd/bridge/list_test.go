@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,7 +18,8 @@ func runBridge(t *testing.T, root string, args ...string) (string, string, int) 
 	cmd.Stderr = &serr
 	err := cmd.Run()
 	code := 0
-	if ee, ok := err.(*exec.ExitError); ok {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
 		code = ee.ExitCode()
 	} else if err != nil {
 		t.Fatalf("run: %v", err)

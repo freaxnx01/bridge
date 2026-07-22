@@ -188,7 +188,8 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	if err := cmd.Run(); err != nil {
-		if ee, ok := err.(*exec.ExitError); ok && ee.ExitCode() == 130 {
+		var ee *exec.ExitError
+		if errors.As(err, &ee) && ee.ExitCode() == 130 {
 			return PickerChoice{}, false, nil
 		}
 		return PickerChoice{}, false, err
@@ -329,7 +330,7 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	// cloned repo content.
 	if direnvBlocked(execDir) {
 		if out, aerr := exec.Command("direnv", "allow", execDir).CombinedOutput(); aerr != nil {
-			return "", fmt.Errorf("clone: direnv allow %s: %v: %s", execDir, aerr, strings.TrimSpace(string(out)))
+			return "", fmt.Errorf("clone: direnv allow %s: %w: %s", execDir, aerr, strings.TrimSpace(string(out)))
 		}
 		fmt.Fprintf(os.Stderr, "bridge: approved direnv .envrc at %s\n", execDir)
 	}

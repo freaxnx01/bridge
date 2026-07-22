@@ -1,6 +1,7 @@
 package store
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -65,7 +66,7 @@ func TestAcquirePIDFileRejectsLiveHolder(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer release()
-	if _, err := AcquirePIDFile(p); err != ErrAlreadyRunning {
+	if _, err := AcquirePIDFile(p); !errors.Is(err, ErrAlreadyRunning) {
 		t.Errorf("got %v, want ErrAlreadyRunning", err)
 	}
 }

@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -79,7 +80,7 @@ func runWatch(cmd *cobra.Command, args []string) error {
 
 	release, err := store.AcquirePIDFile(pidPath)
 	if err != nil {
-		if err == store.ErrAlreadyRunning {
+		if errors.Is(err, store.ErrAlreadyRunning) {
 			existing, _ := store.ReadPIDFile(pidPath)
 			return fmt.Errorf("watch already running (PID %d)", existing)
 		}

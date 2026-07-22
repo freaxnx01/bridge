@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -383,7 +384,8 @@ func TestPreflightOpenUnknownRepoExits2(t *testing.T) {
 		t.Fatal("expected non-zero exit")
 	}
 	// go run wraps exit codes; accept either direct exit code 2 OR stderr containing "exit status 2".
-	if ee, ok := err.(*exec.ExitError); ok {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
 		if ee.ExitCode() != 2 && !strings.Contains(string(out), "exit status 2") {
 			t.Errorf("expected exit 2, got exit %d / output %s", ee.ExitCode(), out)
 		}

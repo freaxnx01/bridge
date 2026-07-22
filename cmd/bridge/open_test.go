@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -90,7 +91,8 @@ func TestOpenUnknownNameExits2(t *testing.T) {
 	}
 	// `go run` itself exits 1 when the child exits non-zero, and prints
 	// "exit status N" to stderr. Check that the child signalled exit 2.
-	if ee, ok := err.(*exec.ExitError); ok {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
 		code := ee.ExitCode()
 		// Direct binary run: exit code is propagated exactly.
 		// go run wrapper: exits 1 but prints "exit status 2" to stderr.

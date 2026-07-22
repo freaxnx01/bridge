@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -52,7 +53,8 @@ func TestSessionsAttachUnknownExits2(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected non-zero exit")
 	}
-	if ee, ok := err.(*exec.ExitError); ok {
+	var ee *exec.ExitError
+	if errors.As(err, &ee) {
 		if ee.ExitCode() != 2 && !strings.Contains(string(out), "exit status 2") {
 			t.Errorf("expected exit 2, got %d / out: %s", ee.ExitCode(), out)
 		}
