@@ -1,6 +1,7 @@
 package audit
 
 import (
+	"context"
 	"fmt"
 	"log/slog"
 	"os"
@@ -21,7 +22,7 @@ type Entry struct {
 
 // Logger appends one JSON object per line to an audit log file.
 type Logger struct {
-	slog *slog.Logger
+	handler slog.Handler
 }
 
 // Open opens (creating if absent) the audit log at path in append mode,
@@ -36,7 +37,15 @@ func Open(path string) (*Logger, error) {
 	if err != nil {
 		return nil, fmt.Errorf("open audit log %s: %w", path, err)
 	}
-	return &Logger{slog: slog.New(slog.NewJSONHandler(f, nil))}, nil
+	handler := slog.NewJSONHandler(f, &slog.HandlerOptions{
+		ReplaceAttr: func(groups []string, a slog.Attr) slog.Attr {
+			if len(groups) == 0 && (a.Key == slog.LevelKey || a.Key == slog.MessageKey) {
+				return slog.Attr{}
+			}
+			return a
+		},
+	})
+	return &Logger{handler: handler}, nil
 }
 
 // Log appends e as one JSON line. A zero e.Time is stamped with time.Now().
@@ -44,13 +53,14 @@ func (l *Logger) Log(e Entry) {
 	if e.Time.IsZero() {
 		e.Time = time.Now()
 	}
-	l.slog.Info("audit",
-		"time", e.Time,
-		"forge", e.Forge,
-		"owner", e.Owner,
-		"repo", e.Repo,
-		"tool", e.Tool,
-		"confirm", e.Confirm,
-		"outcome", e.Outcome,
+	r := slog.NewRecord(e.Time, slog.LevelInfo, "audit", 0)
+	r.AddAttrs(
+		slog.String("forge", e.Forge),
+		slog.String("owner", e.Owner),
+		slog.String("repo", e.Repo),
+		slog.String("tool", e.Tool),
+		slog.Bool("confirm", e.Confirm),
+		slog.String("outcome", e.Outcome),
 	)
+	_ = l.handler.Handle(context.Background(), r) // best-effort write
 }

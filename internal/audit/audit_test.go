@@ -42,6 +42,19 @@ func TestLogger_LogWritesOneValidJSONLinePerCall(t *testing.T) {
 	if got["forge"] != "github" || got["tool"] != "close_issue" || got["outcome"] != "success" || got["confirm"] != true {
 		t.Errorf("entry: %+v", got)
 	}
+
+	wantKeys := map[string]bool{
+		"time": true, "forge": true, "owner": true, "repo": true,
+		"tool": true, "confirm": true, "outcome": true,
+	}
+	if len(got) != len(wantKeys) {
+		t.Fatalf("want %d keys %v, got %d keys: %+v", len(wantKeys), wantKeys, len(got), got)
+	}
+	for k := range got {
+		if !wantKeys[k] {
+			t.Errorf("unexpected key %q in entry: %+v", k, got)
+		}
+	}
 }
 
 func TestLogger_AppendsAcrossMultipleOpensOfSamePath(t *testing.T) {
