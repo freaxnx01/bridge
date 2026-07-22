@@ -3,9 +3,12 @@ package mcp
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/audit"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -216,5 +219,323 @@ func TestHandleCreateIssue_UnconfiguredForgeErrors(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "not configured") {
 		t.Errorf("want a not-configured error, got %v", err)
+	}
+}
+
+func TestHandleCloseIssue_DraftDoesNotCloseOrLogAudit(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.closeCalled = &calls
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, out, err := d.handleCloseIssue(context.Background(), nil, closeIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("Confirm=false must return a draft: %+v", out)
+	}
+	if calls != 0 {
+		t.Fatalf("draft must not call CloseIssue, got %d calls", calls)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("draft must not log an audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCloseIssue_ConfirmClosesAndLogsSuccess(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.closeCalled = &calls
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, out, err := d.handleCloseIssue(context.Background(), nil, closeIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, StateReason: "completed", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("Confirm=true must not be a draft: %+v", out)
+	}
+	if out.Issue == nil || out.Issue.State != "closed" {
+		t.Fatalf("want closed issue in response: %+v", out.Issue)
+	}
+	if calls != 1 {
+		t.Fatalf("want exactly 1 CloseIssue call, got %d", calls)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tool":"close_issue"`) || !strings.Contains(string(data), `"outcome":"success"`) {
+		t.Errorf("want a success audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCloseIssue_ForgeErrorLogsErrorOutcome(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.closeErr = errors.New("boom")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleCloseIssue(context.Background(), nil, closeIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want an error when CloseIssue fails")
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"error"`) {
+		t.Errorf("want an error audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCloseIssue_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleCloseIssue(context.Background(), nil,
+		closeIssueInput{Forge: "gitlab", Owner: "o", Repo: "r", IssueNumber: 1, Confirm: true})
+	if err == nil {
+		t.Fatal("want an error for a client without CloseIssue, got nil")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a resolved but incapable client must not be reported as unconfigured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleCloseIssue_UnconfiguredForgeErrors(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+
+	_, _, err := d.handleCloseIssue(context.Background(), nil,
+		closeIssueInput{Forge: "gitlab", Owner: "o", Repo: "r", IssueNumber: 1, Confirm: true})
+	if err == nil {
+		t.Fatal("want an error for an unconfigured forge, got nil")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Errorf("want a not-configured error, got %v", err)
+	}
+}
+
+func TestHandleUpdateIssue_RequiresTitleOrBody(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+
+	_, _, err := d.handleUpdateIssue(context.Background(), nil,
+		updateIssueInput{Forge: "github", Owner: "o", Repo: "r", IssueNumber: 1, Confirm: true})
+	if err == nil {
+		t.Fatal("want an error when both title and body are empty")
+	}
+	if !strings.Contains(err.Error(), "at least one of title or body") {
+		t.Errorf("want a title-or-body-required error, got %v", err)
+	}
+}
+
+func TestHandleUpdateIssue_DraftDoesNotUpdate(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.updateCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateIssue(context.Background(), nil, updateIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Title: "t", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("Confirm=false must return a draft: %+v", out)
+	}
+	if calls != 0 {
+		t.Fatalf("draft must not call UpdateIssue, got %d calls", calls)
+	}
+}
+
+func TestHandleUpdateIssue_ConfirmUpdates(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.updateCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateIssue(context.Background(), nil, updateIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Title: "new title", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("Confirm=true must not be a draft: %+v", out)
+	}
+	if out.Issue == nil || out.Issue.Title != "new title" {
+		t.Fatalf("want updated title in response: %+v", out.Issue)
+	}
+	if calls != 1 {
+		t.Fatalf("want exactly 1 UpdateIssue call, got %d", calls)
+	}
+}
+
+func TestHandleUpdateIssue_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleUpdateIssue(context.Background(), nil,
+		updateIssueInput{Forge: "gitlab", Owner: "o", Repo: "r", IssueNumber: 1, Title: "t", Confirm: true})
+	if err == nil {
+		t.Fatal("want an error for a client without UpdateIssue, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleAddLabels_RequiresNonEmptyLabels(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+
+	_, _, err := d.handleAddLabels(context.Background(), nil,
+		addLabelsInput{Forge: "github", Owner: "o", Repo: "r", IssueNumber: 1, Confirm: true})
+	if err == nil {
+		t.Fatal("want an error when labels is empty")
+	}
+	if !strings.Contains(err.Error(), "labels must not be empty") {
+		t.Errorf("want a labels-required error, got %v", err)
+	}
+}
+
+func TestHandleAddLabels_DraftDoesNotAdd(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.labelsCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleAddLabels(context.Background(), nil, addLabelsInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Labels: []string{"bug"}, Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("Confirm=false must return a draft: %+v", out)
+	}
+	if calls != 0 {
+		t.Fatalf("draft must not call AddLabels, got %d calls", calls)
+	}
+}
+
+func TestHandleAddLabels_ConfirmAdds(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.labelsCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleAddLabels(context.Background(), nil, addLabelsInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Labels: []string{"bug", "p1"}, Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("Confirm=true must not be a draft: %+v", out)
+	}
+	if len(out.Labels) != 2 {
+		t.Fatalf("want the returned label set: %+v", out.Labels)
+	}
+	if calls != 1 {
+		t.Fatalf("want exactly 1 AddLabels call, got %d", calls)
+	}
+}
+
+func TestHandleAddLabels_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleAddLabels(context.Background(), nil,
+		addLabelsInput{Forge: "gitlab", Owner: "o", Repo: "r", IssueNumber: 1, Labels: []string{"bug"}, Confirm: true})
+	if err == nil {
+		t.Fatal("want an error for a client without AddLabels, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleCommentIssue_DraftDoesNotComment(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.commentCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleCommentIssue(context.Background(), nil, commentIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Body: "lgtm", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("Confirm=false must return a draft: %+v", out)
+	}
+	if calls != 0 {
+		t.Fatalf("draft must not call CommentIssue, got %d calls", calls)
+	}
+}
+
+func TestHandleCommentIssue_ConfirmComments(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.commentCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleCommentIssue(context.Background(), nil, commentIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", IssueNumber: 142, Body: "lgtm", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("Confirm=true must not be a draft: %+v", out)
+	}
+	if out.Comment == nil || out.Comment.Body != "lgtm" {
+		t.Fatalf("want the posted comment in response: %+v", out.Comment)
+	}
+	if calls != 1 {
+		t.Fatalf("want exactly 1 CommentIssue call, got %d", calls)
+	}
+}
+
+func TestHandleCommentIssue_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleCommentIssue(context.Background(), nil,
+		commentIssueInput{Forge: "gitlab", Owner: "o", Repo: "r", IssueNumber: 1, Body: "lgtm", Confirm: true})
+	if err == nil {
+		t.Fatal("want an error for a client without CommentIssue, got nil")
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
 	}
 }

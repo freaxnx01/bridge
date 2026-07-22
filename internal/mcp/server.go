@@ -45,6 +45,26 @@ func NewServer(deps Deps) *mcp.Server {
 			Name:        "create_repo",
 			Description: "Create a repository. The owner input selects which account's token to use — the repo is created under that token's account, which may differ. Without confirm=true this returns a draft and creates nothing.",
 		}, deps.handleCreateRepo)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "close_issue",
+			Description: "Close an issue. Without confirm=true this returns a draft and closes nothing.",
+		}, deps.handleCloseIssue)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "update_issue",
+			Description: "Update an issue's title and/or body. Without confirm=true this returns a draft and updates nothing.",
+		}, deps.handleUpdateIssue)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "add_labels",
+			Description: "Add labels to an issue. Without confirm=true this returns a draft and adds nothing.",
+		}, deps.handleAddLabels)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "comment_issue",
+			Description: "Post a comment on an issue. Without confirm=true this returns a draft and posts nothing.",
+		}, deps.handleCommentIssue)
 	}
 
 	return srv
