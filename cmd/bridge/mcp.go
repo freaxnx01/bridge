@@ -21,6 +21,7 @@ import (
 	sdkmcp "github.com/modelcontextprotocol/go-sdk/mcp"
 	"github.com/modelcontextprotocol/go-sdk/oauthex"
 
+	"github.com/freaxnx01/bridge/internal/audit"
 	"github.com/freaxnx01/bridge/internal/forge"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
 	"github.com/freaxnx01/bridge/internal/oauth"
@@ -29,11 +30,12 @@ import (
 )
 
 var (
-	mcpPort     int
-	mcpHost     string
-	mcpReadOnly bool
-	mcpNoAuth   bool
-	mcpAuthMode string
+	mcpPort             int
+	mcpHost             string
+	mcpReadOnly         bool
+	mcpAllowDestructive bool
+	mcpNoAuth           bool
+	mcpAuthMode         string
 )
 
 func init() {
@@ -53,6 +55,7 @@ func newMCPCmd() *cobra.Command {
 	serveCmd.Flags().IntVar(&mcpPort, "port", 7788, "port to listen on")
 	serveCmd.Flags().StringVar(&mcpHost, "host", "127.0.0.1", "host to bind to")
 	serveCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "disable write tools (create_issue is not registered)")
+	serveCmd.Flags().BoolVar(&mcpAllowDestructive, "allow-destructive", false, "allow destructive tools to execute when confirmed (reserved for future archive_repo/delete_repo; tier-1 tools are unaffected)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
 	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
 	mcpCmd.AddCommand(serveCmd)
@@ -166,6 +169,22 @@ func mcpStateDir() (string, error) {
 	return filepath.Join(home, ".local", "state", "bridge-mcp"), nil
 }
 
+// auditLogPath resolves the audit log path: BRIDGE_AUDIT_LOG_PATH wins,
+// then $XDG_STATE_HOME/bridge/audit.jsonl, else ~/.local/state/bridge/audit.jsonl.
+func auditLogPath() (string, error) {
+	if p := os.Getenv("BRIDGE_AUDIT_LOG_PATH"); p != "" {
+		return p, nil
+	}
+	if xdg := os.Getenv("XDG_STATE_HOME"); xdg != "" {
+		return filepath.Join(xdg, "bridge", "audit.jsonl"), nil
+	}
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return "", fmt.Errorf("resolve home directory for default audit log path: %w", err)
+	}
+	return filepath.Join(home, ".local", "state", "bridge", "audit.jsonl"), nil
+}
+
 // validateNoAuthHost fails fast when --no-auth is combined with a
 // non-loopback --host: skipping bearer auth is only safe when the server is
 // unreachable from outside the machine.
@@ -194,18 +213,28 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 
 	roots := reposRoots()
 
+	logPath, err := auditLogPath()
+	if err != nil {
+		return err
+	}
+	auditLogger, err := audit.Open(logPath)
+	if err != nil {
+		return fmt.Errorf("open audit log: %w", err)
+	}
+
 	deps := imcp.Deps{
-		ReadOnly:      mcpReadOnly || os.Getenv("BRIDGE_MCP_READONLY") == "1",
-		DefaultOwners: parseOwners(os.Getenv("BRIDGE_MCP_OWNERS")),
-		ClientFor:     newCachingClientResolver(clientForMCP(roots)),
-		BuildOverview: buildOverviewSnapshot,
+		ReadOnly:         mcpReadOnly || os.Getenv("BRIDGE_MCP_READONLY") == "1",
+		AllowDestructive: mcpAllowDestructive || os.Getenv("BRIDGE_MCP_ALLOW_DESTRUCTIVE") == "1",
+		DefaultOwners:    parseOwners(os.Getenv("BRIDGE_MCP_OWNERS")),
+		ClientFor:        newCachingClientResolver(clientForMCP(roots)),
+		BuildOverview:    buildOverviewSnapshot,
+		Audit:            auditLogger,
 	}
 
 	srv := imcp.NewServer(deps)
 
 	var (
 		handler http.Handler
-		err     error
 		cleanup = func() error { return nil }
 	)
 	switch mcpAuthMode {
@@ -247,7 +276,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		IdleTimeout: 120 * time.Second,
 	}
 
-	slog.Info("Bridge MCP", "addr", "http://"+addr, "read_only", deps.ReadOnly, "auth", !mcpNoAuth, "auth_mode", mcpAuthMode)
+	slog.Info("Bridge MCP", "addr", "http://"+addr, "read_only", deps.ReadOnly, "allow_destructive", deps.AllowDestructive, "auth", !mcpNoAuth, "auth_mode", mcpAuthMode)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
