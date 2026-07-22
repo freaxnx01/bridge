@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/freaxnx01/bridge/internal/audit"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/overview"
 )
@@ -39,6 +40,37 @@ type repoCreator interface {
 	CreateRepo(ctx context.Context, name string, private bool) (forge.RepoRef, error)
 }
 
+// issueCloser is asserted by close_issue.
+type issueCloser interface {
+	CloseIssue(ctx context.Context, owner, repo string, number int, stateReason string) (forge.Issue, error)
+}
+
+// issueUpdater is asserted by update_issue.
+type issueUpdater interface {
+	UpdateIssue(ctx context.Context, owner, repo string, number int, title, body *string) (forge.Issue, error)
+}
+
+// labelAdder is asserted by add_labels.
+type labelAdder interface {
+	AddLabels(ctx context.Context, owner, repo string, number int, labels []string) ([]string, error)
+}
+
+// issueCommenter is asserted by comment_issue.
+type issueCommenter interface {
+	CommentIssue(ctx context.Context, owner, repo string, number int, body string) (forge.Comment, error)
+}
+
+// repoArchiver and repoDeleter are tier-3/4 capability stubs: declared so
+// Capabilities' switch is complete before those tiers are implemented, but no
+// concrete client satisfies them yet.
+type repoArchiver interface {
+	ArchiveRepo(ctx context.Context, owner, repo string) (forge.RepoRef, error)
+}
+
+type repoDeleter interface {
+	DeleteRepo(ctx context.Context, owner, repo string) error
+}
+
 // Capabilities returns the names of the MCP tools a resolved client supports.
 // It reports tool names rather than method names so a caller can map the result
 // directly onto what it may invoke. Returns nil for a nil reader.
@@ -59,6 +91,24 @@ func Capabilities(r ForgeReader) []string {
 	if _, ok := r.(repoCreator); ok {
 		capabilities = append(capabilities, "create_repo")
 	}
+	if _, ok := r.(issueCloser); ok {
+		capabilities = append(capabilities, "close_issue")
+	}
+	if _, ok := r.(issueUpdater); ok {
+		capabilities = append(capabilities, "update_issue")
+	}
+	if _, ok := r.(labelAdder); ok {
+		capabilities = append(capabilities, "add_labels")
+	}
+	if _, ok := r.(issueCommenter); ok {
+		capabilities = append(capabilities, "comment_issue")
+	}
+	if _, ok := r.(repoArchiver); ok {
+		capabilities = append(capabilities, "archive_repo")
+	}
+	if _, ok := r.(repoDeleter); ok {
+		capabilities = append(capabilities, "delete_repo")
+	}
 	return capabilities
 }
 
@@ -66,10 +116,21 @@ func Capabilities(r ForgeReader) []string {
 // ready per-(forge, owner) reader (token baked in) or nil when that forge is
 // unconfigured. BuildOverview produces the cross-forge status snapshot.
 type Deps struct {
-	ReadOnly      bool
-	DefaultOwners []Target
-	ClientFor     func(forgeName, owner string) ForgeReader
-	BuildOverview func(ctx context.Context) (overview.Snapshot, error)
+	ReadOnly         bool
+	AllowDestructive bool
+	DefaultOwners    []Target
+	ClientFor        func(forgeName, owner string) ForgeReader
+	BuildOverview    func(ctx context.Context) (overview.Snapshot, error)
+	Audit            *audit.Logger
+}
+
+// auditLog appends e to Deps.Audit. A no-op when Audit is nil (tests, or a
+// caller that hasn't wired one up) so handlers never need a nil check.
+func (d Deps) auditLog(e audit.Entry) {
+	if d.Audit == nil {
+		return
+	}
+	d.Audit.Log(e)
 }
 
 // targets returns the (forge, owner) pairs list_repos should query for the

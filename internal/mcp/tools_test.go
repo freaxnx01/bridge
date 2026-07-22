@@ -2,8 +2,12 @@ package mcp
 
 import (
 	"context"
+	"encoding/json"
+	"os"
+	"path/filepath"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/audit"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -49,8 +53,16 @@ func (f *fakeFiles) GetFile(_ context.Context, _, _, _ string) ([]byte, string, 
 // rather than read from fakeReader because embedded structs cannot see one
 // another's fields.
 type fakeIssues struct {
-	forgeName    string
-	createCalled *int
+	forgeName     string
+	createCalled  *int
+	closeCalled   *int
+	closeErr      error
+	updateCalled  *int
+	updateErr     error
+	labelsCalled  *int
+	labelsErr     error
+	commentCalled *int
+	commentErr    error
 }
 
 func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string) (forge.Issue, error) {
@@ -58,6 +70,50 @@ func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string
 		*f.createCalled++
 	}
 	return forge.Issue{Forge: f.forgeName, Repo: owner + "/" + repo, Number: 42, Title: title}, nil
+}
+
+func (f *fakeIssues) CloseIssue(_ context.Context, owner, repo string, number int, _ string) (forge.Issue, error) {
+	if f.closeCalled != nil {
+		*f.closeCalled++
+	}
+	if f.closeErr != nil {
+		return forge.Issue{}, f.closeErr
+	}
+	return forge.Issue{Forge: f.forgeName, Repo: owner + "/" + repo, Number: number, State: "closed"}, nil
+}
+
+func (f *fakeIssues) UpdateIssue(_ context.Context, owner, repo string, number int, title, _ *string) (forge.Issue, error) {
+	if f.updateCalled != nil {
+		*f.updateCalled++
+	}
+	if f.updateErr != nil {
+		return forge.Issue{}, f.updateErr
+	}
+	is := forge.Issue{Forge: f.forgeName, Repo: owner + "/" + repo, Number: number}
+	if title != nil {
+		is.Title = *title
+	}
+	return is, nil
+}
+
+func (f *fakeIssues) AddLabels(_ context.Context, _, _ string, _ int, labels []string) ([]string, error) {
+	if f.labelsCalled != nil {
+		*f.labelsCalled++
+	}
+	if f.labelsErr != nil {
+		return nil, f.labelsErr
+	}
+	return labels, nil
+}
+
+func (f *fakeIssues) CommentIssue(_ context.Context, _, _ string, _ int, body string) (forge.Comment, error) {
+	if f.commentCalled != nil {
+		*f.commentCalled++
+	}
+	if f.commentErr != nil {
+		return forge.Comment{}, f.commentErr
+	}
+	return forge.Comment{ID: 7, Body: body}, nil
 }
 
 // fakeRepos supplies the repoCreator capability.
@@ -139,7 +195,10 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 		{
 			name:   "fully capable client reports every tool",
 			client: newFakeFull("github"),
-			want:   []string{"list_repos", "list_issues", "read_file", "create_issue", "create_repo"},
+			want: []string{
+				"list_repos", "list_issues", "read_file", "create_issue", "create_repo",
+				"close_issue", "update_issue", "add_labels", "comment_issue",
+			},
 		},
 	}
 	for _, tt := range tests {
@@ -154,5 +213,33 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestDeps_AuditLogNoopWhenAuditNil(t *testing.T) {
+	d := Deps{}
+	d.auditLog(audit.Entry{Tool: "close_issue"}) // must not panic
+}
+
+func TestDeps_AuditLogAppendsToConfiguredLogger(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := Deps{Audit: logger}
+
+	d.auditLog(audit.Entry{Tool: "close_issue", Outcome: "success"})
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var entry map[string]any
+	if err := json.Unmarshal(data, &entry); err != nil {
+		t.Fatalf("audit log line is not valid JSON: %v", err)
+	}
+	if entry["tool"] != "close_issue" || entry["outcome"] != "success" {
+		t.Errorf("audit entry not written correctly: %+v", entry)
 	}
 }

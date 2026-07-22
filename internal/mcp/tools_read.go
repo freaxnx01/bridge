@@ -147,8 +147,9 @@ type forgeStatus struct {
 }
 
 type listGitForgesOutput struct {
-	Forges   []forgeStatus `json:"forges"`
-	ReadOnly bool          `json:"read_only"`
+	Forges           []forgeStatus `json:"forges"`
+	ReadOnly         bool          `json:"read_only"`
+	AllowDestructive bool          `json:"allow_destructive"`
 }
 
 // isWriteTool reports whether a tool name is registered only when
@@ -156,7 +157,7 @@ type listGitForgesOutput struct {
 // is no mutable global state.
 func isWriteTool(name string) bool {
 	switch name {
-	case "create_issue", "create_repo":
+	case "create_issue", "create_repo", "close_issue", "update_issue", "add_labels", "comment_issue":
 		return true
 	default:
 		return false
@@ -201,5 +202,5 @@ func (d Deps) handleListGitForges(_ context.Context, _ *mcp.CallToolRequest, _ l
 		}
 		forges = append(forges, status)
 	}
-	return nil, listGitForgesOutput{Forges: forges, ReadOnly: d.ReadOnly}, nil
+	return nil, listGitForgesOutput{Forges: forges, ReadOnly: d.ReadOnly, AllowDestructive: d.AllowDestructive}, nil
 }
