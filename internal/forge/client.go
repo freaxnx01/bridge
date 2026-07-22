@@ -41,8 +41,16 @@ type Issue struct {
 	Number  int       `json:"number"`
 	Title   string    `json:"title"`
 	URL     string    `json:"url"`
+	State   string    `json:"state,omitempty"`
 	Labels  []string  `json:"labels,omitempty"`
 	Updated time.Time `json:"updated,omitempty"`
+}
+
+// Comment is a single issue comment.
+type Comment struct {
+	ID      int       `json:"id"`
+	Body    string    `json:"body"`
+	Created time.Time `json:"created,omitempty"`
 }
 
 type Client interface {

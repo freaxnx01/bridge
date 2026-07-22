@@ -305,3 +305,128 @@ func TestGithubCreateIssue(t *testing.T) {
 		t.Fatalf("is.Updated is zero, want populated from response")
 	}
 }
+
+func TestGithubCloseIssue(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" || r.URL.Path != "/repos/freaxnx01/bridge/issues/142" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"number":142,"title":"flicker","state":"closed","html_url":"https://github.com/freaxnx01/bridge/issues/142","updated_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	is, err := c.CloseIssue(context.Background(), "freaxnx01", "bridge", 142, "completed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["state"] != "closed" || gotBody["state_reason"] != "completed" {
+		t.Errorf("body sent: %+v", gotBody)
+	}
+	if is.State != "closed" || is.Number != 142 {
+		t.Errorf("issue: %+v", is)
+	}
+	if is.Updated.IsZero() {
+		t.Fatalf("is.Updated is zero, want populated from response")
+	}
+}
+
+func TestGithubCloseIssue_OmitsStateReasonWhenEmpty(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"number":142,"state":"closed","updated_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	if _, err := c.CloseIssue(context.Background(), "freaxnx01", "bridge", 142, ""); err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := gotBody["state_reason"]; ok {
+		t.Errorf("state_reason must be omitted when empty, got %+v", gotBody)
+	}
+}
+
+func TestGithubUpdateIssue(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PATCH" || r.URL.Path != "/repos/freaxnx01/bridge/issues/142" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`{"number":142,"title":"new title","html_url":"https://github.com/freaxnx01/bridge/issues/142","updated_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	title := "new title"
+	is, err := c.UpdateIssue(context.Background(), "freaxnx01", "bridge", 142, &title, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["title"] != "new title" {
+		t.Errorf("body sent: %+v", gotBody)
+	}
+	if _, ok := gotBody["body"]; ok {
+		t.Errorf("body must be omitted when nil, got %+v", gotBody)
+	}
+	if is.Title != "new title" || is.Number != 142 {
+		t.Errorf("issue: %+v", is)
+	}
+}
+
+func TestGithubAddLabels(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/repos/freaxnx01/bridge/issues/142/labels" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte(`[{"name":"bug"},{"name":"p1"}]`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	labels, err := c.AddLabels(context.Background(), "freaxnx01", "bridge", 142, []string{"bug", "p1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(labels) != 2 || labels[0] != "bug" || labels[1] != "p1" {
+		t.Errorf("labels: %+v", labels)
+	}
+}
+
+func TestGithubCommentIssue(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/repos/freaxnx01/bridge/issues/142/comments" {
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"id":7,"body":"looks good","created_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	comment, err := c.CommentIssue(context.Background(), "freaxnx01", "bridge", 142, "looks good")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["body"] != "looks good" {
+		t.Errorf("body sent: %+v", gotBody)
+	}
+	if comment.ID != 7 || comment.Body != "looks good" {
+		t.Errorf("comment: %+v", comment)
+	}
+	if comment.Created.IsZero() {
+		t.Fatalf("comment.Created is zero, want populated from response")
+	}
+}
