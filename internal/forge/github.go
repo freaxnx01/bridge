@@ -111,7 +111,7 @@ func (c *GithubClient) CreateRepo(ctx context.Context, name string, private bool
 	return RepoRef{
 		Forge: "github", Owner: r.Owner.Login, Name: r.Name,
 		DefaultBranch: r.DefaultBranch, Visibility: vis,
-		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL,
+		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL, UpdatedAt: r.UpdatedAt,
 	}, nil
 }
 
@@ -119,19 +119,21 @@ func (c *GithubClient) CreateRepo(ctx context.Context, name string, private bool
 func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
 	req := map[string]any{"title": title, "body": body}
 	var raw struct {
-		Number  int    `json:"number"`
-		Title   string `json:"title"`
-		HTMLURL string `json:"html_url"`
+		Number    int       `json:"number"`
+		Title     string    `json:"title"`
+		HTMLURL   string    `json:"html_url"`
+		UpdatedAt time.Time `json:"updated_at"`
 	}
 	if err := c.post(ctx, "/repos/"+owner+"/"+repo+"/issues", req, &raw); err != nil {
 		return Issue{}, err
 	}
 	return Issue{
-		Forge:  "github",
-		Repo:   owner + "/" + repo,
-		Number: raw.Number,
-		Title:  raw.Title,
-		URL:    raw.HTMLURL,
+		Forge:   "github",
+		Repo:    owner + "/" + repo,
+		Number:  raw.Number,
+		Title:   raw.Title,
+		URL:     raw.HTMLURL,
+		Updated: raw.UpdatedAt,
 	}, nil
 }
 

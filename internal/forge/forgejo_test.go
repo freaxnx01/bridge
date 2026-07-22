@@ -85,7 +85,7 @@ func TestForgejoCreateRepo(t *testing.T) {
 		w.WriteHeader(201)
 		_, _ = w.Write([]byte(`{"name":"foo","private":true,"default_branch":"main",
 			"html_url":"https://git/h/foo","ssh_url":"ssh://git@git/h/foo.git",
-			"owner":{"login":"freax"}}`))
+			"updated_at":"2026-07-22T10:00:00Z","owner":{"login":"freax"}}`))
 	}))
 	defer srv.Close()
 
@@ -102,6 +102,9 @@ func TestForgejoCreateRepo(t *testing.T) {
 	}
 	if ref.SSHURL == "" {
 		t.Fatal("missing ssh_url")
+	}
+	if ref.UpdatedAt.IsZero() {
+		t.Fatalf("ref.UpdatedAt is zero, want populated from response")
 	}
 }
 
@@ -124,7 +127,7 @@ func TestForgejoCreateIssue(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"number":7,"title":"rough idea","html_url":"https://fj.example/freax/notes/issues/7"}`))
+		_, _ = w.Write([]byte(`{"number":7,"title":"rough idea","html_url":"https://fj.example/freax/notes/issues/7","updated_at":"2026-07-22T10:00:00Z"}`))
 	}))
 	defer srv.Close()
 
@@ -138,6 +141,9 @@ func TestForgejoCreateIssue(t *testing.T) {
 	}
 	if is.Forge != "forgejo" || is.Repo != "freax/notes" || is.Number != 7 || is.URL != "https://fj.example/freax/notes/issues/7" {
 		t.Errorf("issue: %+v", is)
+	}
+	if is.Updated.IsZero() {
+		t.Fatalf("is.Updated is zero, want populated from response")
 	}
 }
 

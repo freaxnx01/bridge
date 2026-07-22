@@ -246,7 +246,7 @@ func TestGithubCreateRepo(t *testing.T) {
 		w.WriteHeader(http.StatusCreated)
 		_, _ = w.Write([]byte(`{"name":"foo","visibility":"private","default_branch":"main",
 			"html_url":"https://gh/freaxnx01/foo","ssh_url":"git@github.com:freaxnx01/foo.git",
-			"owner":{"login":"freaxnx01"}}`))
+			"updated_at":"2026-07-22T10:00:00Z","owner":{"login":"freaxnx01"}}`))
 	}))
 	defer srv.Close()
 
@@ -260,6 +260,9 @@ func TestGithubCreateRepo(t *testing.T) {
 	}
 	if ref.Name != "foo" || ref.Owner != "freaxnx01" || ref.Visibility != "private" {
 		t.Fatalf("ref = %+v", ref)
+	}
+	if ref.UpdatedAt.IsZero() {
+		t.Fatalf("ref.UpdatedAt is zero, want populated from response")
 	}
 }
 
@@ -282,7 +285,7 @@ func TestGithubCreateIssue(t *testing.T) {
 		}
 		_ = json.NewDecoder(r.Body).Decode(&gotBody)
 		w.WriteHeader(http.StatusCreated)
-		_, _ = w.Write([]byte(`{"number":142,"title":"flicker","html_url":"https://github.com/freaxnx01/bridge/issues/142"}`))
+		_, _ = w.Write([]byte(`{"number":142,"title":"flicker","html_url":"https://github.com/freaxnx01/bridge/issues/142","updated_at":"2026-07-22T10:00:00Z"}`))
 	}))
 	defer srv.Close()
 
@@ -297,5 +300,8 @@ func TestGithubCreateIssue(t *testing.T) {
 	if is.Forge != "github" || is.Repo != "freaxnx01/bridge" || is.Number != 142 || is.Title != "flicker" ||
 		is.URL != "https://github.com/freaxnx01/bridge/issues/142" {
 		t.Errorf("issue: %+v", is)
+	}
+	if is.Updated.IsZero() {
+		t.Fatalf("is.Updated is zero, want populated from response")
 	}
 }
