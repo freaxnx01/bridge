@@ -94,6 +94,31 @@ func (c *ForgejoClient) post(ctx context.Context, path string, body, out any) er
 	return json.NewDecoder(resp.Body).Decode(out)
 }
 
+func (c *ForgejoClient) patch(ctx context.Context, path string, body, out any) error {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PATCH", c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "token "+c.token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("forgejo %s: %s: %s", path, resp.Status, string(b))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
 // CreateRepo creates a repo under the authenticated user (auto-initialized).
 func (c *ForgejoClient) CreateRepo(ctx context.Context, name string, private bool) (RepoRef, error) {
 	body := map[string]any{
@@ -135,6 +160,90 @@ func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, bod
 		URL:     raw.HTMLURL,
 		Updated: raw.UpdatedAt,
 	}, nil
+}
+
+// CloseIssue closes owner/repo#number. stateReason is accepted for interface
+// parity with GithubClient but Forgejo/Gitea has no equivalent field, so it
+// is never sent.
+func (c *ForgejoClient) CloseIssue(ctx context.Context, owner, repo string, number int, _ string) (Issue, error) {
+	req := map[string]any{"state": "closed"}
+	var raw struct {
+		Number    int       `json:"number"`
+		Title     string    `json:"title"`
+		State     string    `json:"state"`
+		HTMLURL   string    `json:"html_url"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return Issue{
+		Forge: "forgejo", Repo: owner + "/" + repo,
+		Number: raw.Number, Title: raw.Title, State: raw.State,
+		URL: raw.HTMLURL, Updated: raw.UpdatedAt,
+	}, nil
+}
+
+// UpdateIssue updates owner/repo#number's title and/or body. A nil pointer
+// leaves that field unchanged.
+func (c *ForgejoClient) UpdateIssue(ctx context.Context, owner, repo string, number int, title, body *string) (Issue, error) {
+	req := map[string]any{}
+	if title != nil {
+		req["title"] = *title
+	}
+	if body != nil {
+		req["body"] = *body
+	}
+	var raw struct {
+		Number    int       `json:"number"`
+		Title     string    `json:"title"`
+		State     string    `json:"state"`
+		HTMLURL   string    `json:"html_url"`
+		UpdatedAt time.Time `json:"updated_at"`
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return Issue{
+		Forge: "forgejo", Repo: owner + "/" + repo,
+		Number: raw.Number, Title: raw.Title, State: raw.State,
+		URL: raw.HTMLURL, Updated: raw.UpdatedAt,
+	}, nil
+}
+
+// AddLabels adds labels to owner/repo#number and returns the issue's full
+// label set after the call.
+func (c *ForgejoClient) AddLabels(ctx context.Context, owner, repo string, number int, labels []string) ([]string, error) {
+	req := map[string]any{"labels": labels}
+	var raw []struct {
+		Name string `json:"name"`
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/labels", owner, repo, number)
+	if err := c.post(ctx, path, req, &raw); err != nil {
+		return nil, err
+	}
+	out := make([]string, 0, len(raw))
+	for _, l := range raw {
+		out = append(out, l.Name)
+	}
+	return out, nil
+}
+
+// CommentIssue posts a comment on owner/repo#number.
+func (c *ForgejoClient) CommentIssue(ctx context.Context, owner, repo string, number int, body string) (Comment, error) {
+	req := map[string]any{"body": body}
+	var raw struct {
+		ID        int       `json:"id"`
+		Body      string    `json:"body"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	if err := c.post(ctx, path, req, &raw); err != nil {
+		return Comment{}, err
+	}
+	return Comment{ID: raw.ID, Body: raw.Body, Created: raw.CreatedAt}, nil
 }
 
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
