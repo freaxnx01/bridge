@@ -48,8 +48,10 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	}
 	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body)
 	if err != nil {
+		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "create_issue", Confirm: true, Outcome: "error"})
 		return nil, createIssueOutput{}, fmt.Errorf("create issue %s/%s: %w", in.Owner, in.Repo, err)
 	}
+	d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "create_issue", Confirm: true, Outcome: "success"})
 	return nil, createIssueOutput{
 		Draft: false,
 		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Title: in.Title, Body: in.Body,
@@ -99,12 +101,14 @@ func (d Deps) handleCreateRepo(ctx context.Context, _ *mcp.CallToolRequest, in c
 	}
 	repo, err := repos.CreateRepo(ctx, in.Name, in.Private)
 	if err != nil {
+		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Name, Tool: "create_repo", Confirm: true, Outcome: "error"})
 		// Distinct and actionable, but still wrapped so callers keep errors.Is.
 		if errors.Is(err, forge.ErrRepoExists) {
 			return nil, createRepoOutput{}, fmt.Errorf("repo %q already exists on %s, choose another name: %w", in.Name, in.Forge, err)
 		}
 		return nil, createRepoOutput{}, fmt.Errorf("create repo %s: %w", in.Name, err)
 	}
+	d.auditLog(audit.Entry{Forge: in.Forge, Owner: repo.Owner, Repo: repo.Name, Tool: "create_repo", Confirm: true, Outcome: "success"})
 	return nil, createRepoOutput{
 		Draft: false,
 		Forge: in.Forge, Owner: repo.Owner, Name: repo.Name, Private: repo.Visibility == "private",

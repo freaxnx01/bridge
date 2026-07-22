@@ -55,6 +55,7 @@ func (f *fakeFiles) GetFile(_ context.Context, _, _, _ string) ([]byte, string, 
 type fakeIssues struct {
 	forgeName     string
 	createCalled  *int
+	createErr     error
 	closeCalled   *int
 	closeErr      error
 	updateCalled  *int
@@ -68,6 +69,9 @@ type fakeIssues struct {
 func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string) (forge.Issue, error) {
 	if f.createCalled != nil {
 		*f.createCalled++
+	}
+	if f.createErr != nil {
+		return forge.Issue{}, f.createErr
 	}
 	return forge.Issue{Forge: f.forgeName, Repo: owner + "/" + repo, Number: 42, Title: title}, nil
 }

@@ -222,6 +222,170 @@ func TestHandleCreateIssue_UnconfiguredForgeErrors(t *testing.T) {
 	}
 }
 
+func TestHandleCreateIssue_DraftDoesNotLogAudit(t *testing.T) {
+	gh := newFakeFull("github")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, out, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("confirm=false must return a draft: %+v", out)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("draft must not log an audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCreateIssue_ConfirmCreatesAndLogsSuccess(t *testing.T) {
+	gh := newFakeFull("github")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, out, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("confirm=true must not be a draft: %+v", out)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tool":"create_issue"`) || !strings.Contains(string(data), `"outcome":"success"`) {
+		t.Errorf("want a success audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCreateIssue_ForgeErrorLogsErrorOutcome(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.createErr = errors.New("boom")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want an error when CreateIssue fails")
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"error"`) {
+		t.Errorf("want an error audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCreateRepo_DraftDoesNotLogAudit(t *testing.T) {
+	gh := newFakeFull("github")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, out, err := d.handleCreateRepo(context.Background(), nil, createRepoInput{
+		Forge: "github", Owner: "freaxnx01", Name: "widget", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("confirm=false must return a draft: %+v", out)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("draft must not log an audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCreateRepo_ConfirmCreatesAndLogsSuccess(t *testing.T) {
+	gh := newFakeFull("github")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, out, err := d.handleCreateRepo(context.Background(), nil, createRepoInput{
+		Forge: "github", Owner: "freaxnx01", Name: "widget", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("confirm=true must not be a draft: %+v", out)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tool":"create_repo"`) || !strings.Contains(string(data), `"outcome":"success"`) {
+		t.Errorf("want a success audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleCreateRepo_ForgeErrorLogsErrorOutcome(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.createRepoErr = forge.ErrRepoExists
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleCreateRepo(context.Background(), nil, createRepoInput{
+		Forge: "github", Owner: "freaxnx01", Name: "widget", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want an error when CreateRepo fails")
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"error"`) {
+		t.Errorf("want an error audit entry, got %q", string(data))
+	}
+}
+
 func TestHandleCloseIssue_DraftDoesNotCloseOrLogAudit(t *testing.T) {
 	calls := 0
 	gh := newFakeFull("github")
