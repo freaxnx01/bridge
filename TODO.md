@@ -49,16 +49,10 @@ Plan 2 covers the actual Svelte pages and components.
 - [ ] Todos, Ideas
 - [ ] GH Actions
 
-## Agent / Bot Integration (ideas captured 2026-06-24, GitHub issues #163–#171)
+## Agent / Bot Integration (ideas captured 2026-06-24)
 
-- [ ] #163 — bot `/ask <question>` (repo/issue summary)
-- [ ] #164 — bot `/status` using `claude agents --json`
-- [ ] #165 — session summary on tmux slot exit
-- [ ] #166 — bot `/plan` (idea → mini-spec → GitHub issue)
-- [ ] #167 — auto-label value/effort on issue capture
-- [ ] #168 — WebUI "What next?" button (Claude-ranked recommendation)
-- [ ] #169 — stale issue detector (>30 days, AI nudge)
-- [ ] #170 — `bridge agents` nav/WebUI panel
-- [ ] #171 — wire agent ping in Radar viz from real `claude agents` data
+Full spec'd items filed as GitHub issues #163–#171 (bot `/ask`, `/status`, `/plan`,
+session summaries, auto-labeling, WebUI panels — see issue tracker for these).
+
 - [ ] Test starting a new Claude Code session via the Telegram bot
 - [ ] Add support for Hermes Agent
