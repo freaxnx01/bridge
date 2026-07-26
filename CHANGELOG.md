@@ -30,6 +30,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `bridge mcp serve --auth=oauth`: loopback redirect URIs in the
+  `BRIDGE_MCP_ALLOWED_REDIRECT_URIS` allowlist now match **on any port** per
+  RFC 8252 §7.3, while remote redirects stay byte-exact. Native MCP clients
+  (e.g. Claude Code) bind a fresh random loopback port on every launch, so a
+  byte-exact allowlist rejected them with `redirect_uri is not in the
+  configured allowlist` on all but the one registered port. Only the port is
+  relaxed, and only for loopback hosts (`127.0.0.1`/`[::1]`/`localhost`); the
+  scheme, host, and path must still match an allowlisted entry. (#214)
 - Repo discovery now lists only **git checkouts**: a directory under a forge/owner folder that has no `.git` entry (e.g. a OneDrive-synced LINQPad-query or notes folder) is skipped, so it no longer shows up as a repo in `bridge nav` and then fails worktree creation with a raw `git worktree list: fatal: not a git repository` error. (#145)
 
 ## [2.8.0] - 2026-06-05
