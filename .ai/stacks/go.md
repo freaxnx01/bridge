@@ -16,10 +16,10 @@ deliverable is a Go binary.
 
 | Layer | Technology |
 |---|---|
-| Language / toolchain | Go (latest stable), pinned in `go.mod` (`go 1.x`); Go modules only — no `GOPATH`, no vendoring unless a consumer requires it |
+| Language / toolchain | Go (latest stable), pinned in `go.mod` (`go 1.x`); Go modules only — no `GOPATH` or vendoring unless required |
 | CLI framework | [`spf13/cobra`](https://github.com/spf13/cobra) — command tree, flags, shell completion |
 | TUI | [Charm](https://github.com/charmbracelet) stack: `bubbletea` (Model-Update-View), `bubbles` (widgets), `lipgloss` (styling) |
-| HTTP services | Standard library `net/http` with the Go 1.22+ enhanced `ServeMux` (method + path patterns); a router (`chi`) only when middleware/sub-routers justify it |
+| HTTP services | Standard library `net/http` with the Go 1.22+ `ServeMux` (method + path patterns); a router (`chi`) only when middleware warrants it |
 | Logging | `log/slog` (structured) for diagnostics; `fmt.Fprintln(os.Stderr, …)` for user-facing CLI notices |
 | Configuration | Env vars (12-factor) + Cobra flags, folded into one config struct |
 | Testing | Standard library `testing`: table-driven tests, `t.Run` subtests, hand-rolled fakes. **No** `testify`, `mockery`, or `gomock` |
@@ -32,7 +32,7 @@ deliverable is a Go binary.
 
 ## Project Structure
 
-```
+```text
 cmd/
   <binary>/              ← one dir per binary; main package + Cobra root wiring only
     main.go
@@ -253,6 +253,51 @@ green, run the full suite after changes, stop after 3 failed attempts) live in
 - Test naming follows the base idiom adapted to Go:
   `TestFunc_StateUnderTest_ExpectedBehavior` (subtest names describe the case).
 
+### TUI testing (two tiers)
+
+Test TUIs at both levels; both gate CI.
+
+**Tier 1 — in-process `Model` (fast, the default).** Use Charm's `teatest`
+(`github.com/charmbracelet/x/exp/teatest`) — first-party to the TUI stack, not
+a mocking/assertion framework, so it's the one sanctioned test helper beyond
+stdlib. Drive the program with `tm.Send(...)` (keys/msgs), assert on the final
+model, and golden-file the rendered frames via `teatest.RequireEqualOutput`
+(refresh with `-update`). Most `Update`/`View` behaviour is covered here
+without a terminal.
+
+**Tier 2 — real PTY via tmux (true rendering).** Launch the built binary in a
+detached, isolated tmux session, `send-keys` to interact, `capture-pane` to
+"screenshot" the rendered screen. Rules that matter:
+
+- **Never launch in the foreground.** A Bubble Tea TUI runs in alt-screen/raw
+  mode and only exits on a quit key — a non-detached launch (`new-session`
+  without `-d`, or running the binary directly) blocks the turn forever.
+  Always `new-session -d`; every command returns instantly; guarantee teardown
+  with `trap '… kill-server' EXIT`.
+- **Isolate the socket** (`tmux -L <socket>`) so tests never touch ambient/real
+  tmux sessions; scrub `$TMUX` (base test rules). Nothing leaks.
+- **Size the pane** (`-x`/`-y`) for the layout — too small renders the fallback
+  and you "screenshot" the wrong thing.
+- **Wait for renders and `tea.Cmd`s** — sleep after launch and after each
+  send-keys; capturing too early grabs a half-painted frame.
+- **Drive with knowledge of the UI** — keys only do what the current state
+  allows (e.g. Enter-on-filter that opens only when one item matches needs a
+  *unique* filter). Point the binary at a fixture (`--base`).
+- **Deterministic fixtures beat real state** — build the world the UI reads
+  (e.g. a bare remote + worktrees in known states) so every cell is
+  reproducible and offline. Time/network-dependent sequences only verify if
+  you construct the conditions.
+
+```bash
+S=tuitest; trap "tmux -L $S kill-server 2>/dev/null" EXIT   # guaranteed cleanup
+tmux -L $S new-session -d -s t -x 215 -y 50 './bin/app --base "$FIXTURE"'
+sleep 1.5
+tmux -L $S capture-pane -p -t t                 # "screenshot" the live screen
+tmux -L $S send-keys -t t 'uniquefilter' Enter; sleep 0.5
+tmux -L $S capture-pane -p -t t                 # assert on snapshot
+tmux -L $S send-keys -t t 'q'                   # quit cleanly
+```
+
 ### Required after every change
 
 - `gofmt -l .` produces no output
@@ -271,7 +316,7 @@ Base rules (SemVer, Conventional Commits → bump mapping, `git-cliff`, tag on
   There is no hand-edited version constant.
 - The version is injected at build time via linker flags into `main`:
 
-  ```
+  ```text
   go build -ldflags "\
     -X main.version=$(git describe --tags --always --dirty) \
     -X main.commit=$(git rev-parse --short HEAD) \
