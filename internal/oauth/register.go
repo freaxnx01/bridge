@@ -5,7 +5,6 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
-	"slices"
 	"time"
 )
 
@@ -32,11 +31,13 @@ func (s *Server) handleRegister(w http.ResponseWriter, r *http.Request) {
 			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri must be an absolute URL")
 			return
 		}
-		if !slices.Contains(s.cfg.AllowedRedirectURIs, raw) {
+		if !redirectURIAllowed(s.cfg.AllowedRedirectURIs, raw) {
 			// Registration is unauthenticated by spec (RFC 7591), so an
 			// attacker could otherwise register a redirect_uri they control
 			// and steal an authorization code by borrowing the authorized
-			// user's login. Only pre-configured destinations are accepted.
+			// user's login. Only pre-configured destinations are accepted
+			// (loopback ports are the RFC 8252 exception; see
+			// redirectURIAllowed).
 			slog.Warn("registration rejected: redirect_uri not in allowlist", "redirect_uri", raw)
 			writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri is not in the configured allowlist")
 			return

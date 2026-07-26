@@ -22,12 +22,17 @@ type Config struct {
 	// 7591), so an attacker can register a client_id pointing at a redirect
 	// URI they control and borrow the authorized user's login to steal the
 	// resulting authorization code. This allowlist is the fix: only these
-	// exact URIs are ever accepted, at both registration and authorize time,
+	// URIs are ever accepted, at both registration and authorize time,
 	// regardless of what a client claims to have registered. Entries are
 	// trimmed of surrounding whitespace when the env var is parsed (a
-	// comma-separated systemd unit value very often has spaces after commas),
-	// but a value arriving in a request is matched byte-exact with no
-	// trimming or normalization.
+	// comma-separated systemd unit value very often has spaces after commas).
+	//
+	// A remote (non-loopback) value arriving in a request is matched
+	// byte-exact with no normalization. A loopback value is matched against a
+	// loopback allowlist entry ignoring the port (RFC 8252 §7.3), so a native
+	// CLI whose callback port is OS-assigned per launch — e.g. Claude Code —
+	// can be permitted by allowlisting one port-less loopback entry such as
+	// "http://localhost/callback". See redirectURIAllowed.
 	AllowedRedirectURIs []string
 }
 

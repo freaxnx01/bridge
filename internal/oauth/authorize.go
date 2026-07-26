@@ -64,13 +64,15 @@ func (s *Server) handleAuthorize(w http.ResponseWriter, r *http.Request) {
 		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri does not exactly match a registered value")
 		return
 	}
-	if !slices.Contains(s.cfg.AllowedRedirectURIs, redirectURI) {
+	if !redirectURIAllowed(s.cfg.AllowedRedirectURIs, redirectURI) {
 		// Defense in depth: a client's own registered redirect_uris are not
 		// sufficient on their own, since /oauth/register is unauthenticated
 		// and an attacker can register any destination they control. This
 		// gate also covers a registration that predates a tightened
 		// allowlist, or one loaded from a persisted state file written under
-		// an older config. Byte-exact, same discipline as above.
+		// an older config. Remote redirects are byte-exact; a loopback
+		// redirect matches an allowlisted loopback entry ignoring the
+		// runtime-assigned port (RFC 8252 §7.3) — see redirectURIAllowed.
 		slog.Warn("authorization rejected: redirect_uri not in allowlist", "client_id", q.Get("client_id"), "redirect_uri", redirectURI)
 		writeOAuthError(w, http.StatusBadRequest, "invalid_redirect_uri", "redirect_uri is not in the configured allowlist")
 		return
