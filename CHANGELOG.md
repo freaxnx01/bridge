@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [2.9.0] - 2026-07-26
+
 ### Added
 
 - **`bridge mcp serve`** — a self-hosted, remote (Streamable HTTP) MCP endpoint exposing seven cross-forge tools (`list_repos`, `read_file`, `list_issues`, `list_git_forges`, `cross_forge_status`, `create_issue`, `create_repo`) over GitHub + Forgejo, guarded by a static `BRIDGE_MCP_TOKEN` bearer. `--read-only` omits both write tools (`create_issue`, `create_repo`) by construction; each returns a draft unless called with `confirm: true`. `list_repos` degrades gracefully — a target that's unconfigured or fails is reported in a `warnings` field rather than failing the whole call. `--no-auth` requires a loopback `--host`. (#195)
