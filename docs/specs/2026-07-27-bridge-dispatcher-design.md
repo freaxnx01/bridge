@@ -154,25 +154,30 @@ a cache wipe, and overridable by hand.
 | Attempt count | Forge label `attempt:N` |
 | Failure bucket | Forge label `failed:<bucket>`, written by the pipeline |
 | Pause flag, last tick, per-night counter | `~/.cache/bridge/dispatch.json` |
-| Limits, overrides, schedule | `~/.config/bridge/dispatch.toml` |
+| Limits, overrides, schedule | `~/.config/bridge/dispatch.json` |
 
-`dispatch.toml` is a deliberate departure from bridge's "discovery is purely
+`dispatch.json` is a deliberate departure from bridge's "discovery is purely
 path-pattern based — no sidecar config" rule. It is justified because limits encode
 operator policy that cannot be derived from repo paths. It is the only exception; repo
 discovery stays path-based.
 
-```toml
-[limits]
-global_open_prs          = 3   # review capacity
-per_repo                 = 1   # avoid conflicting PRs
-max_dispatches_per_night = 5   # unattended spend bound
+JSON rather than TOML: bridge has no TOML dependency, and every other file it writes
+(`slots.json`, `presence.json`, `sync.json`) is JSON via `store.AtomicWrite`. The
+config format is not worth a new module dependency.
 
-[limits.overrides]
-quotes = 2
-
-[schedule]
-dispatch_at = "22:00"
-retry_until = "06:00"
+```json
+{
+  "limits": {
+    "global_open_prs": 3,
+    "per_repo": 1,
+    "max_dispatches_per_night": 5,
+    "overrides": { "quotes": 2 }
+  },
+  "schedule": {
+    "dispatch_at": "22:00",
+    "retry_until": "06:00"
+  }
+}
 ```
 
 ### CLI surface
