@@ -10,6 +10,31 @@
 
 **Spec:** [`docs/specs/2026-07-27-bridge-dispatcher-design.md`](../specs/2026-07-27-bridge-dispatcher-design.md)
 
+## Status (2026-07-28)
+
+**Phase:** plan written and approved for execution. **No code has been written yet.**
+**Next step:** Task 1 — extend `internal/forge`. Tasks 2–7 are blocked on it; once it
+lands they are mutually independent and can run in parallel.
+
+Decisions already made and settled — do not re-litigate them:
+
+- Dispatcher lives in **bridge**, not agent-workflow or FlowHub.
+- **bridge schedules; agent-workflow decides the model.** bridge writes only
+  `ai-implement`, never `agent:*` / `model:*`.
+- Eligible = enriched (`needs-enrichment` removed by `/enrich`) and not blocked.
+  Running `/enrich` is the approval; there is no second gesture.
+- Milestones **filter when present**, and are not required.
+- Ordering is a **deterministic ladder**, no LLM.
+- Guards are **per-repo + global + nightly**, all three.
+- Schedule is a **22:00 batch** with retry-only ticks until 06:00; presence-awareness
+  was considered and cut.
+- Config is **JSON** (`~/.config/bridge/dispatch.json`) — no new Go dependency.
+- Retry-tick wiring is **deferred** to a follow-up plan. `NextAction` is built and
+  tested in Task 6 but nothing drives it yet.
+
+Operating model this serves: enrich during the day → built overnight → reviewed the
+next morning.
+
 ## Global Constraints
 
 - **No new Go module dependencies.** Config is JSON via stdlib `encoding/json`.
