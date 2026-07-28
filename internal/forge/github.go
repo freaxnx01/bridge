@@ -294,7 +294,13 @@ type ghIssue struct {
 	Labels  []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Milestone *struct {
+		Title  string    `json:"title"`
+		Number int       `json:"number"`
+		DueOn  time.Time `json:"due_on"`
+	} `json:"milestone"`
 	UpdatedAt   time.Time `json:"updated_at"`
+	CreatedAt   time.Time `json:"created_at"`
 	PullRequest *struct {
 		URL string `json:"url"`
 	} `json:"pull_request"`
@@ -458,14 +464,20 @@ func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) (
 		for _, l := range i.Labels {
 			labels = append(labels, l.Name)
 		}
+		milestone := ""
+		if i.Milestone != nil {
+			milestone = i.Milestone.Title
+		}
 		out = append(out, Issue{
-			Forge:   "github",
-			Repo:    owner + "/" + repo,
-			Number:  i.Number,
-			Title:   i.Title,
-			URL:     i.HTMLURL,
-			Labels:  labels,
-			Updated: i.UpdatedAt,
+			Forge:     "github",
+			Repo:      owner + "/" + repo,
+			Number:    i.Number,
+			Title:     i.Title,
+			URL:       i.HTMLURL,
+			Labels:    labels,
+			Milestone: milestone,
+			Updated:   i.UpdatedAt,
+			Created:   i.CreatedAt,
 		})
 	}
 	return out, nil
@@ -551,4 +563,67 @@ func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, co
 		return "", err
 	}
 	return out.Content.HTMLURL, nil
+}
+
+func (c *GithubClient) ListOpenMilestones(ctx context.Context, owner, repo string) ([]Milestone, error) {
+	var raw []struct {
+		Number int        `json:"number"`
+		Title  string     `json:"title"`
+		DueOn  *time.Time `json:"due_on"`
+	}
+	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/milestones?state=open&per_page=100", &raw); err != nil {
+		return nil, err
+	}
+	out := make([]Milestone, 0, len(raw))
+	for _, m := range raw {
+		ms := Milestone{Number: m.Number, Title: m.Title}
+		if m.DueOn != nil {
+			ms.DueOn = *m.DueOn
+		}
+		out = append(out, ms)
+	}
+	return out, nil
+}
+
+func (c *GithubClient) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error) {
+	var raw []struct {
+		Number int    `json:"number"`
+		Title  string `json:"title"`
+		Body   string `json:"body"`
+		Draft  bool   `json:"draft"`
+	}
+	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/pulls?state=open&per_page=100", &raw); err != nil {
+		return nil, err
+	}
+	out := make([]PullRequest, 0, len(raw))
+	for _, p := range raw {
+		out = append(out, PullRequest{Number: p.Number, Title: p.Title, Body: p.Body, Draft: p.Draft})
+	}
+	return out, nil
+}
+
+// RemoveLabel deletes one label from an issue. A 404 (label not present) is
+// not an error — removal is idempotent by design, because the dispatcher
+// re-runs label cleanup on every retry tick.
+func (c *GithubClient) RemoveLabel(ctx context.Context, owner, repo string, number int, label string) error {
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/issues/%d/labels/%s",
+		c.baseURL, url.PathEscape(owner), url.PathEscape(repo), number, url.PathEscape(label))
+	req, err := http.NewRequestWithContext(ctx, "DELETE", endpoint, nil)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Authorization", "Bearer "+c.token)
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return nil
+	}
+	if resp.StatusCode >= 300 {
+		return fmt.Errorf("remove label: %s", resp.Status)
+	}
+	return nil
 }

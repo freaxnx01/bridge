@@ -430,3 +430,83 @@ func TestGithubCommentIssue(t *testing.T) {
 		t.Fatalf("comment.Created is zero, want populated from response")
 	}
 }
+
+func TestGithubListOpenIssuesMilestoneAndCreated(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+		  {"number":41,"title":"authors filter","html_url":"u1","labels":[{"name":"feat"}],
+		   "updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z",
+		   "milestone":{"title":"v2 search","number":3,"due_on":"2026-08-15T00:00:00Z"}},
+		  {"number":42,"title":"no milestone","html_url":"u2","labels":[],
+		   "updated_at":"2026-07-02T00:00:00Z","created_at":"2026-06-02T00:00:00Z"}
+		]`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	issues, err := c.ListOpenIssues(context.Background(), "freaxnx01", "quotes")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(issues) != 2 {
+		t.Fatalf("got %d issues", len(issues))
+	}
+	if issues[0].Milestone != "v2 search" {
+		t.Errorf("milestone: %q", issues[0].Milestone)
+	}
+	if issues[0].Created.Format("2006-01-02") != "2026-06-01" {
+		t.Errorf("created: %v", issues[0].Created)
+	}
+	// A missing milestone must be the empty string, not a panic.
+	if issues[1].Milestone != "" {
+		t.Errorf("milestone should be empty, got %q", issues[1].Milestone)
+	}
+}
+
+func TestGithubListOpenMilestones(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("state") != "open" {
+			t.Errorf("state: %q", r.URL.Query().Get("state"))
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+		  {"number":3,"title":"v2 search","due_on":"2026-08-15T00:00:00Z"},
+		  {"number":4,"title":"someday","due_on":null}
+		]`))
+	}))
+	defer srv.Close()
+
+	ms, err := NewGithubClient("token", srv.URL).ListOpenMilestones(context.Background(), "o", "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 2 || ms[0].Title != "v2 search" {
+		t.Fatalf("got %+v", ms)
+	}
+	// A null due_on must decode to the zero time, not error.
+	if !ms[1].DueOn.IsZero() {
+		t.Errorf("due_on should be zero, got %v", ms[1].DueOn)
+	}
+}
+
+func TestGithubListOpenPullRequests(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+		  {"number":90,"title":"feat: authors","body":"Closes #41","draft":true}
+		]`))
+	}))
+	defer srv.Close()
+
+	prs, err := NewGithubClient("token", srv.URL).ListOpenPullRequests(context.Background(), "o", "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(prs) != 1 || prs[0].Number != 90 || !prs[0].Draft {
+		t.Fatalf("got %+v", prs)
+	}
+	if prs[0].Body != "Closes #41" {
+		t.Errorf("body: %q", prs[0].Body)
+	}
+}

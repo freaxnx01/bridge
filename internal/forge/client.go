@@ -36,14 +36,16 @@ type RepoRef struct {
 }
 
 type Issue struct {
-	Forge   string    `json:"forge"`
-	Repo    string    `json:"repo"`
-	Number  int       `json:"number"`
-	Title   string    `json:"title"`
-	URL     string    `json:"url"`
-	State   string    `json:"state,omitempty"`
-	Labels  []string  `json:"labels,omitempty"`
-	Updated time.Time `json:"updated,omitempty"`
+	Forge     string    `json:"forge"`
+	Repo      string    `json:"repo"`
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	State     string    `json:"state,omitempty"`
+	Labels    []string  `json:"labels,omitempty"`
+	Milestone string    `json:"milestone,omitempty"`
+	Updated   time.Time `json:"updated,omitempty"`
+	Created   time.Time `json:"created,omitempty"`
 }
 
 // Comment is a single issue comment.
@@ -51,6 +53,21 @@ type Comment struct {
 	ID      int       `json:"id"`
 	Body    string    `json:"body"`
 	Created time.Time `json:"created,omitempty"`
+}
+
+// Milestone is an open milestone. DueOn is the zero time when unset.
+type Milestone struct {
+	Number int       `json:"number"`
+	Title  string    `json:"title"`
+	DueOn  time.Time `json:"due_on,omitempty"`
+}
+
+// PullRequest is an open pull request. Body is needed to resolve "Closes #N".
+type PullRequest struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Draft  bool   `json:"draft"`
 }
 
 type Client interface {
