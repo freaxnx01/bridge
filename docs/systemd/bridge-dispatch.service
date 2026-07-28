@@ -1,0 +1,7 @@
+[Unit]
+Description=bridge dispatch tick
+After=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=%h/.local/bin/bridge dispatch --auto

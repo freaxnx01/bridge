@@ -46,6 +46,10 @@ bridge presence [away|back|auto]
 bridge sync [now|--auto]
 bridge list [-r] [--refresh]    # text dump (scripts); -r adds remote rows
 bridge issues                   # open issues across forges (TTL cache)
+bridge dispatch [--dry-run]     # decide which enriched issues to hand to the pipeline
+bridge dispatch now             # one tick, manual
+bridge dispatch pause|resume    # kill switch
+bridge dispatch status          # caps, in-flight, last tick
 bridge watch                    # long-running watcher of ~/repos/
 bridge tui                      # Bubbletea dashboard (repos / cached issues / live sessions; Enter to act)
 bridge nav                      # interactive navigator: pick a repo → dashboard of its sessions & worktrees
