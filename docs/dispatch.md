@@ -37,53 +37,55 @@ The sort is stable: equal-rank issues retain their input order.
 
 ## Caps
 
-Three independent caps limit dispatch:
+Three independent caps limit dispatch, checked in this order:
 
-- **Per-repo WIP cap** — Prevents conflicting concurrent PRs in one repo by limiting open agent PRs per repo. Default: 1 per repo. Configured per-repo via overrides in `dispatch.json`. Example: `"overrides": {"quotes": 2}` allows 2 concurrent PRs in the `quotes` repo.
-- **Global open-PR cap** — Limits the operator's review capacity across all repos. Default: 3 open agent PRs total. Once reached, no further dispatch until some close.
-- **Nightly cap** — Bounds unattended spend during non-business hours (22:00–06:00, when the timer runs). Prevents a spike of dispatches with no human oversight. Default: 5 dispatches per night. Resets daily at dispatch time (22:00).
+1. **Nightly cap** — Bounds unattended spend during non-business hours (22:00–06:00, when the timer runs). Prevents a spike of dispatches with no human oversight. Default: 5 dispatches per night. Resets daily at dispatch time (22:00).
+2. **Global open-PR cap** — Limits the operator's review capacity across all repos. Default: 3 open agent PRs total. Once reached, no further dispatch until some close.
+3. **Per-repo WIP cap** — Prevents conflicting concurrent PRs in one repo by limiting open agent PRs per repo. Default: 1 per repo. Configured per-repo via overrides in `dispatch.json`. Example: `"overrides": {"quotes": 2}` allows 2 concurrent PRs in the `quotes` repo.
 
-All three must pass before an issue is dispatched. Dry-run shows which cap (if any) caused a skip.
+All three must pass before an issue is dispatched. Dry-run shows which cap (if any) caused a skip (the first one that was exceeded in the order above).
 
 ## Labels
 
-Dispatch uses these labels to track eligibility and failure state:
+Bridge dispatch checks and creates these labels:
 
 | Label | Meaning | Set by |
 |---|---|---|
 | `needs-enrichment` | Issue lacks clear task description; skip until enriched | Manual (operator) |
-| `🧊 parked` | Issue failed 2 times; skip until manually unparked | Dispatch (after 2 attempts) |
-| `ai-implement` | Selected for dispatch; ready for the pipeline | Dispatch (on selection) |
-| `attempt:1`, `attempt:2`, … | Attempt count (removed after each retry) | Dispatch (retry tick) |
-| `failed:transient` | Last failure was transient (API auth, rate limit, infra) — will retry automatically | Dispatch (failure labeling) |
-| `failed:max_turns` | Run hit the max-turn limit without producing a PR | Dispatch (failure labeling) |
-| `failed:gate_failed` | Run failed a pre-merge gate (linting, test, etc.) | Dispatch (failure labeling) |
-| `failed:no_diff` | Run produced no code changes | Dispatch (failure labeling) |
+| `🧊 parked` | Issue exhausted the attempt budget; skip until manually unparked | Agent-workflow / future retry-tick component |
+| `ai-implement` | Selected for dispatch; ready for the pipeline | Bridge dispatch (on selection) |
+| `attempt:1`, `attempt:2` | Attempt count; incremented after each failed substantive run | Agent-workflow / future retry-tick component |
+| `failed:api_auth` | Last run failed due to GitHub API auth error | Agent-workflow pipeline |
+| `failed:rate_limit` | Last run failed due to GitHub API rate limit | Agent-workflow pipeline |
+| `failed:infra` | Last run failed due to infrastructure error | Agent-workflow pipeline |
+| `failed:max_turns` | Last run hit the max-turn limit without producing a PR | Agent-workflow pipeline |
+| `failed:gate_failed` | Last run produced code but failed a pre-merge gate | Agent-workflow pipeline |
+| `failed:no_diff` | Last run produced no code changes | Agent-workflow pipeline |
 | `size:s`, `size:m`, `size:l` | Issue complexity estimate (small, medium, large) | Manual (operator) |
 
 ## When a run fails
 
-A failed run (when the pipeline labels an issue with `failed:<bucket>`) is categorized as either **transient** or **substantive**:
+When the agent-workflow pipeline labels an issue with `failed:<bucket>`, the failure is categorized as either **transient** or **substantive**. The distinction determines how a retry-tick component (when built and wired) will handle retries.
 
-### Transient failures (no attempt cost)
+### Transient failures (no attempt cost when retried)
 
 Transient failures indicate a temporary environmental issue, not a problem with the issue itself:
-- `api_auth` — GitHub API auth failure (bad/expired token, etc.)
-- `rate_limit` — GitHub API rate limit hit
-- `infra` — Infrastructure error (network timeout, service unavailable, etc.)
+- `failed:api_auth` — GitHub API auth failure (bad/expired token, etc.)
+- `failed:rate_limit` — GitHub API rate limit hit
+- `failed:infra` — Infrastructure error (network timeout, service unavailable, etc.)
 
-Transient failures are retried immediately (retry tick advances to the next eligible issue and retries this one without incrementing the attempt counter).
+When a future retry-tick component is wired, transient failures will be retried immediately without incrementing the attempt counter.
 
-### Substantive failures (count toward budget)
+### Substantive failures (count toward the 2-attempt budget)
 
-Substantive failures indicate a real problem the issue or task definition:
-- `max_turns` — Run hit the max-turn limit without producing a PR
-- `gate_failed` — Run produced code but failed a pre-merge gate (linting, tests, etc.)
-- `no_diff` — Run produced no code changes
+Substantive failures indicate a real problem with the issue or task definition:
+- `failed:max_turns` — Run hit the max-turn limit without producing a PR
+- `failed:gate_failed` — Run produced code but failed a pre-merge gate (linting, tests, etc.)
+- `failed:no_diff` — Run produced no code changes
 
-Substantive failures increment the attempt counter. After 2 failed substantive runs, the issue is labeled `🧊 parked` and skipped by dispatch until manually unparked.
+When a future retry-tick component is wired, substantive failures will increment the attempt counter. After 2 failed substantive runs, the issue will be labeled `🧊 parked` and skipped by dispatch until manually unparked.
 
-**Note:** Retry-tick automation is built (`NextAction` in `internal/dispatch/failure.go`) but not yet wired to a systemd timer or an automated `--retry-only` mode. For now, substantive retries require manual `bridge dispatch now` runs.
+**Status today:** The retry-tick logic is fully specified (`NextAction` in `internal/dispatch/failure.go` computes the label actions and retry decision), but it is not yet wired to an automated systemd timer or a `--retry-only` dispatch mode. For now, retries of any kind require manual `bridge dispatch now` runs.
 
 ## Config
 
@@ -122,9 +124,9 @@ Example with every key:
 
 ### Flags
 
-- `bridge dispatch` — Dry-run mode: decide which issues to dispatch, print decisions, change nothing. Used for testing and the first week of validation.
-- `bridge dispatch --dry-run` — Explicit dry-run (same as `bridge dispatch` with no flags).
-- `bridge dispatch --json` — Machine-readable output: one JSON object per decision with repo, issue number, title, dispatch decision, and skip reason.
+- `bridge dispatch` — Default: **applies decisions for real** (adds `ai-implement` labels and comments to GitHub). Use only after validation. To preview without side effects, use `--dry-run`.
+- `bridge dispatch --dry-run` — Dry-run mode: decide which issues to dispatch, print decisions, change nothing. Used for testing and the first week of validation. **This flag must be passed explicitly to preview safely.**
+- `bridge dispatch --json` — Machine-readable output: one JSON object per decision with repo, issue number, title, dispatch decision, and skip reason. Works with or without `--dry-run`.
 
 ### Subcommands
 
