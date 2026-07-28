@@ -16,11 +16,12 @@ Each tick, dispatch reads open issues from every GitHub repo, applies eligibilit
 
 An issue is eligible for dispatch if it passes these checks in order:
 
-1. **Not needs-enrichment** — The issue must be labeled `needs-enrichment` if it lacks a clear task description or acceptance criteria. Issues with this label are skipped.
+1. **Not needs-enrichment** — The issue must NOT be labeled `needs-enrichment` (i.e. it must already have a clear task description or acceptance criteria). Issues carrying this label are skipped until enriched.
 2. **Not parked** — The issue must not be labeled `🧊 parked`. Parked issues are skipped and must be manually unparked by removing the label.
-3. **Attempt budget** — The issue must not have an `attempt:N` label with N ≥ 2. A failed run increments the attempt counter; after 2 failed runs, the issue is parked and skipped.
-4. **No open PR** — The issue must not have an open pull request that closes it (detected by matching closing keywords in the PR body: "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"). A hand-written PR never consumes a dispatch slot.
-5. **Milestone membership** — If the repo has an open milestone with a due date, the issue must belong to that milestone. Undated milestones are treated as inactive (setting a due date is how the operator marks a milestone active for dispatch).
+3. **Not already dispatched** — The issue must not already carry the `ai-implement` label. This guards against re-labeling/re-commenting an issue on every tick when a prior dispatch failed without producing a PR (see "When a run fails" below) — the open-PR check alone can't catch that case, since no PR exists.
+4. **Attempt budget** — The issue must not have an `attempt:N` label with N ≥ 2. A failed run increments the attempt counter; after 2 failed runs, the issue is parked and skipped.
+5. **No open PR** — The issue must not have an open pull request that closes it (detected by matching closing keywords in the PR body: "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"). A hand-written PR never consumes a dispatch slot.
+6. **Milestone membership** — If the repo has an open milestone with a due date, the issue must belong to that milestone. Undated milestones are treated as inactive (setting a due date is how the operator marks a milestone active for dispatch).
 
 The first failure reason is returned; dry-run uses this to explain every skip.
 
@@ -139,7 +140,15 @@ Example with every key:
 
 `docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer runs `bridge dispatch --auto` at:
 - **22:00 (main tick)** — Dispatch new work within caps.
-- **23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00** — Hourly retries for issues that failed (only if wired; see "When a run fails" above).
+- **23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00** — Hourly ticks.
+
+**Every one of these ticks — 22:00 and hourly — runs the same full dispatch path today, bounded by the same nightly/global/per-repo caps.** There is no separate retry-only mode yet (see "When a run fails" above) — a dedicated `--retry-only` mode is still future work. What keeps the hourly ticks from re-labeling and re-commenting an issue that already failed without producing a PR is the "not already dispatched" eligibility guard (an issue already carrying `ai-implement` is skipped), not a retry-specific code path.
+
+The service requires a GitHub token in its environment. Systemd user units do **not** inherit your shell/direnv env, so create `~/.config/bridge/dispatch.env` (referenced by the service's `EnvironmentFile=`) containing at least:
+```
+GH_TOKEN=ghp_your_token_here
+```
+Without this file, `clientFor` resolves no GitHub client, every repo is silently skipped, and the tick reports "0 dispatched, 0 skipped" with exit 0 — a green timer doing nothing. Check `journalctl --user -u bridge-dispatch` for a `no GitHub client available` warning if dispatch looks inert.
 
 To install:
 ```bash

@@ -111,9 +111,9 @@ var dispatchStatusCmd = &cobra.Command{
 }
 
 func init() {
-	dispatchCmd.Flags().BoolVar(&dispatchDryRun, "dry-run", false, "decide and print, change nothing")
-	dispatchCmd.Flags().BoolVar(&dispatchJSON, "json", false, "machine-readable output")
-	dispatchCmd.Flags().BoolVar(&dispatchAuto, "auto", false, "timer entry point; honours the pause flag")
+	dispatchCmd.PersistentFlags().BoolVar(&dispatchDryRun, "dry-run", false, "decide and print, change nothing")
+	dispatchCmd.PersistentFlags().BoolVar(&dispatchJSON, "json", false, "machine-readable output")
+	dispatchCmd.PersistentFlags().BoolVar(&dispatchAuto, "auto", false, "timer entry point; honours the pause flag")
 	dispatchCmd.AddCommand(dispatchNowCmd, dispatchPauseCmd, dispatchResumeCmd, dispatchStatusCmd)
 	rootCmd.AddCommand(dispatchCmd)
 }
@@ -180,14 +180,17 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	}
 	var out []repoInput
 	var firstErr error
+	githubRepos, clientsResolved := 0, 0
 	for _, r := range repos {
 		if r.Forge != "github" {
 			continue
 		}
+		githubRepos++
 		gh, ok := clientFor(r.Forge).(*forge.GithubClient)
 		if !ok || gh == nil {
 			continue
 		}
+		clientsResolved++
 		in := repoInput{Forge: r.Forge, Owner: r.Owner, Name: r.Name}
 		if in.Issues, err = gh.ListOpenIssues(ctx, r.Owner, r.Name); err != nil {
 			if firstErr == nil {
@@ -214,6 +217,9 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	}
 	if firstErr != nil {
 		slog.Warn("dispatch: skipped repo(s) due to fetch error", "error", firstErr)
+	}
+	if githubRepos > 0 && clientsResolved == 0 {
+		slog.Warn("dispatch: no GitHub client available — check GH_TOKEN/BRIDGE_GITHUB_API", "github_repos", githubRepos)
 	}
 	return out, nil
 }

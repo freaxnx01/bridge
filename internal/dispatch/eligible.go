@@ -94,6 +94,9 @@ func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (b
 	if hasLabel(i.Labels, LabelParked) {
 		return false, "parked"
 	}
+	if hasLabel(i.Labels, LabelAIImplement) {
+		return false, "already dispatched"
+	}
 	if Attempts(i.Labels) >= 2 {
 		return false, "attempts exhausted"
 	}
