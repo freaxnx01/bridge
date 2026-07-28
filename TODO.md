@@ -49,6 +49,49 @@ Plan 2 covers the actual Svelte pages and components.
 - [ ] Todos, Ideas
 - [ ] GH Actions
 
+## bridge dispatch — manual testing (merged main, 2026-07-28)
+
+Full docs: [`docs/dispatch.md`](docs/dispatch.md). Spec: [`docs/specs/2026-07-27-bridge-dispatcher-design.md`](docs/specs/2026-07-27-bridge-dispatcher-design.md).
+
+**Do this before enabling the systemd timer — dry-run only for the first week.**
+
+- [ ] Build and install: `just build` (confirm `bridge dispatch --help` shows
+      `now`, `pause`, `resume`, `status` subcommands and `--dry-run`/`--json`/`--auto` flags)
+- [ ] `bridge dispatch --dry-run` against real repos — confirm it prints a
+      decision table (repo, issue #, title, dispatch/SKIP + reason) and a
+      summary line, and writes nothing (check no label/comment appeared on
+      any real issue afterward)
+- [ ] `bridge dispatch --dry-run --json` — confirm valid JSON output (this
+      exercises the persistent-flag fix; previously `--json` failed with
+      "unknown flag" on subcommands)
+- [ ] `bridge dispatch status` and `bridge dispatch status --json` — confirm
+      caps, paused flag, dispatched-tonight count, last tick render correctly
+- [ ] `bridge dispatch pause` then `bridge dispatch status` — confirm paused:
+      true; `bridge dispatch resume` flips it back
+- [ ] `bridge dispatch now` while paused — confirm it still runs (only
+      `--auto` should respect the pause flag)
+- [ ] Pick one low-stakes real issue, remove `needs-enrichment`, run
+      `bridge dispatch now` for real (no `--dry-run`) — confirm exactly the
+      `ai-implement` label + a "Dispatched by `bridge dispatch`" comment
+      appear, and nothing else (no `agent:*`/`model:*` label)
+- [ ] Run `bridge dispatch now` again immediately on the same issue — confirm
+      it is now skipped as "already dispatched" (the in-flight guard added in
+      final review) rather than being re-labeled
+- [ ] Force a repo to its per-repo WIP cap (two eligible issues, `per_repo: 1`
+      default) — confirm the second is skipped with `"repo at WIP 1/1"`
+- [ ] Set `max_dispatches_per_night` low in `~/.config/bridge/dispatch.json`
+      and confirm the nightly cap kicks in with `"night cap N/N"`
+- [ ] Confirm `~/.config/bridge/dispatch.json` overrides are picked up (e.g.
+      a per-repo override) and `~/.cache/bridge/dispatch.json` state persists
+      across runs (dispatched-tonight count, last tick)
+- [ ] Only after the above look right: install
+      `docs/systemd/bridge-dispatch.service` + `.timer`, create
+      `~/.config/bridge/dispatch.env` with `GH_TOKEN=...`, `systemctl --user
+      enable --now bridge-dispatch.timer`, and confirm a real 22:00 tick (or
+      `systemctl --user start bridge-dispatch.service` to trigger manually)
+      dispatches as expected — watch for the new `slog.Warn` if the token
+      env file is missing/misconfigured
+
 ## Agent / Bot Integration (ideas captured 2026-06-24)
 
 Full spec'd items filed as GitHub issues #163–#171 (bot `/ask`, `/status`, `/plan`,
