@@ -40,3 +40,23 @@ func TestRenderDecisionsEmpty(t *testing.T) {
 		t.Errorf("got %q", buf.String())
 	}
 }
+
+func TestCollectCandidatesSkipsNonGithubAndIneligible(t *testing.T) {
+	repos := []repoInput{
+		{Forge: "github", Owner: "o", Name: "quotes",
+			Issues: []forge.Issue{
+				{Number: 41, Labels: []string{"feat"}},
+				{Number: 42, Labels: []string{"needs-enrichment"}},
+			}},
+		{Forge: "forgejo", Owner: "f", Name: "notes",
+			Issues: []forge.Issue{{Number: 1, Labels: []string{"feat"}}}},
+	}
+
+	got := collectCandidates(repos)
+	if len(got) != 1 {
+		t.Fatalf("got %d candidates: %+v", len(got), got)
+	}
+	if got[0].Issue.Number != 41 || got[0].Repo != "quotes" {
+		t.Errorf("got %+v", got[0])
+	}
+}
