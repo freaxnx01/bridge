@@ -618,7 +618,7 @@ func (c *GithubClient) RemoveLabel(ctx context.Context, owner, repo string, numb
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode == http.StatusNotFound {
 		return nil
 	}

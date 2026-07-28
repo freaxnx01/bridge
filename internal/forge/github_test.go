@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"strings"
 	"testing"
 )
@@ -508,5 +509,70 @@ func TestGithubListOpenPullRequests(t *testing.T) {
 	}
 	if prs[0].Body != "Closes #41" {
 		t.Errorf("body: %q", prs[0].Body)
+	}
+}
+
+func TestGithubRemoveLabel(t *testing.T) {
+	testCases := []struct {
+		name       string
+		statusCode int
+		label      string
+	}{
+		{
+			name:       "success with complex label",
+			statusCode: http.StatusNoContent,
+			label:      "🧊 parked",
+		},
+		{
+			name:       "success with colon-separated label",
+			statusCode: http.StatusNoContent,
+			label:      "failed:infra",
+		},
+		{
+			name:       "404 treated as success",
+			statusCode: http.StatusNotFound,
+			label:      "attempt:1",
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				// Verify the request method and path
+				if r.Method != "DELETE" {
+					t.Errorf("method: %s, want DELETE", r.Method)
+				}
+				// Verify the Accept header
+				if r.Header.Get("Accept") != "application/vnd.github+json" {
+					t.Errorf("Accept header: %q", r.Header.Get("Accept"))
+				}
+				// Verify Bearer token header
+				if r.Header.Get("Authorization") != "Bearer token" {
+					t.Errorf("Authorization header: %q", r.Header.Get("Authorization"))
+				}
+				// Extract and verify the escaped label from the path
+				// Path format: /repos/owner/repo/issues/42/labels/ESCAPED_LABEL
+				pathParts := strings.Split(r.URL.Path, "/")
+				if len(pathParts) < 8 {
+					t.Errorf("path too short: %s", r.URL.Path)
+				}
+				escapedLabel := pathParts[len(pathParts)-1]
+				// url.QueryUnescape should round-trip to the original label
+				unescaped, err := url.QueryUnescape(escapedLabel)
+				if err != nil {
+					t.Errorf("unescape label: %v", err)
+				}
+				if unescaped != tc.label {
+					t.Errorf("label mismatch: got %q, want %q", unescaped, tc.label)
+				}
+				w.WriteHeader(tc.statusCode)
+			}))
+			defer srv.Close()
+
+			err := NewGithubClient("token", srv.URL).RemoveLabel(context.Background(), "owner", "repo", 42, tc.label)
+			if err != nil {
+				t.Errorf("RemoveLabel: %v", err)
+			}
+		})
 	}
 }
