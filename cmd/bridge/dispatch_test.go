@@ -124,3 +124,63 @@ func TestRunDispatchStatusJSON(t *testing.T) {
 		t.Errorf("expected paused=true in JSON output, got %q", out.String())
 	}
 }
+
+// setDispatchFlags sets the package-level dispatch flags for the duration of
+// a test and restores their zero values afterward, since runDispatch reads
+// them as globals rather than taking parameters.
+func setDispatchFlags(t *testing.T, jsonOut, dryRun bool) {
+	t.Helper()
+	dispatchJSON, dispatchDryRun = jsonOut, dryRun
+	t.Cleanup(func() { dispatchJSON, dispatchDryRun = false, false })
+}
+
+func TestRunDispatch_JSONLiveTick_CallsApplyDecisions(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_BASE", t.TempDir()) // exists but has no repos: fetchRepoInputs finds nothing
+	setDispatchFlags(t, true, false)     // --json, no --dry-run
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	if err := runDispatch(cmd, nil); err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	var decisions []dispatch.Decision
+	if err := json.Unmarshal(out.Bytes(), &decisions); err != nil {
+		t.Fatalf("invalid JSON %q: %v", out.String(), err)
+	}
+
+	state, err := dispatch.ReadState(dispatchStatePath())
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if state.LastTick.IsZero() {
+		t.Errorf("want LastTick set (applyDecisions ran on a live --json tick), got zero value")
+	}
+}
+
+func TestRunDispatch_DryRunJSON_SkipsApplyDecisions(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_BASE", t.TempDir())
+	setDispatchFlags(t, true, true) // --json --dry-run: dry-run always wins
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	if err := runDispatch(cmd, nil); err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	state, err := dispatch.ReadState(dispatchStatePath())
+	if err != nil {
+		t.Fatalf("ReadState: %v", err)
+	}
+	if !state.LastTick.IsZero() {
+		t.Errorf("want LastTick unset (--dry-run must skip applyDecisions), got %v", state.LastTick)
+	}
+}

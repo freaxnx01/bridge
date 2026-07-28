@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"time"
@@ -156,9 +157,12 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	)
 
 	if dispatchJSON {
-		return emitJSON(cmd.OutOrStdout(), decisions)
+		if err := emitJSON(cmd.OutOrStdout(), decisions); err != nil {
+			return err
+		}
+	} else {
+		renderDecisions(cmd.OutOrStdout(), decisions)
 	}
-	renderDecisions(cmd.OutOrStdout(), decisions)
 	if dispatchDryRun {
 		return nil
 	}
@@ -207,6 +211,9 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	}
 	if len(out) == 0 && firstErr != nil {
 		return nil, firstErr
+	}
+	if firstErr != nil {
+		slog.Warn("dispatch: skipped repo(s) due to fetch error", "error", firstErr)
 	}
 	return out, nil
 }
