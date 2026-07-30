@@ -61,6 +61,7 @@ type fjRepo struct {
 	Description   string    `json:"description"`
 	Private       bool      `json:"private"`
 	Archived      bool      `json:"archived"`
+	Topics        []string  `json:"topics"`
 	HTMLURL       string    `json:"html_url"`
 	SSHURL        string    `json:"ssh_url"`
 	UpdatedAt     time.Time `json:"updated_at"`
@@ -137,6 +138,69 @@ func (c *ForgejoClient) CreateRepo(ctx context.Context, name string, private boo
 		DefaultBranch: r.DefaultBranch, Visibility: vis,
 		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL, UpdatedAt: r.UpdatedAt,
 	}, nil
+}
+
+// UpdateRepo patches description/private/archived. A nil pointer leaves that
+// field unchanged; topics is a separate call (SetTopics) since it lives on
+// its own endpoint.
+func (c *ForgejoClient) UpdateRepo(ctx context.Context, owner, repo string, description *string, private, archived *bool) (RepoRef, error) {
+	body := map[string]any{}
+	if description != nil {
+		body["description"] = *description
+	}
+	if private != nil {
+		body["private"] = *private
+	}
+	if archived != nil {
+		body["archived"] = *archived
+	}
+	var r fjRepo
+	path := fmt.Sprintf("/api/v1/repos/%s/%s", url.PathEscape(owner), url.PathEscape(repo))
+	if err := c.patch(ctx, path, body, &r); err != nil {
+		return RepoRef{}, err
+	}
+	vis := "public"
+	if r.Private {
+		vis = "private"
+	}
+	return RepoRef{
+		Forge: "forgejo", Owner: r.Owner.Login, Name: r.Name,
+		DefaultBranch: r.DefaultBranch, Description: r.Description, Topics: r.Topics,
+		Visibility: vis, Archived: r.Archived,
+		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL, UpdatedAt: r.UpdatedAt,
+	}, nil
+}
+
+// SetTopics replaces owner/repo's topic set via the dedicated topics
+// endpoint. Gitea/Forgejo answers with 204 No Content, so there is nothing to
+// decode back — the requested set is echoed on success.
+func (c *ForgejoClient) SetTopics(ctx context.Context, owner, repo string, topics []string) ([]string, error) {
+	if topics == nil {
+		topics = []string{}
+	}
+	buf, err := json.Marshal(map[string]any{"topics": topics})
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/topics", url.PathEscape(owner), url.PathEscape(repo))
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return nil, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "token "+c.token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("forgejo %s: %s: %s", path, resp.Status, string(b))
+	}
+	return topics, nil
 }
 
 // CreateIssue creates an issue on owner/repo via Forgejo/Gitea and returns the

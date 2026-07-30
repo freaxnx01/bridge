@@ -147,6 +147,82 @@ func TestForgejoCreateIssue(t *testing.T) {
 	}
 }
 
+func TestForgejoUpdateRepo_PatchesOnlyGivenFields(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/api/v1/repos/freax/notes" {
+			t.Errorf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		json.NewDecoder(r.Body).Decode(&gotBody)
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"description":"new desc","private":false,"html_url":"https://x/freax/notes","updated_at":"2026-01-02T03:04:05Z"}`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	desc := "new desc"
+	repo, err := c.UpdateRepo(context.Background(), "freax", "notes", &desc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotBody) != 1 || gotBody["description"] != "new desc" {
+		t.Errorf("want only description in the PATCH body, got %+v", gotBody)
+	}
+	if repo.Description != "new desc" || repo.Visibility != "public" {
+		t.Errorf("unexpected repo: %+v", repo)
+	}
+	if repo.UpdatedAt.IsZero() {
+		t.Error("want a real timestamp, not a Go zero value")
+	}
+}
+
+func TestForgejoUpdateRepo_ArchivedRoundTrips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["archived"] != true {
+			t.Errorf("want archived=true in request body, got %+v", body)
+		}
+		w.Write([]byte(`{"archived":true,"html_url":"https://x/freax/notes"}`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	archived := true
+	repo, err := c.UpdateRepo(context.Background(), "freax", "notes", nil, nil, &archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.Archived {
+		t.Errorf("want archived=true in the result, got %+v", repo)
+	}
+}
+
+func TestForgejoSetTopics_RoundTrips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/api/v1/repos/freax/notes/topics" {
+			t.Errorf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		topics, _ := body["topics"].([]any)
+		if len(topics) != 2 {
+			t.Errorf("want 2 topics in request, got %+v", body)
+		}
+		w.WriteHeader(http.StatusNoContent)
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	topics, err := c.SetTopics(context.Background(), "freax", "notes", []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 2 || topics[0] != "a" {
+		t.Errorf("unexpected topics: %+v", topics)
+	}
+}
+
 func TestForgejoGetFile_FoundAndAbsent(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/api/v1/repos/freax/notes/contents/ideas.md" {

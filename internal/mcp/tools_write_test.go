@@ -703,3 +703,316 @@ func TestHandleCommentIssue_TierOneClientReportsUnsupportedNotUnconfigured(t *te
 		t.Fatalf("want a does-not-support error, got %v", err)
 	}
 }
+
+func strPtr(s string) *string { return &s }
+func boolPtr(b bool) *bool    { return &b }
+
+func TestHandleUpdateRepo_RequiresAtLeastOneField(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleUpdateRepo(context.Background(), nil,
+		updateRepoInput{Forge: "github", Owner: "o", Repo: "r"})
+	if err == nil {
+		t.Fatal("want an error when no mutable field is given, got nil")
+	}
+}
+
+func TestHandleUpdateRepo_DraftDoesNotUpdate(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Description: strPtr("new desc"), Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("confirm=false must return a draft: %+v", out)
+	}
+	if out.Result != nil {
+		t.Fatalf("draft must carry no result: %+v", out.Result)
+	}
+}
+
+func TestHandleUpdateRepo_ConfirmUpdatesDescription(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Description: strPtr("new desc"), Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatalf("confirm=true must not be a draft: %+v", out)
+	}
+	if out.Result == nil || out.Result.Description != "new desc" {
+		t.Fatalf("want the updated description in the result: %+v", out.Result)
+	}
+}
+
+func TestHandleUpdateRepo_ConfirmUpdatesTopicsOnly(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Topics: []string{"a", "b"}, Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Result != nil {
+		t.Fatalf("topics-only update must not touch the repo PATCH: %+v", out.Result)
+	}
+	if len(out.TopicsResult) != 2 || out.TopicsResult[0] != "a" {
+		t.Fatalf("want the topics result: %+v", out.TopicsResult)
+	}
+	if out.TopicsError != "" {
+		t.Fatalf("want no topics error: %q", out.TopicsError)
+	}
+}
+
+func TestHandleUpdateRepo_ConfirmUpdatesDescriptionAndTopicsTogether(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r",
+		Description: strPtr("new desc"), Topics: []string{"a"}, Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Result == nil || out.Result.Description != "new desc" {
+		t.Fatalf("want the repo-level result: %+v", out.Result)
+	}
+	if len(out.TopicsResult) != 1 || out.TopicsResult[0] != "a" {
+		t.Fatalf("want the topics result: %+v", out.TopicsResult)
+	}
+}
+
+func TestHandleUpdateRepo_EmptyTopicsArrayClearsTopics(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Topics: []string{}, Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.TopicsResult == nil || len(out.TopicsResult) != 0 {
+		t.Fatalf("want an explicit empty topics result, got %+v (nil means topics was never called)", out.TopicsResult)
+	}
+	if gh.lastTopics == nil {
+		t.Fatal("an explicit empty array must still call SetTopics to clear topics, got no call")
+	}
+}
+
+func TestHandleUpdateRepo_TopicsFailureAfterRepoSuccessIsPartialNotError(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.topicsErr = errors.New("topics endpoint down")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r",
+		Description: strPtr("new desc"), Topics: []string{"a"}, Confirm: true,
+	})
+	if err != nil {
+		t.Fatalf("a partial failure must not surface as a top-level error (would discard the successful description update): %v", err)
+	}
+	if out.Result == nil || out.Result.Description != "new desc" {
+		t.Fatalf("the successful repo-level update must still be reported: %+v", out.Result)
+	}
+	if out.TopicsError == "" {
+		t.Fatal("want a non-empty TopicsError to flag the partial failure")
+	}
+}
+
+func TestHandleUpdateRepo_TopicsOnlyFailureIsFullError(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.topicsErr = errors.New("topics endpoint down")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Topics: []string{"a"}, Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("nothing succeeded, so this must be a normal top-level error")
+	}
+}
+
+func TestHandleUpdateRepo_ArchivedTrueRequiresAllowDestructive(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.AllowDestructive = false
+
+	_, _, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Archived: boolPtr(true), Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want an error when archiving without --allow-destructive, got nil")
+	}
+}
+
+func TestHandleUpdateRepo_ArchivedTrueWithAllowDestructiveSucceeds(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.AllowDestructive = true
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Archived: boolPtr(true), Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Result == nil || !out.Result.Archived {
+		t.Fatalf("want the archived result: %+v", out.Result)
+	}
+}
+
+func TestHandleUpdateRepo_ArchivedFalseDoesNotRequireAllowDestructive(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.AllowDestructive = false
+
+	_, out, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Archived: boolPtr(false), Confirm: true,
+	})
+	if err != nil {
+		t.Fatalf("unarchiving must not require --allow-destructive: %v", err)
+	}
+	if out.Result == nil {
+		t.Fatalf("want a result: %+v", out.Result)
+	}
+}
+
+func TestHandleUpdateRepo_UnconfiguredForgeErrors(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "bogus", Owner: "o", Repo: "r", Description: strPtr("x"), Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want error for unknown forge, got nil")
+	}
+}
+
+func TestHandleUpdateRepo_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleUpdateRepo(context.Background(), nil,
+		updateRepoInput{Forge: "gitlab", Owner: "o", Repo: "r", Description: strPtr("x"), Confirm: true})
+	if err == nil {
+		t.Fatal("want an error for a client without UpdateRepo, got nil")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a resolved but incapable client must not be reported as unconfigured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleUpdateRepo_DraftDoesNotLogAudit(t *testing.T) {
+	gh := newFakeFull("github")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Description: strPtr("x"), Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(data) != 0 {
+		t.Errorf("draft must not log an audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleUpdateRepo_ConfirmLogsSuccess(t *testing.T) {
+	gh := newFakeFull("github")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Description: strPtr("x"), Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tool":"update_repo"`) || !strings.Contains(string(data), `"outcome":"success"`) {
+		t.Errorf("want a success audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleUpdateRepo_PartialFailureLogsPartialOutcome(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.topicsErr = errors.New("topics endpoint down")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r",
+		Description: strPtr("x"), Topics: []string{"a"}, Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tool":"update_repo"`) || !strings.Contains(string(data), `"outcome":"partial"`) {
+		t.Errorf("want a partial audit entry, got %q", string(data))
+	}
+}
+
+func TestHandleUpdateRepo_ForgeErrorLogsErrorOutcome(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.repoUpdateErr = errors.New("api down")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.Audit = logger
+
+	_, _, err = d.handleUpdateRepo(context.Background(), nil, updateRepoInput{
+		Forge: "github", Owner: "o", Repo: "r", Description: strPtr("x"), Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want an error when UpdateRepo fails")
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"outcome":"error"`) {
+		t.Errorf("want an error audit entry, got %q", string(data))
+	}
+}

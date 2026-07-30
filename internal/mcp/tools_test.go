@@ -162,6 +162,41 @@ func (f *fakeRepos) CreateRepo(_ context.Context, name string, private bool) (fo
 	return forge.RepoRef{Forge: f.forgeName, Owner: "token-owner", Name: name, Visibility: visibility}, nil
 }
 
+// fakeRepoUpdater supplies the repoUpdater and topicsSetter capabilities.
+type fakeRepoUpdater struct {
+	forgeName     string
+	repoUpdateErr error
+	topicsErr     error
+	lastTopics    []string
+}
+
+func (f *fakeRepoUpdater) UpdateRepo(_ context.Context, owner, repo string, description *string, private, archived *bool) (forge.RepoRef, error) {
+	if f.repoUpdateErr != nil {
+		return forge.RepoRef{}, f.repoUpdateErr
+	}
+	r := forge.RepoRef{Forge: f.forgeName, Owner: owner, Name: repo}
+	if description != nil {
+		r.Description = *description
+	}
+	if private != nil && *private {
+		r.Visibility = "private"
+	} else {
+		r.Visibility = "public"
+	}
+	if archived != nil {
+		r.Archived = *archived
+	}
+	return r, nil
+}
+
+func (f *fakeRepoUpdater) SetTopics(_ context.Context, _, _ string, topics []string) ([]string, error) {
+	f.lastTopics = topics
+	if f.topicsErr != nil {
+		return nil, f.topicsErr
+	}
+	return topics, nil
+}
+
 // fakeFull has every capability — the GitHub/Forgejo shape.
 type fakeFull struct {
 	*fakeReader
@@ -169,17 +204,19 @@ type fakeFull struct {
 	*fakeTree
 	*fakeIssues
 	*fakeRepos
+	*fakeRepoUpdater
 }
 
 // newFakeFull builds a fully capable client. Tests set fields on the embedded
 // structs afterwards, e.g. c.repos = … or c.found = false.
 func newFakeFull(name string) *fakeFull {
 	return &fakeFull{
-		fakeReader: &fakeReader{name: name},
-		fakeFiles:  &fakeFiles{},
-		fakeTree:   &fakeTree{},
-		fakeIssues: &fakeIssues{forgeName: name},
-		fakeRepos:  &fakeRepos{forgeName: name},
+		fakeReader:      &fakeReader{name: name},
+		fakeFiles:       &fakeFiles{},
+		fakeTree:        &fakeTree{},
+		fakeIssues:      &fakeIssues{forgeName: name},
+		fakeRepos:       &fakeRepos{forgeName: name},
+		fakeRepoUpdater: &fakeRepoUpdater{forgeName: name},
 	}
 }
 
@@ -216,7 +253,7 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			name:   "fully capable client reports every tool",
 			client: newFakeFull("github"),
 			want: []string{
-				"list_repos", "list_issues", "read_file", "list_tree", "create_issue", "create_repo",
+				"list_repos", "list_issues", "read_file", "list_tree", "create_issue", "create_repo", "update_repo",
 				"close_issue", "update_issue", "add_labels", "comment_issue",
 			},
 		},

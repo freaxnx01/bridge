@@ -116,6 +116,109 @@ func (d Deps) handleCreateRepo(ctx context.Context, _ *mcp.CallToolRequest, in c
 	}, nil
 }
 
+type updateRepoInput struct {
+	Forge       string   `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner       string   `json:"owner" jsonschema:"repository owner"`
+	Repo        string   `json:"repo" jsonschema:"repository name"`
+	Description *string  `json:"description,omitempty" jsonschema:"new description; omit to leave unchanged"`
+	Topics      []string `json:"topics,omitempty" jsonschema:"replaces the full topic set; omit to leave unchanged, pass an empty array to clear all topics"`
+	Private     *bool    `json:"private,omitempty" jsonschema:"flip repo visibility; omit to leave unchanged"`
+	Archived    *bool    `json:"archived,omitempty" jsonschema:"archive or unarchive the repo; setting true additionally requires the server to run with --allow-destructive, since archiving blocks all further writes"`
+	Confirm     bool     `json:"confirm,omitempty" jsonschema:"when false, returns a draft without updating; set true to update. At least one of description/topics/private/archived is required"`
+}
+
+// updateRepoOutput separates the repo-level PATCH result (Result) from the
+// topics result (TopicsResult/TopicsError): topics lives on its own endpoint
+// on both forges, so a call that changes both can succeed on one and fail on
+// the other. TopicsError being set alongside a non-nil Result is a partial
+// success, not silently reported as either full success or full failure.
+type updateRepoOutput struct {
+	Draft        bool           `json:"draft"`
+	Forge        string         `json:"forge"`
+	Owner        string         `json:"owner"`
+	Repo         string         `json:"repo"`
+	Description  *string        `json:"description,omitempty"`
+	Topics       []string       `json:"topics,omitempty"`
+	Private      *bool          `json:"private,omitempty"`
+	Archived     *bool          `json:"archived,omitempty"`
+	Result       *forge.RepoRef `json:"result,omitempty"`
+	TopicsResult []string       `json:"topics_result,omitempty"`
+	TopicsError  string         `json:"topics_error,omitempty"`
+}
+
+func (d Deps) handleUpdateRepo(ctx context.Context, _ *mcp.CallToolRequest, in updateRepoInput) (*mcp.CallToolResult, updateRepoOutput, error) {
+	if in.Description == nil && in.Topics == nil && in.Private == nil && in.Archived == nil {
+		return nil, updateRepoOutput{}, fmt.Errorf("update repo %s/%s: at least one of description, topics, private, or archived is required", in.Owner, in.Repo)
+	}
+	draft := updateRepoOutput{
+		Draft: true,
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo,
+		Description: in.Description, Topics: in.Topics, Private: in.Private, Archived: in.Archived,
+	}
+	if !in.Confirm {
+		return nil, draft, nil
+	}
+	// Archiving blocks all further writes to the repo, so it needs the
+	// destructive-tools gate on top of the normal confirm=true — there is no
+	// path that archives without both.
+	if in.Archived != nil && *in.Archived && !d.AllowDestructive {
+		return nil, updateRepoOutput{}, fmt.Errorf("update repo %s/%s: archiving requires the server to run with --allow-destructive", in.Owner, in.Repo)
+	}
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return nil, updateRepoOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+
+	out := updateRepoOutput{
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo,
+		Description: in.Description, Topics: in.Topics, Private: in.Private, Archived: in.Archived,
+	}
+
+	if in.Description != nil || in.Private != nil || in.Archived != nil {
+		updater, ok := client.(repoUpdater)
+		if !ok {
+			return nil, updateRepoOutput{}, fmt.Errorf("forge %q does not support updating repositories", in.Forge)
+		}
+		repo, err := updater.UpdateRepo(ctx, in.Owner, in.Repo, in.Description, in.Private, in.Archived)
+		if err != nil {
+			d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "update_repo", Confirm: true, Outcome: "error"})
+			return nil, updateRepoOutput{}, fmt.Errorf("update repo %s/%s: %w", in.Owner, in.Repo, err)
+		}
+		out.Result = &repo
+	}
+
+	if in.Topics != nil {
+		setter, ok := client.(topicsSetter)
+		if !ok {
+			return d.partialOrFullTopicsFailure(in, out, fmt.Errorf("forge %q does not support setting topics", in.Forge))
+		}
+		topics, err := setter.SetTopics(ctx, in.Owner, in.Repo, in.Topics)
+		if err != nil {
+			return d.partialOrFullTopicsFailure(in, out, fmt.Errorf("update repo %s/%s topics: %w", in.Owner, in.Repo, err))
+		}
+		out.TopicsResult = topics
+	}
+
+	d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "update_repo", Confirm: true, Outcome: "success"})
+	return nil, out, nil
+}
+
+// partialOrFullTopicsFailure handles a topics-step failure. If the repo-level
+// PATCH already succeeded (out.Result != nil), that success must not be
+// discarded: the failure is reported inside the output as TopicsError so the
+// caller sees exactly what did and didn't happen, rather than a top-level
+// error that reads as "nothing changed." If nothing succeeded yet, the
+// failure is the whole story and is returned as a normal error.
+func (d Deps) partialOrFullTopicsFailure(in updateRepoInput, out updateRepoOutput, err error) (*mcp.CallToolResult, updateRepoOutput, error) {
+	if out.Result == nil {
+		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "update_repo", Confirm: true, Outcome: "error"})
+		return nil, updateRepoOutput{}, err
+	}
+	out.TopicsError = err.Error()
+	d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "update_repo", Confirm: true, Outcome: "partial"})
+	return nil, out, nil
+}
+
 type closeIssueInput struct {
 	Forge       string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
 	Owner       string `json:"owner" jsonschema:"repository owner"`

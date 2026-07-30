@@ -142,6 +142,78 @@ func (c *GithubClient) CreateRepo(ctx context.Context, name string, private bool
 }
 
 // CreateIssue creates an issue on owner/repo and returns the minimal Issue.
+func (c *GithubClient) put(ctx context.Context, path string, body, out any) error {
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+path, bytes.NewReader(buf))
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("github %s: %s: %s", path, resp.Status, string(b))
+	}
+	return json.NewDecoder(resp.Body).Decode(out)
+}
+
+// UpdateRepo patches description/private/archived. A nil pointer leaves that
+// field unchanged; topics is a separate call (SetTopics) since it lives on
+// its own endpoint.
+func (c *GithubClient) UpdateRepo(ctx context.Context, owner, repo string, description *string, private, archived *bool) (RepoRef, error) {
+	body := map[string]any{}
+	if description != nil {
+		body["description"] = *description
+	}
+	if private != nil {
+		body["private"] = *private
+	}
+	if archived != nil {
+		body["archived"] = *archived
+	}
+	var r ghRepo
+	if err := c.patch(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo), body, &r); err != nil {
+		return RepoRef{}, err
+	}
+	vis := r.Visibility
+	if vis == "" {
+		vis = "public"
+	}
+	return RepoRef{
+		Forge: "github", Owner: r.Owner.Login, Name: r.Name,
+		DefaultBranch: r.DefaultBranch, Description: r.Description, Topics: r.Topics,
+		Visibility: vis, Archived: r.Archived,
+		HTMLURL: r.HTMLURL, SSHURL: r.SSHURL, UpdatedAt: r.UpdatedAt,
+	}, nil
+}
+
+// SetTopics replaces owner/repo's topic set entirely via the dedicated topics
+// endpoint and returns the topics GitHub reports back.
+func (c *GithubClient) SetTopics(ctx context.Context, owner, repo string, topics []string) ([]string, error) {
+	if topics == nil {
+		topics = []string{}
+	}
+	body := map[string]any{"names": topics}
+	var out struct {
+		Names []string `json:"names"`
+	}
+	if err := c.put(ctx, "/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo)+"/topics", body, &out); err != nil {
+		return nil, err
+	}
+	return out.Names, nil
+}
+
 func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
 	req := map[string]any{"title": title, "body": body}
 	var raw struct {

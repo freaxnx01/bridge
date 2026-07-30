@@ -40,7 +40,7 @@ func advertisedTools(t *testing.T, deps Deps) []string {
 
 func TestNewServer_RegistersExpectedToolSet(t *testing.T) {
 	names := advertisedTools(t, Deps{})
-	want := []string{"add_labels", "close_issue", "comment_issue", "create_issue", "create_repo", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "list_tree", "read_file", "update_issue"}
+	want := []string{"add_labels", "close_issue", "comment_issue", "create_issue", "create_repo", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "list_tree", "read_file", "update_issue", "update_repo"}
 	if len(names) != len(want) {
 		t.Fatalf("want %v, got %v", want, names)
 	}

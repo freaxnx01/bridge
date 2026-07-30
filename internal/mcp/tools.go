@@ -45,6 +45,18 @@ type repoCreator interface {
 	CreateRepo(ctx context.Context, name string, private bool) (forge.RepoRef, error)
 }
 
+// repoUpdater is asserted by update_repo for its description/private/archived
+// fields. A nil pointer leaves that field unchanged.
+type repoUpdater interface {
+	UpdateRepo(ctx context.Context, owner, repo string, description *string, private, archived *bool) (forge.RepoRef, error)
+}
+
+// topicsSetter is asserted by update_repo for its topics field — both forges
+// expose topics via a separate endpoint from the main repo PATCH.
+type topicsSetter interface {
+	SetTopics(ctx context.Context, owner, repo string, topics []string) ([]string, error)
+}
+
 // issueCloser is asserted by close_issue.
 type issueCloser interface {
 	CloseIssue(ctx context.Context, owner, repo string, number int, stateReason string) (forge.Issue, error)
@@ -98,6 +110,9 @@ func Capabilities(r ForgeReader) []string {
 	}
 	if _, ok := r.(repoCreator); ok {
 		capabilities = append(capabilities, "create_repo")
+	}
+	if _, ok := r.(repoUpdater); ok {
+		capabilities = append(capabilities, "update_repo")
 	}
 	if _, ok := r.(issueCloser); ok {
 		capabilities = append(capabilities, "close_issue")

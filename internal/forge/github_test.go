@@ -388,6 +388,84 @@ func TestGithubListTree_RecursiveEmptyRepoReturnsEmptyListNotError(t *testing.T)
 	}
 }
 
+func TestGithubUpdateRepo_PatchesOnlyGivenFields(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch || r.URL.Path != "/repos/o/r" {
+			t.Errorf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatal(err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`{"description":"new desc","visibility":"public","html_url":"https://x/o/r","updated_at":"2026-01-02T03:04:05Z"}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	desc := "new desc"
+	repo, err := c.UpdateRepo(context.Background(), "o", "r", &desc, nil, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(gotBody) != 1 || gotBody["description"] != "new desc" {
+		t.Errorf("want only description in the PATCH body, got %+v", gotBody)
+	}
+	if repo.Description != "new desc" || repo.Visibility != "public" {
+		t.Errorf("unexpected repo: %+v", repo)
+	}
+	if repo.UpdatedAt.IsZero() {
+		t.Error("want a real timestamp, not a Go zero value")
+	}
+}
+
+func TestGithubUpdateRepo_ArchivedRoundTrips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["archived"] != true {
+			t.Errorf("want archived=true in request body, got %+v", body)
+		}
+		w.Write([]byte(`{"archived":true,"visibility":"public","html_url":"https://x/o/r"}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	archived := true
+	repo, err := c.UpdateRepo(context.Background(), "o", "r", nil, nil, &archived)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !repo.Archived {
+		t.Errorf("want archived=true in the result, got %+v", repo)
+	}
+}
+
+func TestGithubSetTopics_RoundTrips(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPut || r.URL.Path != "/repos/o/r/topics" {
+			t.Errorf("method=%s path=%s", r.Method, r.URL.Path)
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		names, _ := body["names"].([]any)
+		if len(names) != 2 {
+			t.Errorf("want 2 topics in request, got %+v", body)
+		}
+		w.Write([]byte(`{"names":["a","b"]}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	topics, err := c.SetTopics(context.Background(), "o", "r", []string{"a", "b"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(topics) != 2 || topics[0] != "a" {
+		t.Errorf("unexpected topics: %+v", topics)
+	}
+}
+
 func TestGithubPutFile_CreateAndUpdate(t *testing.T) {
 	var gotBodies []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
