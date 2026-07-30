@@ -2,6 +2,7 @@ package forge
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/url"
 	"strings"
@@ -20,6 +21,42 @@ func escapePathSegments(p string) string {
 		segments[i] = url.PathEscape(s)
 	}
 	return strings.Join(segments, "/")
+}
+
+// isEmptyRepoMessage reports whether a 404/409 error body from a contents or
+// git-data endpoint describes a repo with no commits yet, as opposed to a
+// missing path. Both GitHub and Forgejo phrase this as an "message" field
+// containing "empty" ("This repository is empty." / "repository is empty"),
+// so a substring check covers both without hardcoding either forge's exact
+// wording.
+func isEmptyRepoMessage(body []byte) bool {
+	var m struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(m.Message), "empty")
+}
+
+// treeEntryType normalizes a git tree entry's (type, mode) pair — "blob"/
+// "tree"/"commit" per the Git Trees API — into the file/dir/symlink/submodule
+// vocabulary the contents API uses natively, so ListTree reports one
+// consistent Type regardless of which API shape answered the call.
+func treeEntryType(apiType, mode string) string {
+	switch apiType {
+	case "tree":
+		return "dir"
+	case "commit":
+		return "submodule"
+	case "blob":
+		if mode == "120000" {
+			return "symlink"
+		}
+		return "file"
+	default:
+		return apiType
+	}
 }
 
 type RepoRef struct {
@@ -46,6 +83,16 @@ type Issue struct {
 	Milestone string    `json:"milestone,omitempty"`
 	Updated   time.Time `json:"updated,omitempty"`
 	Created   time.Time `json:"created,omitempty"`
+}
+
+// TreeEntry is one path in a repo tree listing. Type is one of "file", "dir",
+// "symlink", or "submodule" — normalized across GitHub's contents/trees API
+// shapes and Forgejo's equivalent.
+type TreeEntry struct {
+	Path string `json:"path"`
+	Type string `json:"type"`
+	Size int64  `json:"size,omitempty"`
+	SHA  string `json:"sha"`
 }
 
 // Comment is a single issue comment.

@@ -49,6 +49,20 @@ func (f *fakeFiles) GetFile(_ context.Context, _, _, _ string) ([]byte, string, 
 	return f.file, f.sha, f.found, nil
 }
 
+// fakeTree supplies the treeLister capability.
+type fakeTree struct {
+	entries   []forge.TreeEntry
+	truncated bool
+	err       error
+}
+
+func (f *fakeTree) ListTree(_ context.Context, _, _, _ string, _ bool) ([]forge.TreeEntry, bool, error) {
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	return f.entries, f.truncated, nil
+}
+
 // fakeIssues supplies the issueCreator capability. forgeName is carried here
 // rather than read from fakeReader because embedded structs cannot see one
 // another's fields.
@@ -152,6 +166,7 @@ func (f *fakeRepos) CreateRepo(_ context.Context, name string, private bool) (fo
 type fakeFull struct {
 	*fakeReader
 	*fakeFiles
+	*fakeTree
 	*fakeIssues
 	*fakeRepos
 }
@@ -162,6 +177,7 @@ func newFakeFull(name string) *fakeFull {
 	return &fakeFull{
 		fakeReader: &fakeReader{name: name},
 		fakeFiles:  &fakeFiles{},
+		fakeTree:   &fakeTree{},
 		fakeIssues: &fakeIssues{forgeName: name},
 		fakeRepos:  &fakeRepos{forgeName: name},
 	}
@@ -200,7 +216,7 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			name:   "fully capable client reports every tool",
 			client: newFakeFull("github"),
 			want: []string{
-				"list_repos", "list_issues", "read_file", "create_issue", "create_repo",
+				"list_repos", "list_issues", "read_file", "list_tree", "create_issue", "create_repo",
 				"close_issue", "update_issue", "add_labels", "comment_issue",
 			},
 		},

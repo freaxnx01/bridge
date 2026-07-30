@@ -38,6 +38,22 @@ type readFileOutput struct {
 	Found   bool   `json:"found"`
 }
 
+type listTreeInput struct {
+	Forge     string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner     string `json:"owner" jsonschema:"repository owner"`
+	Repo      string `json:"repo" jsonschema:"repository name"`
+	Path      string `json:"path,omitempty" jsonschema:"directory path within the repo (default branch); omit for repo root"`
+	Recursive bool   `json:"recursive,omitempty" jsonschema:"when true, return the full tree instead of one level"`
+}
+
+type listTreeOutput struct {
+	Entries []forge.TreeEntry `json:"entries"`
+	// Truncated is true only when Recursive was requested and GitHub's
+	// recursive trees API cut the response off past its size limit — the
+	// entries returned are then a partial, not full, tree.
+	Truncated bool `json:"truncated"`
+}
+
 type crossForgeStatusInput struct{}
 
 // handleListRepos aggregates repos across all matching targets concurrently.
@@ -96,6 +112,22 @@ func (d Deps) handleReadFile(ctx context.Context, _ *mcp.CallToolRequest, in rea
 		return nil, readFileOutput{}, fmt.Errorf("read %s/%s/%s: %w", in.Owner, in.Repo, in.Path, err)
 	}
 	return nil, readFileOutput{Content: string(content), SHA: sha, Found: found}, nil
+}
+
+func (d Deps) handleListTree(ctx context.Context, _ *mcp.CallToolRequest, in listTreeInput) (*mcp.CallToolResult, listTreeOutput, error) {
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return nil, listTreeOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+	trees, ok := client.(treeLister)
+	if !ok {
+		return nil, listTreeOutput{}, fmt.Errorf("forge %q does not support listing trees", in.Forge)
+	}
+	entries, truncated, err := trees.ListTree(ctx, in.Owner, in.Repo, in.Path, in.Recursive)
+	if err != nil {
+		return nil, listTreeOutput{}, fmt.Errorf("list tree %s/%s/%s: %w", in.Owner, in.Repo, in.Path, err)
+	}
+	return nil, listTreeOutput{Entries: entries, Truncated: truncated}, nil
 }
 
 func (d Deps) handleCrossForgeStatus(ctx context.Context, _ *mcp.CallToolRequest, _ crossForgeStatusInput) (*mcp.CallToolResult, overview.Snapshot, error) {

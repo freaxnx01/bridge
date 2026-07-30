@@ -153,6 +153,67 @@ func TestHandleReadFile_TierOneClientReportsUnsupportedNotUnconfigured(t *testin
 	}
 }
 
+func TestHandleListTree_ReturnsEntriesAndTruncated(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.entries = []forge.TreeEntry{{Path: "README.md", Type: "file", Size: 10, SHA: "abc"}}
+	gh.truncated = true
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListTree(context.Background(), nil,
+		listTreeInput{Forge: "github", Owner: "o", Repo: "r", Recursive: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Entries) != 1 || out.Entries[0].Path != "README.md" {
+		t.Fatalf("unexpected entries: %+v", out.Entries)
+	}
+	if !out.Truncated {
+		t.Error("want Truncated=true to propagate from the client")
+	}
+}
+
+func TestHandleListTree_UnconfiguredForgeErrors(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleListTree(context.Background(), nil,
+		listTreeInput{Forge: "bogus", Owner: "o", Repo: "r"})
+	if err == nil {
+		t.Fatal("want error for unknown forge, got nil")
+	}
+}
+
+func TestHandleListTree_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleListTree(context.Background(), nil,
+		listTreeInput{Forge: "gitlab", Owner: "o", Repo: "r"})
+
+	if err == nil {
+		t.Fatal("want an error for a client without ListTree, got nil")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a resolved but incapable client must not be reported as unconfigured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleListTree_ClientErrorPropagatesWrapped(t *testing.T) {
+	sentinel := errors.New("boom")
+	gh := newFakeFull("github")
+	gh.err = sentinel
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleListTree(context.Background(), nil,
+		listTreeInput{Forge: "github", Owner: "o", Repo: "r", Path: "src"})
+	if !errors.Is(err, sentinel) {
+		t.Fatalf("want the sentinel preserved via %%w, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "o/r/src") {
+		t.Errorf("want the repo path in the wrap, got %v", err)
+	}
+}
+
 func TestHandleCrossForgeStatus_DelegatesToBuild(t *testing.T) {
 	want := overview.Snapshot{RoadmapErr: "sentinel"}
 	d := Deps{BuildOverview: func(_ context.Context) (overview.Snapshot, error) { return want, nil }}
@@ -291,8 +352,8 @@ func TestHandleListGitForges_ReportsConfiguredAndUnconfiguredTargets(t *testing.
 	if configured.Reason != "" {
 		t.Errorf("a configured target must carry no reason, got %q", configured.Reason)
 	}
-	if len(configured.Capabilities) != 9 {
-		t.Errorf("a fully capable client must report 9 tools, got %v", configured.Capabilities)
+	if len(configured.Capabilities) != 10 {
+		t.Errorf("a fully capable client must report 10 tools, got %v", configured.Capabilities)
 	}
 
 	unconfigured := out.Forges[1]
@@ -349,8 +410,8 @@ func TestHandleListGitForges_ReadOnlyDropsWriteCapabilities(t *testing.T) {
 			t.Errorf("read-only must not advertise write tools, got %v", out.Forges[0].Capabilities)
 		}
 	}
-	if len(out.Forges[0].Capabilities) != 3 {
-		t.Errorf("want the 3 read tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 4 {
+		t.Errorf("want the 4 read tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 
@@ -368,8 +429,8 @@ func TestHandleListGitForges_ReadOnlyFalseKeepsWriteCapabilities(t *testing.T) {
 	if out.ReadOnly {
 		t.Error("read_only must be false when Deps.ReadOnly is false")
 	}
-	if len(out.Forges[0].Capabilities) != 9 {
-		t.Errorf("want all 9 tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 10 {
+		t.Errorf("want all 10 tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 
