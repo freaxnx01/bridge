@@ -55,35 +55,42 @@ Full docs: [`docs/dispatch.md`](docs/dispatch.md). Spec: [`docs/specs/2026-07-27
 
 **Do this before enabling the systemd timer — dry-run only for the first week.**
 
-- [ ] Build and install: `just build` (confirm `bridge dispatch --help` shows
+- [x] Build and install: `just build` (confirm `bridge dispatch --help` shows
       `now`, `pause`, `resume`, `status` subcommands and `--dry-run`/`--json`/`--auto` flags)
-- [ ] `bridge dispatch --dry-run` against real repos — confirm it prints a
+- [x] `bridge dispatch --dry-run` against real repos — confirm it prints a
       decision table (repo, issue #, title, dispatch/SKIP + reason) and a
       summary line, and writes nothing (check no label/comment appeared on
       any real issue afterward)
-- [ ] `bridge dispatch --dry-run --json` — confirm valid JSON output (this
+- [x] `bridge dispatch --dry-run --json` — confirm valid JSON output (this
       exercises the persistent-flag fix; previously `--json` failed with
       "unknown flag" on subcommands)
-- [ ] `bridge dispatch status` and `bridge dispatch status --json` — confirm
+- [x] `bridge dispatch status` and `bridge dispatch status --json` — confirm
       caps, paused flag, dispatched-tonight count, last tick render correctly
-- [ ] `bridge dispatch pause` then `bridge dispatch status` — confirm paused:
+- [x] `bridge dispatch pause` then `bridge dispatch status` — confirm paused:
       true; `bridge dispatch resume` flips it back
-- [ ] `bridge dispatch now` while paused — confirm it still runs (only
+- [x] `bridge dispatch now` while paused — confirm it still runs (only
       `--auto` should respect the pause flag)
-- [ ] Pick one low-stakes real issue, remove `needs-enrichment`, run
+- [x] Pick one low-stakes real issue, remove `needs-enrichment`, run
       `bridge dispatch now` for real (no `--dry-run`) — confirm exactly the
       `ai-implement` label + a "Dispatched by `bridge dispatch`" comment
       appear, and nothing else (no `agent:*`/`model:*` label)
-- [ ] Run `bridge dispatch now` again immediately on the same issue — confirm
+      — done 2026-07-29 on `freaxnx01/agent-workflow#105`
+- [x] Run `bridge dispatch now` again immediately on the same issue — confirm
       it is now skipped as "already dispatched" (the in-flight guard added in
       final review) rather than being re-labeled
-- [ ] Force a repo to its per-repo WIP cap (two eligible issues, `per_repo: 1`
+      — confirmed: issue drops out of the candidate list entirely once
+      `ai-implement` is set, comment count stayed at 1
+- [x] Force a repo to its per-repo WIP cap (two eligible issues, `per_repo: 1`
       default) — confirm the second is skipped with `"repo at WIP 1/1"`
+      — observed live (not forced): `bridge` repo already at 1/1 blocked #114
 - [ ] Set `max_dispatches_per_night` low in `~/.config/bridge/dispatch.json`
       and confirm the nightly cap kicks in with `"night cap N/N"`
-- [ ] Confirm `~/.config/bridge/dispatch.json` overrides are picked up (e.g.
+- [x] Confirm `~/.config/bridge/dispatch.json` overrides are picked up (e.g.
       a per-repo override) and `~/.cache/bridge/dispatch.json` state persists
       across runs (dispatched-tonight count, last tick)
+      — bumped `global_open_prs` to 10 to unblock a live test (cap was
+      already exceeded: 5 open agent PRs vs. default cap of 3 — worth a
+      look separately), confirmed via `status`, then reverted
 - [ ] Only after the above look right: install
       `docs/systemd/bridge-dispatch.service` + `.timer`, create
       `~/.config/bridge/dispatch.env` with `GH_TOKEN=...`, `systemctl --user
