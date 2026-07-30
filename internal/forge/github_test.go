@@ -199,6 +199,195 @@ func TestGithubGetFile_EscapesPathAgainstQueryInjection(t *testing.T) {
 	}
 }
 
+func TestGithubListTree_ShallowRoot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/contents" {
+			t.Errorf("path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+			{"path":"README.md","type":"file","size":10,"sha":"a1"},
+			{"path":"internal","type":"dir","size":0,"sha":"a2"}
+		]`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	entries, truncated, err := c.ListTree(context.Background(), "o", "r", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Error("shallow listing must never report truncated")
+	}
+	if len(entries) != 2 || entries[0].Path != "README.md" || entries[0].Type != "file" || entries[1].Type != "dir" {
+		t.Fatalf("unexpected entries: %+v", entries)
+	}
+}
+
+func TestGithubListTree_ShallowSubdirectory(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/repos/o/r/contents/internal" {
+			t.Errorf("path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"path":"internal/mcp","type":"dir","size":0,"sha":"b1"}]`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	entries, _, err := c.ListTree(context.Background(), "o", "r", "internal", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(entries) != 1 || entries[0].Path != "internal/mcp" {
+		t.Fatalf("unexpected entries: %+v", entries)
+	}
+}
+
+func TestGithubListTree_EmptyRepoReturnsEmptyListNotError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"This repository is empty."}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	entries, truncated, err := c.ListTree(context.Background(), "o", "r", "", false)
+	if err != nil {
+		t.Fatalf("empty repo must not error: %v", err)
+	}
+	if truncated {
+		t.Error("empty repo must not report truncated")
+	}
+	if len(entries) != 0 {
+		t.Fatalf("want empty list, got %+v", entries)
+	}
+}
+
+func TestGithubListTree_MissingPathIsAnError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, _, err := c.ListTree(context.Background(), "o", "r", "nope", false)
+	if err == nil {
+		t.Fatal("want an error for a genuinely missing path, got nil")
+	}
+}
+
+func TestGithubListTree_RecursiveResolvesDefaultBranchAndFiltersPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"default_branch":"main"}`))
+		case r.URL.Path == "/repos/o/r/git/trees/main":
+			if r.URL.Query().Get("recursive") != "1" {
+				t.Errorf("want recursive=1, got %q", r.URL.RawQuery)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{
+				"tree": [
+					{"path":"README.md","mode":"100644","type":"blob","sha":"a1","size":10},
+					{"path":"internal","mode":"040000","type":"tree","sha":"a2"},
+					{"path":"internal/mcp","mode":"040000","type":"tree","sha":"a3"},
+					{"path":"internal/mcp/tools.go","mode":"100644","type":"blob","sha":"a4","size":20},
+					{"path":"vendor/lib","mode":"160000","type":"commit","sha":"a5"},
+					{"path":"link","mode":"120000","type":"blob","sha":"a6","size":5}
+				],
+				"truncated": true
+			}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	entries, truncated, err := c.ListTree(context.Background(), "o", "r", "internal", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !truncated {
+		t.Error("want truncated=true to be surfaced, not silently dropped")
+	}
+	if len(entries) != 3 {
+		t.Fatalf("want entries scoped to the internal/ prefix, got %+v", entries)
+	}
+	byPath := map[string]TreeEntry{}
+	for _, e := range entries {
+		byPath[e.Path] = e
+	}
+	if byPath["internal"].Type != "dir" {
+		t.Errorf("want internal to be dir, got %+v", byPath["internal"])
+	}
+	if byPath["internal/mcp/tools.go"].Type != "file" {
+		t.Errorf("want internal/mcp/tools.go to be file, got %+v", byPath["internal/mcp/tools.go"])
+	}
+}
+
+func TestGithubListTree_RecursiveTypeMapping(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r":
+			w.Write([]byte(`{"default_branch":"main"}`))
+		case r.URL.Path == "/repos/o/r/git/trees/main":
+			w.Write([]byte(`{
+				"tree": [
+					{"path":"file.txt","mode":"100644","type":"blob","sha":"a1","size":1},
+					{"path":"dir","mode":"040000","type":"tree","sha":"a2"},
+					{"path":"sub","mode":"160000","type":"commit","sha":"a3"},
+					{"path":"link","mode":"120000","type":"blob","sha":"a4","size":1}
+				],
+				"truncated": false
+			}`))
+		}
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	entries, _, err := c.ListTree(context.Background(), "o", "r", "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	byPath := map[string]string{}
+	for _, e := range entries {
+		byPath[e.Path] = e.Type
+	}
+	want := map[string]string{"file.txt": "file", "dir": "dir", "sub": "submodule", "link": "symlink"}
+	for path, wantType := range want {
+		if byPath[path] != wantType {
+			t.Errorf("%s: got type %q, want %q", path, byPath[path], wantType)
+		}
+	}
+}
+
+func TestGithubListTree_RecursiveEmptyRepoReturnsEmptyListNotError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/repos/o/r":
+			w.Write([]byte(`{"default_branch":"main"}`))
+		case r.URL.Path == "/repos/o/r/git/trees/main":
+			w.WriteHeader(http.StatusConflict)
+			w.Write([]byte(`{"message":"Git Repository is empty."}`))
+		}
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	entries, truncated, err := c.ListTree(context.Background(), "o", "r", "", true)
+	if err != nil {
+		t.Fatalf("empty repo must not error: %v", err)
+	}
+	if truncated || len(entries) != 0 {
+		t.Fatalf("want empty, non-truncated list, got entries=%+v truncated=%v", entries, truncated)
+	}
+}
+
 func TestGithubPutFile_CreateAndUpdate(t *testing.T) {
 	var gotBodies []map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

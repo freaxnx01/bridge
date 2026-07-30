@@ -30,6 +30,11 @@ type fileReader interface {
 	GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error)
 }
 
+// treeLister is asserted by list_tree.
+type treeLister interface {
+	ListTree(ctx context.Context, owner, repo, path string, recursive bool) (entries []forge.TreeEntry, truncated bool, err error)
+}
+
 // issueCreator is asserted by create_issue.
 type issueCreator interface {
 	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
@@ -84,6 +89,9 @@ func Capabilities(r ForgeReader) []string {
 	capabilities := []string{"list_repos", "list_issues"}
 	if _, ok := r.(fileReader); ok {
 		capabilities = append(capabilities, "read_file")
+	}
+	if _, ok := r.(treeLister); ok {
+		capabilities = append(capabilities, "list_tree")
 	}
 	if _, ok := r.(issueCreator); ok {
 		capabilities = append(capabilities, "create_issue")

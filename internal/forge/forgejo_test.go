@@ -178,6 +178,82 @@ func TestForgejoGetFile_FoundAndAbsent(t *testing.T) {
 	}
 }
 
+func TestForgejoListTree_ShallowRoot(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/repos/freax/notes/contents" {
+			t.Errorf("path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[{"path":"README.md","type":"file","size":10,"sha":"a1"}]`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	entries, truncated, err := c.ListTree(context.Background(), "freax", "notes", "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Error("shallow listing must never report truncated")
+	}
+	if len(entries) != 1 || entries[0].Path != "README.md" {
+		t.Fatalf("unexpected entries: %+v", entries)
+	}
+}
+
+func TestForgejoListTree_EmptyRepoReturnsEmptyListNotError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"repository is empty"}`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	entries, _, err := c.ListTree(context.Background(), "freax", "notes", "", false)
+	if err != nil {
+		t.Fatalf("empty repo must not error: %v", err)
+	}
+	if len(entries) != 0 {
+		t.Fatalf("want empty list, got %+v", entries)
+	}
+}
+
+func TestForgejoListTree_RecursiveResolvesDefaultBranchAndFiltersPath(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/api/v1/repos/freax/notes":
+			w.Write([]byte(`{"default_branch":"main"}`))
+		case r.URL.Path == "/api/v1/repos/freax/notes/git/trees/main":
+			if r.URL.Query().Get("recursive") != "true" {
+				t.Errorf("want recursive=true, got %q", r.URL.RawQuery)
+			}
+			w.Write([]byte(`{
+				"tree": [
+					{"path":"README.md","mode":"100644","type":"blob","sha":"a1","size":10},
+					{"path":"src","mode":"040000","type":"tree","sha":"a2"},
+					{"path":"src/main.go","mode":"100644","type":"blob","sha":"a3","size":20}
+				],
+				"truncated": false
+			}`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	entries, truncated, err := c.ListTree(context.Background(), "freax", "notes", "src", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if truncated {
+		t.Error("want truncated=false")
+	}
+	if len(entries) != 2 {
+		t.Fatalf("want entries scoped to the src/ prefix, got %+v", entries)
+	}
+}
+
 func TestForgejoGetFile_EscapesPathAgainstQueryInjection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawQuery != "" {

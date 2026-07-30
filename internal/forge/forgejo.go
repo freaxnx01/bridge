@@ -301,6 +301,115 @@ func (c *ForgejoClient) GetFile(ctx context.Context, owner, repo, path string) (
 	return raw, fc.SHA, true, nil
 }
 
+// ListTree lists path's entries from the repo's default branch. Non-recursive
+// uses the Contents API (one level); recursive uses the Git Trees API with
+// recursive=true. found is implicit: an empty repo returns an empty,
+// non-truncated list with a nil error rather than an error.
+func (c *ForgejoClient) ListTree(ctx context.Context, owner, repo, path string, recursive bool) ([]TreeEntry, bool, error) {
+	if recursive {
+		return c.listTreeRecursive(ctx, owner, repo, path)
+	}
+	return c.listTreeShallow(ctx, owner, repo, path)
+}
+
+func (c *ForgejoClient) listTreeShallow(ctx context.Context, owner, repo, path string) ([]TreeEntry, bool, error) {
+	endpoint := fmt.Sprintf("/api/v1/repos/%s/%s/contents", url.PathEscape(owner), url.PathEscape(repo))
+	if path != "" {
+		endpoint += "/" + escapePathSegments(path)
+	}
+	resp, err := c.doGet(ctx, endpoint)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode == http.StatusNotFound && isEmptyRepoMessage(body) {
+		return nil, false, nil
+	}
+	if resp.StatusCode >= 400 {
+		return nil, false, fmt.Errorf("forgejo list tree %s: %s: %s", path, resp.Status, string(body))
+	}
+	var raw []struct {
+		Path string `json:"path"`
+		Type string `json:"type"`
+		Size int64  `json:"size"`
+		SHA  string `json:"sha"`
+	}
+	if err := json.Unmarshal(body, &raw); err != nil {
+		return nil, false, fmt.Errorf("decode tree %s: %w", path, err)
+	}
+	entries := make([]TreeEntry, 0, len(raw))
+	for _, e := range raw {
+		entries = append(entries, TreeEntry{Path: e.Path, Type: e.Type, Size: e.Size, SHA: e.SHA})
+	}
+	return entries, false, nil
+}
+
+// defaultBranch fetches the repo's configured default branch. Used by
+// listTreeRecursive to resolve the tree to fetch — an empty repo still has a
+// default_branch value even before its first commit.
+func (c *ForgejoClient) defaultBranch(ctx context.Context, owner, repo string) (string, error) {
+	var r struct {
+		DefaultBranch string `json:"default_branch"`
+	}
+	if err := c.get(ctx, "/api/v1/repos/"+url.PathEscape(owner)+"/"+url.PathEscape(repo), &r); err != nil {
+		return "", err
+	}
+	return r.DefaultBranch, nil
+}
+
+func (c *ForgejoClient) listTreeRecursive(ctx context.Context, owner, repo, path string) ([]TreeEntry, bool, error) {
+	branch, err := c.defaultBranch(ctx, owner, repo)
+	if err != nil {
+		return nil, false, err
+	}
+	endpoint := fmt.Sprintf("/api/v1/repos/%s/%s/git/trees/%s?recursive=true", url.PathEscape(owner), url.PathEscape(repo), url.PathEscape(branch))
+	resp, err := c.doGet(ctx, endpoint)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusConflict) && isEmptyRepoMessage(body) {
+		return nil, false, nil
+	}
+	if resp.StatusCode >= 400 {
+		return nil, false, fmt.Errorf("forgejo list tree (recursive) %s: %s: %s", path, resp.Status, string(body))
+	}
+	var tree struct {
+		Tree []struct {
+			Path string `json:"path"`
+			Mode string `json:"mode"`
+			Type string `json:"type"`
+			SHA  string `json:"sha"`
+			Size int64  `json:"size"`
+		} `json:"tree"`
+		Truncated bool `json:"truncated"`
+	}
+	if err := json.Unmarshal(body, &tree); err != nil {
+		return nil, false, fmt.Errorf("decode tree (recursive) %s: %w", path, err)
+	}
+	prefix := ""
+	trimmed := strings.TrimSuffix(path, "/")
+	if trimmed != "" {
+		prefix = trimmed + "/"
+	}
+	entries := make([]TreeEntry, 0, len(tree.Tree))
+	for _, e := range tree.Tree {
+		if trimmed != "" && e.Path != trimmed && !strings.HasPrefix(e.Path, prefix) {
+			continue
+		}
+		entries = append(entries, TreeEntry{Path: e.Path, Type: treeEntryType(e.Type, e.Mode), Size: e.Size, SHA: e.SHA})
+	}
+	return entries, tree.Truncated, nil
+}
+
 type fjIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`

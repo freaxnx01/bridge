@@ -21,6 +21,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleReadFile)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_tree",
+		Description: "List a directory's entries (or the full tree, recursively) from a repo's default branch.",
+	}, deps.handleListTree)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_issues",
 		Description: "List open issues for a single repository (live).",
 	}, deps.handleListIssues)
