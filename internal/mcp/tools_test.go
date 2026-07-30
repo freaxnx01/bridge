@@ -63,6 +63,24 @@ func (f *fakeTree) ListTree(_ context.Context, _, _, _ string, _ bool) ([]forge.
 	return f.entries, f.truncated, nil
 }
 
+// fakeSearcher supplies the searchCoder capability. It is not embedded in
+// fakeFull: GithubClient and ForgejoClient now genuinely diverge on this
+// capability (only GitHub implements it), so tests compose it explicitly
+// alongside fakeReader rather than pretending every forge has it.
+type fakeSearcher struct {
+	*fakeReader
+	matches    []forge.CodeMatch
+	incomplete bool
+	err        error
+}
+
+func (f *fakeSearcher) SearchCode(_ context.Context, _, _, _ string) ([]forge.CodeMatch, bool, error) {
+	if f.err != nil {
+		return nil, false, f.err
+	}
+	return f.matches, f.incomplete, nil
+}
+
 // fakeIssues supplies the issueCreator capability. forgeName is carried here
 // rather than read from fakeReader because embedded structs cannot see one
 // another's fields.
@@ -248,6 +266,11 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			name:   "tier-1 only client reports tier-1 tools",
 			client: &fakeReader{name: "gitlab"},
 			want:   []string{"list_repos", "list_issues"},
+		},
+		{
+			name:   "search-only client reports it alongside tier-1 tools",
+			client: &fakeSearcher{fakeReader: &fakeReader{name: "github"}},
+			want:   []string{"list_repos", "list_issues", "search_code"},
 		},
 		{
 			name:   "fully capable client reports every tool",

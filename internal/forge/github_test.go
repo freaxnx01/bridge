@@ -199,6 +199,106 @@ func TestGithubGetFile_EscapesPathAgainstQueryInjection(t *testing.T) {
 	}
 }
 
+func TestGithubSearchCode_ScopesQueryToRepo(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/search/code":
+			gotQuery = r.URL.Query().Get("q")
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"incomplete_results":false,"items":[
+				{"path":"foo.go","repository":{"full_name":"o/r"}}
+			]}`))
+		case r.URL.Path == "/repos/o/r/contents/foo.go":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`{"sha":"s1","content":"cGFja2FnZSBmb28KCmZ1bmMgeCgpIHt9Cg=="}`)) // "package foo\n\nfunc x() {}\n"
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	matches, incomplete, err := c.SearchCode(context.Background(), "o", "r", "func x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "func x repo:o/r" {
+		t.Errorf("query = %q, want %q", gotQuery, "func x repo:o/r")
+	}
+	if incomplete {
+		t.Error("want incomplete=false")
+	}
+	if len(matches) != 1 || matches[0].Line != 3 || matches[0].Repo != "o/r" || matches[0].Path != "foo.go" {
+		t.Fatalf("unexpected matches: %+v", matches)
+	}
+}
+
+func TestGithubSearchCode_ScopesQueryToOwnerWithoutRepo(t *testing.T) {
+	var gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.Query().Get("q")
+		w.Write([]byte(`{"incomplete_results":false,"items":[]}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, _, err := c.SearchCode(context.Background(), "o", "", "func x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotQuery != "func x user:o" {
+		t.Errorf("query = %q, want %q", gotQuery, "func x user:o")
+	}
+}
+
+func TestGithubSearchCode_IncompleteResultsSurfaced(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`{"incomplete_results":true,"items":[]}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, incomplete, err := c.SearchCode(context.Background(), "o", "", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !incomplete {
+		t.Error("want incomplete=true to be surfaced, not silently dropped")
+	}
+}
+
+func TestGithubSearchCode_RateLimitIsDistinctError(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"You have exceeded a secondary rate limit. Please wait a few minutes before you try again."}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, _, err := c.SearchCode(context.Background(), "o", "", "x")
+	if !errors.Is(err, ErrSearchRateLimited) {
+		t.Fatalf("want ErrSearchRateLimited, got %v", err)
+	}
+}
+
+func TestGithubSearchCode_OtherForbiddenIsNotRateLimit(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusForbidden)
+		w.Write([]byte(`{"message":"Must have push access to view repository issue votes."}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, _, err := c.SearchCode(context.Background(), "o", "", "x")
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if errors.Is(err, ErrSearchRateLimited) {
+		t.Fatal("a non-rate-limit 403 must not be reported as rate limited")
+	}
+}
+
 func TestGithubListTree_ShallowRoot(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/o/r/contents" {

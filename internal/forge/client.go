@@ -12,6 +12,19 @@ import (
 // ErrRepoExists is returned by CreateRepo when the repo already exists.
 var ErrRepoExists = errors.New("repo already exists")
 
+// ErrSearchRateLimited is returned by SearchCode when the forge's
+// (typically much tighter) code-search rate limit is exhausted, so callers
+// can distinguish "search is throttled" from "search found nothing."
+var ErrSearchRateLimited = errors.New("code search rate limit exceeded")
+
+// CodeMatch is one matching line from a code search.
+type CodeMatch struct {
+	Repo string `json:"repo"`
+	Path string `json:"path"`
+	Line int    `json:"line"`
+	Text string `json:"text"`
+}
+
 // escapePathSegments percent-escapes each "/"-delimited segment of p so a
 // segment cannot reinterpret the request URL (inject a query string,
 // fragment, or extra path segment) while preserving p's directory structure.

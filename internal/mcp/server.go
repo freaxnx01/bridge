@@ -26,6 +26,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleListTree)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "search_code",
+		Description: "Search code across configured (or requested) owners. GitHub-only for now — Forgejo has no code-search REST API, so a Forgejo target lands in warnings rather than returning silent zero results.",
+	}, deps.handleSearchCode)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_issues",
 		Description: "List open issues for a single repository (live).",
 	}, deps.handleListIssues)

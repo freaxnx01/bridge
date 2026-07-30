@@ -12,14 +12,15 @@ implementation notes, see:
 
 ## What it is
 
-`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing nine
-cross-forge tools over GitHub + Forgejo (six in `--read-only` mode):
+`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing ten
+cross-forge tools over GitHub + Forgejo (seven in `--read-only` mode):
 
 | Tool | Purpose | Notes |
 |---|---|---|
 | `list_repos` | List repos across configured (or requested) owners | Concurrent fan-out; partial failures land in a `warnings` field instead of failing the whole call |
 | `read_file` | Read a file's content + blob sha | Default branch only (no `ref` pinning in this slice) |
 | `list_tree` | List a directory's entries, or the full tree with `recursive: true` | Default branch only; a `truncated` flag surfaces when GitHub's recursive trees API cuts off past its size limit rather than silently returning a partial tree; an empty repo returns an empty list, not an error |
+| `search_code` | Cross-repo code search across configured (or requested) owners | **GitHub-only** — Forgejo has no code-search REST API (only an HTML search page), so a Forgejo target lands in `warnings`, not a silent empty result. GitHub's search API reports matching files, not lines; each match is re-fetched via `read_file`'s underlying call to locate the actual line number. A rate-limited target (GitHub's search API has a much tighter limit than the rest) is called out by name in `warnings` too, distinct from "no matches" |
 | `list_issues` | List open issues for a single repo | Needs no capability assertion — part of the tier-1 `ForgeReader` surface, so it works on any wired forge |
 | `list_git_forges` | List the configured `(forge, owner)` targets, whether each is configured, and which tools it supports | Read-only, no network requests — resolution is cached per process |
 | `create_issue` | Create an issue | **Draft by default** — nothing is created unless called with `confirm: true`. Not registered at all when `--read-only` |

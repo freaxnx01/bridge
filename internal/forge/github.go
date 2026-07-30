@@ -555,6 +555,97 @@ func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) (
 	return out, nil
 }
 
+// isRateLimitMessage reports whether a 403 error body describes a rate limit
+// (primary or the "secondary"/abuse-detection variant) rather than some other
+// 403 (e.g. an unauthorized query). GitHub's wording for both variants
+// contains "rate limit", so a single substring check covers both.
+func isRateLimitMessage(body []byte) bool {
+	var m struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &m); err != nil {
+		return false
+	}
+	return strings.Contains(strings.ToLower(m.Message), "rate limit")
+}
+
+// SearchCode searches GitHub's code search index. query is scoped to repo
+// (owner+repo) when repo is non-empty, to owner (via the user: qualifier)
+// when only owner is given, or left unscoped otherwise. GitHub's search API
+// reports matching files, not lines, so each matching file's content is
+// re-fetched via GetFile to locate the actual matching line(s) — the search
+// API's own text-match fragments carry character offsets, not line numbers.
+// incomplete mirrors GitHub's incomplete_results flag (large result sets are
+// capped server-side). A rate-limited response returns ErrSearchRateLimited
+// rather than an empty result, since the code-search rate limit is much
+// tighter than bridge's other GitHub calls.
+func (c *GithubClient) SearchCode(ctx context.Context, owner, repo, query string) ([]CodeMatch, bool, error) {
+	q := query
+	switch {
+	case repo != "":
+		q += " repo:" + owner + "/" + repo
+	case owner != "":
+		q += " user:" + owner
+	}
+	endpoint := c.baseURL + "/search/code?q=" + url.QueryEscape(q)
+	req, err := http.NewRequestWithContext(ctx, "GET", endpoint, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return nil, false, err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, false, err
+	}
+	if resp.StatusCode == http.StatusForbidden && isRateLimitMessage(body) {
+		return nil, false, ErrSearchRateLimited
+	}
+	if resp.StatusCode >= 400 {
+		return nil, false, fmt.Errorf("github search code: %s: %s", resp.Status, string(body))
+	}
+	var result struct {
+		IncompleteResults bool `json:"incomplete_results"`
+		Items             []struct {
+			Path       string `json:"path"`
+			Repository struct {
+				FullName string `json:"full_name"`
+			} `json:"repository"`
+		} `json:"items"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return nil, false, fmt.Errorf("decode search results: %w", err)
+	}
+
+	var matches []CodeMatch
+	for _, item := range result.Items {
+		itemOwner, itemRepo, ok := strings.Cut(item.Repository.FullName, "/")
+		if !ok {
+			continue
+		}
+		content, _, found, err := c.GetFile(ctx, itemOwner, itemRepo, item.Path)
+		if err != nil || !found {
+			continue
+		}
+		for i, line := range strings.Split(string(content), "\n") {
+			if strings.Contains(line, query) {
+				matches = append(matches, CodeMatch{
+					Repo: item.Repository.FullName, Path: item.Path,
+					Line: i + 1, Text: strings.TrimSpace(line),
+				})
+			}
+		}
+	}
+	return matches, result.IncompleteResults, nil
+}
+
 // GetFile fetches a file's decoded content and blob sha via the Contents API.
 // found is false (with nil error) when the file does not exist (404).
 func (c *GithubClient) GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error) {
