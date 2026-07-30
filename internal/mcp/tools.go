@@ -35,6 +35,15 @@ type treeLister interface {
 	ListTree(ctx context.Context, owner, repo, path string, recursive bool) (entries []forge.TreeEntry, truncated bool, err error)
 }
 
+// searchCoder is asserted by search_code. No forge client is required to
+// implement it — Forgejo has no code-search REST API (only an HTML search
+// page), so ForgejoClient deliberately does not satisfy this interface, and
+// Capabilities()/list_git_forges report that gap honestly per forge rather
+// than silently returning zero results.
+type searchCoder interface {
+	SearchCode(ctx context.Context, owner, repo, query string) (matches []forge.CodeMatch, incomplete bool, err error)
+}
+
 // issueCreator is asserted by create_issue.
 type issueCreator interface {
 	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
@@ -105,6 +114,9 @@ func Capabilities(r ForgeReader) []string {
 	if _, ok := r.(treeLister); ok {
 		capabilities = append(capabilities, "list_tree")
 	}
+	if _, ok := r.(searchCoder); ok {
+		capabilities = append(capabilities, "search_code")
+	}
 	if _, ok := r.(issueCreator); ok {
 		capabilities = append(capabilities, "create_issue")
 	}
@@ -156,21 +168,22 @@ func (d Deps) auditLog(e audit.Entry) {
 	d.Audit.Log(e)
 }
 
-// targets returns the (forge, owner) pairs list_repos should query for the
-// given input: an explicit owner requires an explicit forge (an owner given
-// without a forge is ambiguous across github/forgejo and is rejected rather
-// than silently guessed); otherwise the configured defaults are used,
-// narrowed by an optional forge.
-func (d Deps) targets(in listReposInput) ([]Target, error) {
-	if in.Owner != "" {
-		if in.Forge == "" {
-			return nil, fmt.Errorf("owner %q given without forge: specify forge (github or forgejo)", in.Owner)
+// targets returns the (forge, owner) pairs a fan-out tool (list_repos,
+// search_code) should query for the given forge/owner filter: an explicit
+// owner requires an explicit forge (an owner given without a forge is
+// ambiguous across github/forgejo and is rejected rather than silently
+// guessed); otherwise the configured defaults are used, narrowed by an
+// optional forge.
+func (d Deps) targets(forge, owner string) ([]Target, error) {
+	if owner != "" {
+		if forge == "" {
+			return nil, fmt.Errorf("owner %q given without forge: specify forge (github or forgejo)", owner)
 		}
-		return []Target{{Forge: in.Forge, Owner: in.Owner}}, nil
+		return []Target{{Forge: forge, Owner: owner}}, nil
 	}
 	var out []Target
 	for _, t := range d.DefaultOwners {
-		if in.Forge != "" && t.Forge != in.Forge {
+		if forge != "" && t.Forge != forge {
 			continue
 		}
 		out = append(out, t)

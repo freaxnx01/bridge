@@ -214,6 +214,137 @@ func TestHandleListTree_ClientErrorPropagatesWrapped(t *testing.T) {
 	}
 }
 
+func TestHandleSearchCode_RequiresQuery(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Forge: "github", Owner: "o"})
+	if err == nil {
+		t.Fatal("want an error when query is empty, got nil")
+	}
+}
+
+func TestHandleSearchCode_RepoRequiresForgeAndOwner(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "x", Repo: "bridge"})
+	if err == nil {
+		t.Fatal("want an error when repo is given without forge/owner, got nil")
+	}
+}
+
+func TestHandleSearchCode_ReturnsMatchesAndIncomplete(t *testing.T) {
+	gh := &fakeSearcher{
+		fakeReader: &fakeReader{name: "github"},
+		matches:    []forge.CodeMatch{{Repo: "o/r", Path: "f.go", Line: 3, Text: "func x() {}"}},
+		incomplete: true,
+	}
+	d := Deps{
+		DefaultOwners: []Target{{Forge: "github", Owner: "o"}},
+		ClientFor:     func(string, string) ForgeReader { return gh },
+	}
+
+	_, out, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "func x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matches) != 1 || out.Matches[0].Path != "f.go" {
+		t.Fatalf("unexpected matches: %+v", out.Matches)
+	}
+	if !out.Incomplete {
+		t.Error("want Incomplete=true to propagate from the client")
+	}
+	if len(out.Warnings) != 0 {
+		t.Errorf("a fully successful search must not warn: %v", out.Warnings)
+	}
+}
+
+func TestHandleSearchCode_UnsupportedForgeWarnsNotErrors(t *testing.T) {
+	// forgejo is configured but doesn't implement searchCoder — this must
+	// land as a warning (list_git_forges already reports the capability
+	// gap), not a silent empty result and not a hard failure.
+	fj := &fakeReader{name: "forgejo"}
+	d := Deps{
+		DefaultOwners: []Target{{Forge: "forgejo", Owner: "freax"}},
+		ClientFor:     func(string, string) ForgeReader { return fj },
+	}
+
+	_, out, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matches) != 0 {
+		t.Fatalf("want no matches, got %+v", out.Matches)
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "does not support search_code") {
+		t.Fatalf("want a does-not-support warning naming the gap, got %v", out.Warnings)
+	}
+}
+
+func TestHandleSearchCode_UnconfiguredTargetWarns(t *testing.T) {
+	d := Deps{DefaultOwners: []Target{{Forge: "github", Owner: "o"}}, ClientFor: func(string, string) ForgeReader { return nil }}
+
+	_, out, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "not configured") {
+		t.Fatalf("want a not-configured warning, got %v", out.Warnings)
+	}
+}
+
+func TestHandleSearchCode_RateLimitWarningIsDistinctFromZeroMatches(t *testing.T) {
+	gh := &fakeSearcher{fakeReader: &fakeReader{name: "github"}, err: forge.ErrSearchRateLimited}
+	d := Deps{
+		DefaultOwners: []Target{{Forge: "github", Owner: "o"}},
+		ClientFor:     func(string, string) ForgeReader { return gh },
+	}
+
+	_, out, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matches) != 0 {
+		t.Fatalf("want no matches: %+v", out.Matches)
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "rate limited") {
+		t.Fatalf("want a rate-limited warning distinguishing this from zero matches, got %v", out.Warnings)
+	}
+}
+
+func TestHandleSearchCode_PartialFailureReturnsWarningAndSuccessfulResults(t *testing.T) {
+	gh := &fakeSearcher{
+		fakeReader: &fakeReader{name: "github"},
+		matches:    []forge.CodeMatch{{Repo: "o/r", Path: "f.go", Line: 1, Text: "x"}},
+	}
+	fj := &fakeReader{name: "forgejo"}
+	d := Deps{
+		DefaultOwners: []Target{{Forge: "github", Owner: "o"}, {Forge: "forgejo", Owner: "freax"}},
+		ClientFor: func(forgeName, _ string) ForgeReader {
+			if forgeName == "github" {
+				return gh
+			}
+			return fj
+		},
+	}
+
+	_, out, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Matches) != 1 {
+		t.Fatalf("want the github target's match despite forgejo lacking the capability: %+v", out.Matches)
+	}
+	if len(out.Warnings) != 1 {
+		t.Fatalf("want 1 warning for the unsupported forgejo target, got %+v", out.Warnings)
+	}
+}
+
+func TestHandleSearchCode_OwnerWithoutForgeIsRejected(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleSearchCode(context.Background(), nil, searchCodeInput{Query: "x", Owner: "acme"})
+	if err == nil {
+		t.Fatal("want error when owner is given without forge, got nil")
+	}
+}
+
 func TestHandleCrossForgeStatus_DelegatesToBuild(t *testing.T) {
 	want := overview.Snapshot{RoadmapErr: "sentinel"}
 	d := Deps{BuildOverview: func(_ context.Context) (overview.Snapshot, error) { return want, nil }}

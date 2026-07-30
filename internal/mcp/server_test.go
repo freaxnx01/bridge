@@ -40,7 +40,7 @@ func advertisedTools(t *testing.T, deps Deps) []string {
 
 func TestNewServer_RegistersExpectedToolSet(t *testing.T) {
 	names := advertisedTools(t, Deps{})
-	want := []string{"add_labels", "close_issue", "comment_issue", "create_issue", "create_repo", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "list_tree", "read_file", "update_issue", "update_repo"}
+	want := []string{"add_labels", "close_issue", "comment_issue", "create_issue", "create_repo", "cross_forge_status", "list_git_forges", "list_issues", "list_repos", "list_tree", "read_file", "search_code", "update_issue", "update_repo"}
 	if len(names) != len(want) {
 		t.Fatalf("want %v, got %v", want, names)
 	}
@@ -91,7 +91,7 @@ func TestListGitForges_AdvertisesOnlyRegisteredTools(t *testing.T) {
 
 func TestNewServer_ReadOnlyOmitsBothWriteTools(t *testing.T) {
 	names := advertisedTools(t, Deps{ReadOnly: true})
-	want := []string{"cross_forge_status", "list_git_forges", "list_issues", "list_repos", "list_tree", "read_file"}
+	want := []string{"cross_forge_status", "list_git_forges", "list_issues", "list_repos", "list_tree", "read_file", "search_code"}
 	if len(names) != len(want) {
 		t.Fatalf("want %v, got %v", want, names)
 	}

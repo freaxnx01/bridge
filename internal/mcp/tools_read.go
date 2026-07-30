@@ -2,6 +2,7 @@ package mcp
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 
@@ -54,6 +55,88 @@ type listTreeOutput struct {
 	Truncated bool `json:"truncated"`
 }
 
+type searchCodeInput struct {
+	Query string `json:"query" jsonschema:"search string"`
+	Forge string `json:"forge,omitempty" jsonschema:"optional forge filter; only github currently implements search_code (Forgejo has no code-search REST API)"`
+	Owner string `json:"owner,omitempty" jsonschema:"optional owner filter"`
+	Repo  string `json:"repo,omitempty" jsonschema:"optional; scope search to a single repo (requires forge and owner)"`
+}
+
+type searchCodeOutput struct {
+	Matches    []forge.CodeMatch `json:"matches"`
+	Incomplete bool              `json:"incomplete,omitempty"`
+	// Warnings reports targets that don't support search_code, are
+	// unconfigured, or failed (e.g. rate-limited) instead of failing the
+	// whole call — matches from any other, healthy target are still
+	// returned. A rate-limited target is called out by name in its warning
+	// text rather than folded indistinguishably into "zero matches."
+	Warnings []string `json:"warnings,omitempty"`
+}
+
+// handleSearchCode fans out across the targets search_code applies to,
+// mirroring handleListRepos: a target that can't search (unconfigured,
+// lacks the capability, or hit its rate limit) lands in Warnings rather than
+// failing the whole call, so results from any other, healthy target still
+// come back.
+func (d Deps) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, in searchCodeInput) (*mcp.CallToolResult, searchCodeOutput, error) {
+	if in.Query == "" {
+		return nil, searchCodeOutput{}, fmt.Errorf("search code: query is required")
+	}
+	if in.Repo != "" && (in.Forge == "" || in.Owner == "") {
+		return nil, searchCodeOutput{}, fmt.Errorf("search code: repo %q requires forge and owner", in.Repo)
+	}
+	targets, err := d.targets(in.Forge, in.Owner)
+	if err != nil {
+		return nil, searchCodeOutput{}, err
+	}
+	var (
+		mu         sync.Mutex
+		all        []forge.CodeMatch
+		incomplete bool
+		warnings   []string
+	)
+	var g errgroup.Group
+	for _, t := range targets {
+		t := t
+		g.Go(func() error {
+			client := d.ClientFor(t.Forge, t.Owner)
+			if client == nil {
+				mu.Lock()
+				warnings = append(warnings, fmt.Sprintf("%s:%s not configured (missing token or forge unavailable)", t.Forge, t.Owner))
+				mu.Unlock()
+				return nil
+			}
+			searcher, ok := client.(searchCoder)
+			if !ok {
+				mu.Lock()
+				warnings = append(warnings, fmt.Sprintf("%s does not support search_code", t.Forge))
+				mu.Unlock()
+				return nil
+			}
+			matches, inc, err := searcher.SearchCode(ctx, t.Owner, in.Repo, in.Query)
+			if err != nil {
+				mu.Lock()
+				if errors.Is(err, forge.ErrSearchRateLimited) {
+					warnings = append(warnings, fmt.Sprintf("%s:%s rate limited: %v", t.Forge, t.Owner, err))
+				} else {
+					warnings = append(warnings, fmt.Sprintf("search %s:%s: %v", t.Forge, t.Owner, err))
+				}
+				mu.Unlock()
+				return nil
+			}
+			mu.Lock()
+			all = append(all, matches...)
+			if inc {
+				incomplete = true
+			}
+			mu.Unlock()
+			return nil
+		})
+	}
+	_ = g.Wait() // per-target failures are captured as warnings above; Go funcs always return nil
+	return nil, searchCodeOutput{Matches: all, Incomplete: incomplete, Warnings: warnings}, nil
+}
+
 type crossForgeStatusInput struct{}
 
 // handleListRepos aggregates repos across all matching targets concurrently.
@@ -61,7 +144,7 @@ type crossForgeStatusInput struct{}
 // call fails does not fail the whole call: it is recorded in Warnings and
 // the results from any other, healthy target are still returned.
 func (d Deps) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in listReposInput) (*mcp.CallToolResult, listReposOutput, error) {
-	targets, err := d.targets(in)
+	targets, err := d.targets(in.Forge, in.Owner)
 	if err != nil {
 		return nil, listReposOutput{}, err
 	}
