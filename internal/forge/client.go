@@ -67,6 +67,7 @@ type RepoRef struct {
 	Description   string    `json:"description,omitempty"`
 	Topics        []string  `json:"topics,omitempty"`
 	Visibility    string    `json:"visibility,omitempty"`
+	Archived      bool      `json:"archived,omitempty"`
 	HTMLURL       string    `json:"html_url"`
 	SSHURL        string    `json:"ssh_url,omitempty"`
 	UpdatedAt     time.Time `json:"updated_at,omitempty"`

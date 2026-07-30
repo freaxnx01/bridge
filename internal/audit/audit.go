@@ -17,7 +17,7 @@ type Entry struct {
 	Repo    string
 	Tool    string
 	Confirm bool
-	Outcome string // "success" | "error" | "refused" | "refused_name_mismatch"
+	Outcome string // "success" | "error" | "refused" | "refused_name_mismatch" | "partial"
 }
 
 // Logger appends one JSON object per line to an audit log file.

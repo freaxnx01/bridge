@@ -12,7 +12,7 @@ implementation notes, see:
 
 ## What it is
 
-`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing eight
+`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing nine
 cross-forge tools over GitHub + Forgejo (six in `--read-only` mode):
 
 | Tool | Purpose | Notes |
@@ -24,6 +24,7 @@ cross-forge tools over GitHub + Forgejo (six in `--read-only` mode):
 | `list_git_forges` | List the configured `(forge, owner)` targets, whether each is configured, and which tools it supports | Read-only, no network requests — resolution is cached per process |
 | `create_issue` | Create an issue | **Draft by default** — nothing is created unless called with `confirm: true`. Not registered at all when `--read-only` |
 | `create_repo` | Create a repository | **Draft by default**, same `confirm: true` gate. Not registered at all when `--read-only`. The `owner` input selects which account's **token** to use, not the destination — both clients POST to `/user/repos`, so the repo is created under whichever account the token belongs to, which may differ from the requested owner |
+| `update_repo` | Update description, topics, visibility, and/or archived state | **Draft by default**, same `confirm: true` gate. `topics` lives on a separate endpoint from the rest — if it fails after the description/private/archived PATCH already succeeded, that's reported as a partial result (`topics_error` alongside a populated `result`), not a top-level error that would discard the successful half. `archived: true` additionally requires the server to run with `--allow-destructive`, since archiving blocks all further writes to the repo |
 | `cross_forge_status` | The same cross-forge overview snapshot `bridge nav`/WebUI use | Read-only |
 
 The endpoint is guarded by a **static bearer token** (`BRIDGE_MCP_TOKEN`),

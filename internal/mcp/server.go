@@ -52,6 +52,11 @@ func NewServer(deps Deps) *mcp.Server {
 		}, deps.handleCreateRepo)
 
 		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "update_repo",
+			Description: "Update a repo's description, topics, visibility, and/or archived state. Without confirm=true this returns a draft and changes nothing. Setting archived=true additionally requires the server to run with --allow-destructive.",
+		}, deps.handleUpdateRepo)
+
+		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "close_issue",
 			Description: "Close an issue. Without confirm=true this returns a draft and closes nothing.",
 		}, deps.handleCloseIssue)
