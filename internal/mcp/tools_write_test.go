@@ -1031,7 +1031,7 @@ func TestHandlePutFile_DraftDoesNotWrite(t *testing.T) {
 	if !out.Draft {
 		t.Fatalf("confirm=false must return a draft: %+v", out)
 	}
-	if gh.fakePutFile.putCalled {
+	if gh.putCalled {
 		t.Fatal("draft must not call PutFile")
 	}
 }
@@ -1064,9 +1064,9 @@ func TestHandlePutFile_GithubDenyAlwaysRejected(t *testing.T) {
 
 func TestHandlePutFile_UpdateWithoutSHARejected(t *testing.T) {
 	gh := newFakeFull("github")
-	gh.fakeFiles.file = []byte("old")
-	gh.fakeFiles.sha = "existing-sha"
-	gh.fakeFiles.found = true
+	gh.file = []byte("old")
+	gh.sha = "existing-sha"
+	gh.found = true
 	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
 	d.PathAllowlist = DefaultPathAllowlist
 
@@ -1080,8 +1080,8 @@ func TestHandlePutFile_UpdateWithoutSHARejected(t *testing.T) {
 
 func TestHandlePutFile_ConfirmCreatesNewFile(t *testing.T) {
 	gh := newFakeFull("github")
-	gh.fakeFiles.found = false // no existing file
-	gh.fakePutFile.htmlURL = "https://github.com/o/r/blob/main/docs/x.md"
+	gh.found = false // no existing file
+	gh.htmlURL = "https://github.com/o/r/blob/main/docs/x.md"
 	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
 	d.PathAllowlist = DefaultPathAllowlist
 
@@ -1101,9 +1101,9 @@ func TestHandlePutFile_ConfirmCreatesNewFile(t *testing.T) {
 
 func TestHandlePutFile_ConfirmUpdatesWithMatchingSHA(t *testing.T) {
 	gh := newFakeFull("github")
-	gh.fakeFiles.file = []byte("old")
-	gh.fakeFiles.sha = "existing-sha"
-	gh.fakeFiles.found = true
+	gh.file = []byte("old")
+	gh.sha = "existing-sha"
+	gh.found = true
 	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
 	d.PathAllowlist = DefaultPathAllowlist
 
