@@ -254,6 +254,57 @@ func TestForgejoGetFile_FoundAndAbsent(t *testing.T) {
 	}
 }
 
+func TestForgejoPutFile_CreateAndUpdate(t *testing.T) {
+	var gotBodies []map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "PUT" {
+			t.Errorf("method: %s", r.Method)
+		}
+		if r.Header.Get("Authorization") != "token tok" {
+			t.Errorf("auth %q", r.Header.Get("Authorization"))
+		}
+		var body map[string]any
+		json.NewDecoder(r.Body).Decode(&body)
+		gotBodies = append(gotBodies, body)
+		w.Write([]byte(`{"content":{"html_url":"https://x/created.md"}}`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	url, err := c.PutFile(context.Background(), "freax", "sandbox", "docs/x.md", []byte("hi"), "docs: add x", "")
+	if err != nil || url != "https://x/created.md" {
+		t.Fatalf("PutFile create: url=%q err=%v", url, err)
+	}
+	if _, hasSHA := gotBodies[0]["sha"]; hasSHA {
+		t.Errorf("create must not send sha: %v", gotBodies[0])
+	}
+	if gotBodies[0]["content"] != "aGk=" { // base64("hi")
+		t.Errorf("content not base64: %v", gotBodies[0]["content"])
+	}
+
+	_, err = c.PutFile(context.Background(), "freax", "sandbox", "docs/x.md", []byte("bye"), "docs: update x", "abc123")
+	if err != nil {
+		t.Fatalf("PutFile update: %v", err)
+	}
+	if gotBodies[1]["sha"] != "abc123" {
+		t.Errorf("update must send sha, got: %v", gotBodies[1])
+	}
+}
+
+func TestForgejoPutFile_ErrorResponse(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		w.Write([]byte(`{"message":"sha does not match"}`))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+
+	_, err := c.PutFile(context.Background(), "freax", "sandbox", "docs/x.md", []byte("x"), "msg", "stale-sha")
+	if err == nil {
+		t.Fatal("want error on 422 response")
+	}
+}
+
 func TestForgejoListTree_ShallowRoot(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/api/v1/repos/freax/notes/contents" {

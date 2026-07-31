@@ -365,6 +365,51 @@ func (c *ForgejoClient) GetFile(ctx context.Context, owner, repo, path string) (
 	return raw, fc.SHA, true, nil
 }
 
+// PutFile creates or updates a file via the Forgejo/Gitea Contents API. Empty
+// sha creates; a blob sha updates. Returns the file's html_url. Mirrors
+// GithubClient.PutFile — Gitea's Contents API has the same PUT-with-optional-
+// sha shape.
+func (c *ForgejoClient) PutFile(ctx context.Context, owner, repo, path string, content []byte, message, sha string) (string, error) {
+	body := map[string]any{
+		"message": message,
+		"content": base64.StdEncoding.EncodeToString(content),
+	}
+	if sha != "" {
+		body["sha"] = sha
+	}
+	buf, err := json.Marshal(body)
+	if err != nil {
+		return "", err
+	}
+	endpoint := fmt.Sprintf("/api/v1/repos/%s/%s/contents/%s", url.PathEscape(owner), url.PathEscape(repo), escapePathSegments(path))
+	req, err := http.NewRequestWithContext(ctx, "PUT", c.baseURL+endpoint, bytes.NewReader(buf))
+	if err != nil {
+		return "", err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "token "+c.token)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode >= 400 {
+		b, _ := io.ReadAll(resp.Body)
+		return "", fmt.Errorf("forgejo put %s: %s: %s", path, resp.Status, string(b))
+	}
+	var out struct {
+		Content struct {
+			HTMLURL string `json:"html_url"`
+		} `json:"content"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+		return "", err
+	}
+	return out.Content.HTMLURL, nil
+}
+
 // ListTree lists path's entries from the repo's default branch. Non-recursive
 // uses the Contents API (one level); recursive uses the Git Trees API with
 // recursive=true. found is implicit: an empty repo returns an empty,
