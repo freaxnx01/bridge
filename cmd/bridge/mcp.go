@@ -30,12 +30,13 @@ import (
 )
 
 var (
-	mcpPort             int
-	mcpHost             string
-	mcpReadOnly         bool
-	mcpAllowDestructive bool
-	mcpNoAuth           bool
-	mcpAuthMode         string
+	mcpPort              int
+	mcpHost              string
+	mcpReadOnly          bool
+	mcpAllowDestructive  bool
+	mcpNoAuth            bool
+	mcpAuthMode          string
+	mcpPutFileAllowlist  string
 )
 
 func init() {
@@ -58,6 +59,7 @@ func newMCPCmd() *cobra.Command {
 	serveCmd.Flags().BoolVar(&mcpAllowDestructive, "allow-destructive", false, "allow destructive tools to execute when confirmed (reserved for future archive_repo/delete_repo; tier-1 tools are unaffected)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
 	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
+	serveCmd.Flags().StringVar(&mcpPutFileAllowlist, "put-file-allowlist", "docs/**,*.md", "comma-separated path patterns put_file may write to (each entry is \"dir/**\" or a root-level \"*.ext\" glob); .github/** is always denied")
 	mcpCmd.AddCommand(serveCmd)
 	return mcpCmd
 }
@@ -93,6 +95,40 @@ func parseAllowedRedirectURIs(s string) []string {
 		out[i] = strings.TrimSpace(p)
 	}
 	return out
+}
+
+// parsePathAllowlist parses a --put-file-allowlist / BRIDGE_MCP_PUT_FILE_ALLOWLIST
+// value: comma-separated patterns, trimmed of surrounding whitespace, empty
+// entries skipped. An empty input falls back to imcp.DefaultPathAllowlist.
+func parsePathAllowlist(s string) imcp.PathAllowlist {
+	if strings.TrimSpace(s) == "" {
+		return imcp.DefaultPathAllowlist
+	}
+	parts := strings.Split(s, ",")
+	out := make(imcp.PathAllowlist, 0, len(parts))
+	for _, p := range parts {
+		p = strings.TrimSpace(p)
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	if len(out) == 0 {
+		return imcp.DefaultPathAllowlist
+	}
+	return out
+}
+
+// firstNonEmpty returns the first non-empty string, or "" if both are empty.
+// Used to let an env var override a flag's value only when the env var is
+// actually set (unlike the flag-OR-env boolean pattern used for
+// AllowDestructive, a full allowlist replacement needs "env wins if set",
+// not "either source enables it").
+func firstNonEmpty(a, b string) string {
+	if a != "" {
+		return a
+	}
+	return b
 }
 
 // buildMCPHandler mounts srv on a Streamable HTTP handler and, unless noAuth is
@@ -226,6 +262,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		ReadOnly:         mcpReadOnly || os.Getenv("BRIDGE_MCP_READONLY") == "1",
 		AllowDestructive: mcpAllowDestructive || os.Getenv("BRIDGE_MCP_ALLOW_DESTRUCTIVE") == "1",
 		DefaultOwners:    parseOwners(os.Getenv("BRIDGE_MCP_OWNERS")),
+		PathAllowlist:    parsePathAllowlist(firstNonEmpty(os.Getenv("BRIDGE_MCP_PUT_FILE_ALLOWLIST"), mcpPutFileAllowlist)),
 		ClientFor:        newCachingClientResolver(clientForMCP(roots)),
 		BuildOverview:    buildOverviewSnapshot,
 		Audit:            auditLogger,
