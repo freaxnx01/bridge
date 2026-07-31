@@ -152,7 +152,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	openByRepo, globalOpen := countOpenAgentPRs(repos)
 	now := time.Now()
 	decisions := dispatch.ApplyCaps(
-		dispatch.Order(collectCandidates(repos)),
+		dispatch.Order(collectCandidates(repos), cfg.RepoPriority),
 		cfg, openByRepo, globalOpen, state.NightBudgetUsed(now),
 	)
 

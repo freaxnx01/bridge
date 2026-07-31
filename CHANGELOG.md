@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `bridge dispatch`: **`repo_priority`** in `dispatch.json` — an ordered list of repo-name patterns (`path.Match` glob syntax) that becomes the ordering ladder's new first rung, ahead of milestone due date. A repo's rank is the index of the first pattern it matches; unmatched repos sort after every configured entry. This lets software-factory repos dispatch before `game-*` prototypes regardless of what each repo has queued. Absent or empty (the default) skips the rung, so existing configs order exactly as before. (#222)
+
 ## [2.9.0] - 2026-07-26
 
 ### Added
