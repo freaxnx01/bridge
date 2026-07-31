@@ -80,6 +80,11 @@ func NewServer(deps Deps) *mcp.Server {
 			Name:        "comment_issue",
 			Description: "Post a comment on an issue. Without confirm=true this returns a draft and posts nothing.",
 		}, deps.handleCommentIssue)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "put_file",
+			Description: "Create or update a file directly on the repo's default branch, within a server-side path allowlist. No branch/PR — git history is the rollback. Without confirm=true this returns a draft and writes nothing. Updating an existing file requires sha (read it via read_file or list_tree first).",
+		}, deps.handlePutFile)
 	}
 
 	return srv
