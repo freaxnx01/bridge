@@ -30,13 +30,13 @@ import (
 )
 
 var (
-	mcpPort              int
-	mcpHost              string
-	mcpReadOnly          bool
-	mcpAllowDestructive  bool
-	mcpNoAuth            bool
-	mcpAuthMode          string
-	mcpPutFileAllowlist  string
+	mcpPort             int
+	mcpHost             string
+	mcpReadOnly         bool
+	mcpAllowDestructive bool
+	mcpNoAuth           bool
+	mcpAuthMode         string
+	mcpPutFileAllowlist string
 )
 
 func init() {
@@ -59,7 +59,7 @@ func newMCPCmd() *cobra.Command {
 	serveCmd.Flags().BoolVar(&mcpAllowDestructive, "allow-destructive", false, "allow destructive tools to execute when confirmed (reserved for future archive_repo/delete_repo; tier-1 tools are unaffected)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
 	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
-	serveCmd.Flags().StringVar(&mcpPutFileAllowlist, "put-file-allowlist", "docs/**,*.md", "comma-separated path patterns put_file may write to (each entry is \"dir/**\" or a root-level \"*.ext\" glob); .github/** is always denied")
+	serveCmd.Flags().StringVar(&mcpPutFileAllowlist, "put-file-allowlist", "docs/**/*.md,*.md", "comma-separated path patterns put_file may write to (each entry is \"dir/**\" or a root-level \"*.ext\" glob); .github/** is always denied")
 	mcpCmd.AddCommand(serveCmd)
 	return mcpCmd
 }
