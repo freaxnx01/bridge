@@ -49,6 +49,26 @@ func (f *fakeFiles) GetFile(_ context.Context, _, _, _ string) ([]byte, string, 
 	return f.file, f.sha, f.found, nil
 }
 
+// fakePutFile supplies the fileWriter capability (fileReader + PutFile).
+type fakePutFile struct {
+	*fakeFiles
+	htmlURL   string
+	putErr    error
+	lastPath  string
+	lastSHA   string
+	lastBody  string
+	putCalled bool
+}
+
+func (f *fakePutFile) PutFile(_ context.Context, _, _, path string, content []byte, _, sha string) (string, error) {
+	f.putCalled = true
+	f.lastPath, f.lastSHA, f.lastBody = path, sha, string(content)
+	if f.putErr != nil {
+		return "", f.putErr
+	}
+	return f.htmlURL, nil
+}
+
 // fakeTree supplies the treeLister capability.
 type fakeTree struct {
 	entries   []forge.TreeEntry
@@ -223,18 +243,21 @@ type fakeFull struct {
 	*fakeIssues
 	*fakeRepos
 	*fakeRepoUpdater
+	*fakePutFile
 }
 
 // newFakeFull builds a fully capable client. Tests set fields on the embedded
 // structs afterwards, e.g. c.repos = … or c.found = false.
 func newFakeFull(name string) *fakeFull {
+	files := &fakeFiles{}
 	return &fakeFull{
 		fakeReader:      &fakeReader{name: name},
-		fakeFiles:       &fakeFiles{},
+		fakeFiles:       files,
 		fakeTree:        &fakeTree{},
 		fakeIssues:      &fakeIssues{forgeName: name},
 		fakeRepos:       &fakeRepos{forgeName: name},
 		fakeRepoUpdater: &fakeRepoUpdater{forgeName: name},
+		fakePutFile:     &fakePutFile{fakeFiles: files},
 	}
 }
 
@@ -273,11 +296,19 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			want:   []string{"list_repos", "list_issues", "search_code"},
 		},
 		{
+			name: "put_file-capable client reports it alongside read_file",
+			client: &struct {
+				*fakeReader
+				*fakePutFile
+			}{fakeReader: &fakeReader{name: "github"}, fakePutFile: &fakePutFile{fakeFiles: &fakeFiles{}}},
+			want: []string{"list_repos", "list_issues", "read_file", "put_file"},
+		},
+		{
 			name:   "fully capable client reports every tool",
 			client: newFakeFull("github"),
 			want: []string{
-				"list_repos", "list_issues", "read_file", "list_tree", "create_issue", "create_repo", "update_repo",
-				"close_issue", "update_issue", "add_labels", "comment_issue",
+				"list_repos", "list_issues", "read_file", "put_file", "list_tree", "create_issue", "create_repo",
+				"update_repo", "close_issue", "update_issue", "add_labels", "comment_issue",
 			},
 		},
 	}

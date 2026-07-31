@@ -165,10 +165,13 @@ func Capabilities(r ForgeReader) []string {
 type Deps struct {
 	ReadOnly         bool
 	AllowDestructive bool
-	DefaultOwners    []Target
-	ClientFor        func(forgeName, owner string) ForgeReader
-	BuildOverview    func(ctx context.Context) (overview.Snapshot, error)
-	Audit            *audit.Logger
+	// PathAllowlist gates which paths put_file may write to. A nil/empty
+	// value falls back to DefaultPathAllowlist inside handlePutFile.
+	PathAllowlist PathAllowlist
+	DefaultOwners []Target
+	ClientFor     func(forgeName, owner string) ForgeReader
+	BuildOverview func(ctx context.Context) (overview.Snapshot, error)
+	Audit         *audit.Logger
 }
 
 // auditLog appends e to Deps.Audit. A no-op when Audit is nil (tests, or a

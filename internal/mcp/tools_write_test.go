@@ -1016,3 +1016,123 @@ func TestHandleUpdateRepo_ForgeErrorLogsErrorOutcome(t *testing.T) {
 		t.Errorf("want an error audit entry, got %q", string(data))
 	}
 }
+
+func TestHandlePutFile_DraftDoesNotWrite(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = DefaultPathAllowlist
+
+	_, out, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: "docs/x.md", Content: "hi", Message: "docs: add x", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("confirm=false must return a draft: %+v", out)
+	}
+	if gh.fakePutFile.putCalled {
+		t.Fatal("draft must not call PutFile")
+	}
+}
+
+func TestHandlePutFile_PathOutsideAllowlistRejected(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = DefaultPathAllowlist
+
+	_, _, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: "internal/mcp/tools.go", Content: "x", Message: "m", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want error for a path outside the allowlist")
+	}
+}
+
+func TestHandlePutFile_GithubDenyAlwaysRejected(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = PathAllowlist{".github/**"} // even an explicit allow must not win
+
+	_, _, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: ".github/workflows/ci.yml", Content: "x", Message: "m", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want error for .github/** even with a matching allowlist entry")
+	}
+}
+
+func TestHandlePutFile_UpdateWithoutSHARejected(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.fakeFiles.file = []byte("old")
+	gh.fakeFiles.sha = "existing-sha"
+	gh.fakeFiles.found = true
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = DefaultPathAllowlist
+
+	_, _, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: "docs/x.md", Content: "new", Message: "m", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want error when updating an existing file without sha")
+	}
+}
+
+func TestHandlePutFile_ConfirmCreatesNewFile(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.fakeFiles.found = false // no existing file
+	gh.fakePutFile.htmlURL = "https://github.com/o/r/blob/main/docs/x.md"
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = DefaultPathAllowlist
+
+	_, out, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: "docs/x.md", Content: "hi", Message: "docs: add x", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatal("confirmed write must not be a draft")
+	}
+	if out.HTMLURL == "" {
+		t.Fatalf("expected html_url on success: %+v", out)
+	}
+}
+
+func TestHandlePutFile_ConfirmUpdatesWithMatchingSHA(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.fakeFiles.file = []byte("old")
+	gh.fakeFiles.sha = "existing-sha"
+	gh.fakeFiles.found = true
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = DefaultPathAllowlist
+
+	_, out, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: "docs/x.md", Content: "new", Message: "docs: update x", SHA: "existing-sha", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Draft {
+		t.Fatal("confirmed write must not be a draft")
+	}
+}
+
+func TestHandlePutFile_ForgeLacksCapability(t *testing.T) {
+	fj := &fakeReader{name: "forgejo"} // no fileWriter methods
+	d := depsWith(nil, nil)
+	d.ClientFor = func(forgeName, _ string) ForgeReader {
+		if forgeName == "forgejo" {
+			return fj
+		}
+		return nil
+	}
+	d.PathAllowlist = DefaultPathAllowlist
+
+	_, _, err := d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "forgejo", Owner: "o", Repo: "r", Path: "docs/x.md", Content: "x", Message: "m", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want error when the forge client does not support put_file")
+	}
+}

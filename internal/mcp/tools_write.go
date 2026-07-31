@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
@@ -425,5 +426,86 @@ func (d Deps) handleCommentIssue(ctx context.Context, _ *mcp.CallToolRequest, in
 		Draft: false,
 		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, IssueNumber: in.IssueNumber,
 		Body: in.Body, Comment: &comment,
+	}, nil
+}
+
+type putFileInput struct {
+	Forge   string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner   string `json:"owner" jsonschema:"repository owner"`
+	Repo    string `json:"repo" jsonschema:"repository name"`
+	Path    string `json:"path" jsonschema:"file path within the repo (default branch); must fall within the server's path allowlist"`
+	Content string `json:"content" jsonschema:"full file content (UTF-8 text); replaces the entire file"`
+	Message string `json:"message" jsonschema:"commit message"`
+	SHA     string `json:"sha,omitempty" jsonschema:"current blob sha; required to update a file that already exists (read it via read_file or list_tree first) — omit only when creating a new file"`
+	Confirm bool   `json:"confirm,omitempty" jsonschema:"when false, returns a draft without writing; set true to write"`
+}
+
+type putFileOutput struct {
+	Draft   bool   `json:"draft"`
+	Forge   string `json:"forge"`
+	Owner   string `json:"owner"`
+	Repo    string `json:"repo"`
+	Path    string `json:"path"`
+	Message string `json:"message"`
+	SHA     string `json:"sha,omitempty"`
+	HTMLURL string `json:"html_url,omitempty"`
+}
+
+// handlePutFile creates or updates a file directly on the repo's default
+// branch. There is no branch/PR step: the path allowlist and the sha-required
+// -on-update check are what replace the review gate a PR would otherwise
+// provide (see docs/superpowers/plans/2026-07-31-put-file.md).
+func (d Deps) handlePutFile(ctx context.Context, _ *mcp.CallToolRequest, in putFileInput) (*mcp.CallToolResult, putFileOutput, error) {
+	if in.Path == "" {
+		return nil, putFileOutput{}, fmt.Errorf("put_file %s/%s: path is required", in.Owner, in.Repo)
+	}
+	if in.Message == "" {
+		return nil, putFileOutput{}, fmt.Errorf("put_file %s/%s/%s: message is required", in.Owner, in.Repo, in.Path)
+	}
+	allowlist := d.PathAllowlist
+	if len(allowlist) == 0 {
+		allowlist = DefaultPathAllowlist
+	}
+	if !allowlist.Allows(in.Path) {
+		return nil, putFileOutput{}, fmt.Errorf("put_file %s/%s/%s: path is not in the allowed set (%s)", in.Owner, in.Repo, in.Path, strings.Join(allowlist, ", "))
+	}
+
+	draft := putFileOutput{
+		Draft: true,
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Path: in.Path, Message: in.Message, SHA: in.SHA,
+	}
+	if !in.Confirm {
+		return nil, draft, nil
+	}
+
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return nil, putFileOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+	files, ok := client.(fileWriter)
+	if !ok {
+		return nil, putFileOutput{}, fmt.Errorf("forge %q does not support writing files", in.Forge)
+	}
+
+	_, existingSHA, found, err := files.GetFile(ctx, in.Owner, in.Repo, in.Path)
+	if err != nil {
+		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "put_file", Confirm: true, Outcome: "error"})
+		return nil, putFileOutput{}, fmt.Errorf("put_file %s/%s/%s: check existing file: %w", in.Owner, in.Repo, in.Path, err)
+	}
+	if found && in.SHA == "" {
+		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "put_file", Confirm: true, Outcome: "refused"})
+		return nil, putFileOutput{}, fmt.Errorf("put_file %s/%s/%s: file already exists (sha %s); sha is required to update it", in.Owner, in.Repo, in.Path, existingSHA)
+	}
+
+	htmlURL, err := files.PutFile(ctx, in.Owner, in.Repo, in.Path, []byte(in.Content), in.Message, in.SHA)
+	if err != nil {
+		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "put_file", Confirm: true, Outcome: "error"})
+		return nil, putFileOutput{}, fmt.Errorf("put_file %s/%s/%s: %w", in.Owner, in.Repo, in.Path, err)
+	}
+	d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "put_file", Confirm: true, Outcome: "success"})
+	return nil, putFileOutput{
+		Draft: false,
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Path: in.Path, Message: in.Message, SHA: in.SHA,
+		HTMLURL: htmlURL,
 	}, nil
 }
