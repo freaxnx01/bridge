@@ -824,8 +824,8 @@ func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, co
 	if err != nil {
 		return "", err
 	}
-	url := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.baseURL, owner, repo, path)
-	req, err := http.NewRequestWithContext(ctx, "PUT", url, bytes.NewReader(payload))
+	endpoint := fmt.Sprintf("%s/repos/%s/%s/contents/%s", c.baseURL, url.PathEscape(owner), url.PathEscape(repo), escapePathSegments(path))
+	req, err := http.NewRequestWithContext(ctx, "PUT", endpoint, bytes.NewReader(payload))
 	if err != nil {
 		return "", err
 	}

@@ -24,6 +24,9 @@ func TestPathAllowlist_Allows(t *testing.T) {
 		{"path-traversal-out-of-repo-denied", PathAllowlist{"docs/**"}, "docs/../../etc/passwd", false},
 		{"absolute-path-denied", PathAllowlist{"docs/**"}, "/etc/passwd", false},
 		{"dotdot-root-traversal-denied", PathAllowlist{"*.md"}, "../README.md", false},
+		{"query-metachar-denied", PathAllowlist{"*.md"}, "justfile?x.md", false},
+		{"query-metachar-on-dotfile-denied", PathAllowlist{"*.md"}, ".envrc?x.md", false},
+		{"fragment-metachar-denied", PathAllowlist{"docs/**/*.md"}, "docs/a.md#x", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

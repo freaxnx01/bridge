@@ -447,7 +447,6 @@ type putFileOutput struct {
 	Repo    string `json:"repo"`
 	Path    string `json:"path"`
 	Message string `json:"message"`
-	SHA     string `json:"sha,omitempty"`
 	HTMLURL string `json:"html_url,omitempty"`
 }
 
@@ -472,7 +471,7 @@ func (d Deps) handlePutFile(ctx context.Context, _ *mcp.CallToolRequest, in putF
 
 	draft := putFileOutput{
 		Draft: true,
-		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Path: in.Path, Message: in.Message, SHA: in.SHA,
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Path: in.Path, Message: in.Message,
 	}
 	if !in.Confirm {
 		return nil, draft, nil
@@ -505,7 +504,7 @@ func (d Deps) handlePutFile(ctx context.Context, _ *mcp.CallToolRequest, in putF
 	d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "put_file", Confirm: true, Outcome: "success"})
 	return nil, putFileOutput{
 		Draft: false,
-		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Path: in.Path, Message: in.Message, SHA: in.SHA,
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Path: in.Path, Message: in.Message,
 		HTMLURL: htmlURL,
 	}, nil
 }

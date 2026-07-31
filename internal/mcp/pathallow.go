@@ -30,6 +30,15 @@ func (a PathAllowlist) Allows(path string) bool {
 	if strings.HasPrefix(path, "/") {
 		return false
 	}
+	// Reject URL-layer metacharacters and control characters: a repo file path
+	// never legitimately contains them, and an unescaped forge client would
+	// let '?'/'#' reinterpret the rest of the path as a query string or
+	// fragment, silently retargeting the write to a different, existing file.
+	for _, r := range path {
+		if r == '?' || r == '#' || r < 0x20 || r == 0x7f {
+			return false
+		}
+	}
 	// Reject paths with .. segments (path traversal) or . segments
 	// by checking if the path is equal to its cleaned version
 	if path != filepath.Clean(path) {

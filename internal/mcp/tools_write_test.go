@@ -1097,6 +1097,9 @@ func TestHandlePutFile_ConfirmCreatesNewFile(t *testing.T) {
 	if out.HTMLURL == "" {
 		t.Fatalf("expected html_url on success: %+v", out)
 	}
+	if gh.lastPath != "docs/x.md" || gh.lastBody != "hi" || gh.lastSHA != "" {
+		t.Errorf("PutFile called with path=%q body=%q sha=%q, want path=docs/x.md body=hi sha=\"\"", gh.lastPath, gh.lastBody, gh.lastSHA)
+	}
 }
 
 func TestHandlePutFile_ConfirmUpdatesWithMatchingSHA(t *testing.T) {
@@ -1115,6 +1118,37 @@ func TestHandlePutFile_ConfirmUpdatesWithMatchingSHA(t *testing.T) {
 	}
 	if out.Draft {
 		t.Fatal("confirmed write must not be a draft")
+	}
+	if gh.lastPath != "docs/x.md" || gh.lastBody != "new" || gh.lastSHA != "existing-sha" {
+		t.Errorf("PutFile called with path=%q body=%q sha=%q, want path=docs/x.md body=new sha=existing-sha", gh.lastPath, gh.lastBody, gh.lastSHA)
+	}
+}
+
+func TestHandlePutFile_PutFileErrorLogsErrorOutcome(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.found = false
+	gh.putErr = errors.New("api down")
+	auditPath := filepath.Join(t.TempDir(), "audit.jsonl")
+	logger, err := audit.Open(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	d.PathAllowlist = DefaultPathAllowlist
+	d.Audit = logger
+
+	_, _, err = d.handlePutFile(context.Background(), nil, putFileInput{
+		Forge: "github", Owner: "o", Repo: "r", Path: "docs/x.md", Content: "hi", Message: "docs: add x", Confirm: true,
+	})
+	if err == nil {
+		t.Fatal("want error when PutFile fails")
+	}
+	data, err := os.ReadFile(auditPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), `"tool":"put_file"`) || !strings.Contains(string(data), `"outcome":"error"`) {
+		t.Errorf("want a put_file error audit entry, got %q", string(data))
 	}
 }
 
