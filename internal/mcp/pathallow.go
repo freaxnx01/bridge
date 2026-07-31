@@ -26,6 +26,23 @@ const deniedPrefix = ".github"
 
 // Allows reports whether path may be written by put_file.
 func (a PathAllowlist) Allows(path string) bool {
+	// Reject absolute paths (must be repo-relative)
+	if strings.HasPrefix(path, "/") {
+		return false
+	}
+	// Reject paths with .. segments (path traversal) or . segments
+	// by checking if the path is equal to its cleaned version
+	if path != filepath.Clean(path) {
+		return false
+	}
+	// Additional check for . and .. as path segments
+	parts := strings.Split(path, "/")
+	for _, part := range parts {
+		if part == "." || part == ".." {
+			return false
+		}
+	}
+	// Reject .github directory and anything under it
 	if path == deniedPrefix || strings.HasPrefix(path, deniedPrefix+"/") {
 		return false
 	}

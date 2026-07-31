@@ -20,6 +20,10 @@ func TestPathAllowlist_Allows(t *testing.T) {
 		{"github-denied-even-with-matching-allowlist-entry", PathAllowlist{".github/**"}, ".github/workflows/ci.yml", false},
 		{"github-exact-file-denied", PathAllowlist{"*"}, ".github", false},
 		{"empty-allowlist-denies-everything", PathAllowlist{}, "docs/x.md", false},
+		{"path-traversal-into-github-denied", PathAllowlist{"docs/**"}, "docs/../.github/workflows/evil.yml", false},
+		{"path-traversal-out-of-repo-denied", PathAllowlist{"docs/**"}, "docs/../../etc/passwd", false},
+		{"absolute-path-denied", PathAllowlist{"docs/**"}, "/etc/passwd", false},
+		{"dotdot-root-traversal-denied", PathAllowlist{"*.md"}, "../README.md", false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
