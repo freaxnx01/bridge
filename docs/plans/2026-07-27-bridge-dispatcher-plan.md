@@ -10,11 +10,12 @@
 
 **Spec:** [`docs/specs/2026-07-27-bridge-dispatcher-design.md`](../specs/2026-07-27-bridge-dispatcher-design.md)
 
-## Status (2026-07-28)
+## Status (2026-08-01)
 
-**Phase:** plan written and approved for execution. **No code has been written yet.**
-**Next step:** Task 1 — extend `internal/forge`. Tasks 2–7 are blocked on it; once it
-lands they are mutually independent and can run in parallel.
+**Phase:** Done. All 8 tasks implemented and merged to `main` (see git log for
+`internal/dispatch/` and `cmd/bridge/dispatch.go`), plus follow-up fixes from
+final review and the configurable repo-priority rung (#222/#227). This status
+note was previously stale relative to the actual implementation state.
 
 Decisions already made and settled — do not re-litigate them:
 
