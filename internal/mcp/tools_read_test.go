@@ -483,8 +483,8 @@ func TestHandleListGitForges_ReportsConfiguredAndUnconfiguredTargets(t *testing.
 	if configured.Reason != "" {
 		t.Errorf("a configured target must carry no reason, got %q", configured.Reason)
 	}
-	if len(configured.Capabilities) != 11 {
-		t.Errorf("a fully capable client must report 11 tools, got %v", configured.Capabilities)
+	if len(configured.Capabilities) != 12 {
+		t.Errorf("a fully capable client must report 12 tools, got %v", configured.Capabilities)
 	}
 
 	unconfigured := out.Forges[1]
@@ -560,8 +560,8 @@ func TestHandleListGitForges_ReadOnlyFalseKeepsWriteCapabilities(t *testing.T) {
 	if out.ReadOnly {
 		t.Error("read_only must be false when Deps.ReadOnly is false")
 	}
-	if len(out.Forges[0].Capabilities) != 11 {
-		t.Errorf("want all 11 tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 12 {
+		t.Errorf("want all 12 tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 

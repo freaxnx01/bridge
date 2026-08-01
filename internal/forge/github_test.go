@@ -600,6 +600,25 @@ func TestGithubPutFile_CreateAndUpdate(t *testing.T) {
 	}
 }
 
+func TestGithubPutFile_EscapesPathAgainstQueryInjection(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.RawQuery != "" {
+			t.Errorf("path leaked into query string: %q", r.URL.RawQuery)
+		}
+		if want := "/repos/freaxnx01/bridge/contents/justfile?x.md"; r.URL.Path != want {
+			t.Errorf("path = %q, want %q", r.URL.Path, want)
+		}
+		w.Write([]byte(`{"content":{"html_url":"https://x/y"}}`))
+	}))
+	defer srv.Close()
+	c := NewGithubClient("token", srv.URL)
+
+	_, err := c.PutFile(context.Background(), "freaxnx01", "bridge", "justfile?x.md", []byte("x"), "m", "")
+	if err != nil {
+		t.Fatalf("PutFile: %v", err)
+	}
+}
+
 func TestGithubCreateRepo(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

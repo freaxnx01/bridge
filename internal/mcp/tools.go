@@ -30,6 +30,15 @@ type fileReader interface {
 	GetFile(ctx context.Context, owner, repo, path string) (content []byte, sha string, found bool, err error)
 }
 
+// fileWriter is asserted by put_file. GetFile is used first to detect an
+// existing file at the target path — an update without a matching sha is
+// rejected before PutFile is ever called, rather than surfacing a raw
+// forge-API error.
+type fileWriter interface {
+	fileReader
+	PutFile(ctx context.Context, owner, repo, path string, content []byte, message, sha string) (htmlURL string, err error)
+}
+
 // treeLister is asserted by list_tree.
 type treeLister interface {
 	ListTree(ctx context.Context, owner, repo, path string, recursive bool) (entries []forge.TreeEntry, truncated bool, err error)
@@ -111,6 +120,9 @@ func Capabilities(r ForgeReader) []string {
 	if _, ok := r.(fileReader); ok {
 		capabilities = append(capabilities, "read_file")
 	}
+	if _, ok := r.(fileWriter); ok {
+		capabilities = append(capabilities, "put_file")
+	}
 	if _, ok := r.(treeLister); ok {
 		capabilities = append(capabilities, "list_tree")
 	}
@@ -153,10 +165,13 @@ func Capabilities(r ForgeReader) []string {
 type Deps struct {
 	ReadOnly         bool
 	AllowDestructive bool
-	DefaultOwners    []Target
-	ClientFor        func(forgeName, owner string) ForgeReader
-	BuildOverview    func(ctx context.Context) (overview.Snapshot, error)
-	Audit            *audit.Logger
+	// PathAllowlist gates which paths put_file may write to. A nil/empty
+	// value falls back to DefaultPathAllowlist inside handlePutFile.
+	PathAllowlist PathAllowlist
+	DefaultOwners []Target
+	ClientFor     func(forgeName, owner string) ForgeReader
+	BuildOverview func(ctx context.Context) (overview.Snapshot, error)
+	Audit         *audit.Logger
 }
 
 // auditLog appends e to Deps.Audit. A no-op when Audit is nil (tests, or a

@@ -121,6 +121,32 @@ func TestParseOwners(t *testing.T) {
 	}
 }
 
+func TestParsePathAllowlist(t *testing.T) {
+	tests := []struct {
+		name string
+		in   string
+		want imcp.PathAllowlist
+	}{
+		{"empty-falls-back-to-default", "", imcp.DefaultPathAllowlist},
+		{"single", "docs/**", imcp.PathAllowlist{"docs/**"}},
+		{"comma-and-space", "docs/**, *.md", imcp.PathAllowlist{"docs/**", "*.md"}},
+		{"skips-empty-entries", "docs/**,,*.md", imcp.PathAllowlist{"docs/**", "*.md"}},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := parsePathAllowlist(tt.in)
+			if len(got) != len(tt.want) {
+				t.Fatalf("parsePathAllowlist(%q) = %+v, want %+v", tt.in, got, tt.want)
+			}
+			for i := range tt.want {
+				if got[i] != tt.want[i] {
+					t.Fatalf("parsePathAllowlist(%q) = %+v, want %+v", tt.in, got, tt.want)
+				}
+			}
+		})
+	}
+}
+
 func TestValidateNoAuthHost(t *testing.T) {
 	tests := []struct {
 		name    string
