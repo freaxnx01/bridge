@@ -2,12 +2,13 @@
 
 _2026-07-31. Tracks #220, #219, #221, #223. Worktree: `.worktrees/new-mcp-cmds`._
 
-## Original scope (4 tools)
+## Original scope (4 tools) — all done
 
 A multi-session plan to grow bridge's MCP surface: `list_tree` (#220),
 `update_repo` (#219), `search_code` (#221), and tree-writes/PR-opening (#223).
 Sessions were explicitly sequenced — do not start #221 or #223 until earlier
-ones land and their open questions are settled.
+ones land and their open questions are settled. All four are now merged to
+`main`; the plan is complete.
 
 ## Done — merged to `main`
 
@@ -28,12 +29,30 @@ ones land and their open questions are settled.
   it's just HTML-only). Went with the issue's own recommended option:
   GitHub-only + honest capability reporting via `list_git_forges`. Findings
   posted to the issue as a comment.
+- **#223 `put_file`** — PR #228, merged. Create-or-update a file directly on
+  a repo's default branch (no branch/PR), gated by a server-side path
+  allowlist (default `docs/**/*.md` + root `*.md`, configurable via
+  `--put-file-allowlist`/`BRIDGE_MCP_PUT_FILE_ALLOWLIST`; `.github/**` always
+  denied). `sha` is required to update an existing file, checked proactively
+  via `GetFile` rather than left to a raw forge-API error. Owner-scoped, no
+  per-repo allowlist — same trust boundary as `create_repo`. Resolved the
+  "Blocked" repo-allowlist question below as option 2. Two real security
+  issues were found and fixed during implementation (not just theoretical
+  hardening): a path-traversal allowlist bypass (`docs/../.github/...`), and
+  a URL-metacharacter bypass in `GithubClient.PutFile` (`?` in a path let a
+  write silently retarget an existing root file like `justfile`/`.envrc`).
+  Both are closed with regression tests. Live-verified against
+  `freaxnx01/agent-action-sandbox` on GitHub; no Forgejo sandbox repo exists,
+  so Forgejo coverage is unit-test only (`ForgejoClient.PutFile`). Follow-up
+  minors (doc staleness, an un-audited denial path) filed as #229; a
+  dispatch-side test-coverage gap found during unrelated PR review filed as
+  #230.
 
-All three tools follow the same conventions: capability interfaces in
+All four tools follow the same conventions: capability interfaces in
 `internal/mcp/tools.go` (`treeLister`, `repoUpdater`/`topicsSetter`,
-`searchCoder`), fan-out-with-warnings for multi-owner reads (mirrors
-`list_repos`), draft-first `confirm` gate for writes, live-verified against
-real repos before opening each PR.
+`searchCoder`, `fileWriter`), fan-out-with-warnings for multi-owner reads
+(mirrors `list_repos`), draft-first `confirm` gate for writes, live-verified
+against real repos before opening each PR.
 
 ## Dogfooded (real writes, already done)
 
@@ -56,35 +75,28 @@ reference:
 This is a small, independent fix (not part of #220/#219/#221/#223) — worth a
 short separate pass, not folded into the tools work.
 
-## Blocked — needs a decision before starting
+## Resolved — repo-allowlist policy (#223)
 
-**#223 (tree writes / PR-opening)** is not started. It grants PR-opening
-capability to every client behind bridge simultaneously — including locutus
-on Telegram — so the repo-allowlist policy needs to be decided *in the
-issue*, before any code exists. Options discussed but not chosen:
+The "which repos can `put_file` write to" question below was decided as
+**option 2**: owner-scoped, no per-repo allowlist — same trust boundary as
+`create_repo` (any repo under the configured default owners). The path
+allowlist (which *paths* within a repo) is the actual safety control, not a
+repo list. Decision recorded on #223's issue comments before implementation.
 
-1. Explicit allowlist in config — a configured list of `(forge, owner, repo)`
-   tuples that tree-writes are permitted on.
-2. Owner-scoped, no repo allowlist — same trust boundary as `create_repo`
-   today (any repo under the configured default owners).
-3. Reuse the existing `AllowDestructive`-style server flag as the gate
-   instead of a per-repo list.
+## Remaining loose end
 
-Last time this was asked, the answer was "not ready to decide yet" — so this
-is a **stop and ask** point, not a default to implement against.
+- `freaxnx01/quicktask-vikunja:.github/workflows/claude.yml:43` still says
+  `freaxnx01/claude-pipeline@main` (discovered while live-testing
+  `search_code`, never part of #220/#219/#221/#223's scope). Still open as of
+  this update — a fast, independent fix whenever it's picked up.
 
-## Resuming this work
+## If starting new MCP-tool work
 
-1. If picking #223 back up: ask the user which repo-allowlist policy to use
-   (see options above) before writing any code. Once decided, record it on
-   the issue itself, then implement following the same conventions used for
-   #220/#219/#221 (capability interface in `tools.go`, draft-first `confirm`
-   gate since it's a write, live-verify on a designated sandbox repo before
-   opening the PR — do not use `freaxnx01/bridge` or
-   `freaxnx01/agent-workflow` as a test target).
-2. The `quicktask-vikunja` stale reference is a fast, independent fix if
-   picked up separately — not a prerequisite for #223.
-3. Branch convention: `.worktrees/` off latest `main`, random `wt/<hex>`
-   branch name (see `CLAUDE.md` → Git Worktrees). Full verification gate
-   before any PR: `gofmt -l .`, `go vet ./...`, `golangci-lint run`,
-   `go test -race -cover ./...`, `govulncheck ./...`.
+Follow the same conventions this batch established: capability interface in
+`tools.go`, draft-first `confirm` gate for writes, live-verify on a
+designated sandbox repo before opening the PR (do not use `freaxnx01/bridge`
+or `freaxnx01/agent-workflow` as a test target). Branch convention:
+`.worktrees/` off latest `main`, random `wt/<hex>` branch name (see
+`CLAUDE.md` → Git Worktrees). Full verification gate before any PR:
+`gofmt -l .`, `go vet ./...`, `golangci-lint run`, `go test -race -cover ./...`,
+`govulncheck ./...`.
