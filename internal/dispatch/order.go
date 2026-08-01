@@ -1,6 +1,7 @@
 package dispatch
 
 import (
+	"path"
 	"slices"
 	"strings"
 	"time"
@@ -17,7 +18,7 @@ type Candidate struct {
 	MilestoneDue time.Time
 }
 
-// typeRank maps an issue's labels to the ladder's second rung.
+// typeRank maps an issue's labels to the ladder's third rung.
 // Lower sorts first.
 func typeRank(labels []string) int {
 	for _, l := range labels {
@@ -34,7 +35,7 @@ func typeRank(labels []string) int {
 	return 2
 }
 
-// sizeRank maps size:s|m|l to the ladder's third rung. Unlabelled is "m",
+// sizeRank maps size:s|m|l to the ladder's fourth rung. Unlabelled is "m",
 // so an unsized issue never jumps ahead of a deliberate quick win.
 func sizeRank(labels []string) int {
 	for _, l := range labels {
@@ -50,11 +51,29 @@ func sizeRank(labels []string) int {
 	return 1
 }
 
-// Order sorts candidates by the deterministic ladder: milestone due date,
-// then type, then size, then age. It returns a new slice.
-func Order(cs []Candidate) []Candidate {
+// repoPriorityRank maps a repo to the ladder's first rung: the index of the
+// first pattern it matches, scanned in list order (path.Match glob syntax, so
+// a literal name matches only itself). A repo matching nothing ranks after
+// every configured entry; an empty list ranks every repo 0, which makes the
+// rung a no-op. A malformed pattern simply does not match — ordering must not
+// fail on a config typo.
+func repoPriorityRank(repo string, patterns []string) int {
+	for i, p := range patterns {
+		if ok, err := path.Match(p, repo); err == nil && ok {
+			return i
+		}
+	}
+	return len(patterns)
+}
+
+// Order sorts candidates by the deterministic ladder: repo priority, then
+// milestone due date, then type, then size, then age. It returns a new slice.
+func Order(cs []Candidate, repoPriority []string) []Candidate {
 	out := slices.Clone(cs)
 	slices.SortStableFunc(out, func(a, b Candidate) int {
+		if c := repoPriorityRank(a.Repo, repoPriority) - repoPriorityRank(b.Repo, repoPriority); c != 0 {
+			return c
+		}
 		if c := compareDue(a.MilestoneDue, b.MilestoneDue); c != 0 {
 			return c
 		}

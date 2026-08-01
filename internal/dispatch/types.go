@@ -20,6 +20,10 @@ type Schedule struct {
 type Config struct {
 	Limits   Limits   `json:"limits"`
 	Schedule Schedule `json:"schedule"`
+	// RepoPriority is an ordered list of repo-name patterns (path.Match glob
+	// syntax) driving the ordering ladder's first rung. Absent/empty skips
+	// the rung entirely, which is what keeps pre-existing configs unchanged.
+	RepoPriority []string `json:"repo_priority,omitempty"`
 }
 
 // State is the only local mutable state the dispatcher keeps. Everything else

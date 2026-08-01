@@ -10,7 +10,7 @@ A scheduled decision engine that selects enriched issues for the agent-workflow 
 - **bridge** owns the eligibility rules, dispatch caps, and ordering ladder.
 - **agent-workflow** owns model selection, the run pipeline, and per-model retry ticks.
 
-Each tick, dispatch reads open issues from every GitHub repo, applies eligibility filters, sorts by deadline/type/size/age, applies per-repo and global WIP caps, and labels the selected issues with `ai-implement` to let the pipeline pick them up. The dispatcher runs on a systemd timer (22:00 dispatch, hourly retries from 23:00 to 06:00) or manually via `bridge dispatch now`. Runs are **dry-run only** during the first week — the timer is not enabled until the decisions look right.
+Each tick, dispatch reads open issues from every GitHub repo, applies eligibility filters, sorts by repo priority/deadline/type/size/age, applies per-repo and global WIP caps, and labels the selected issues with `ai-implement` to let the pipeline pick them up. The dispatcher runs on a systemd timer (22:00 dispatch, hourly retries from 23:00 to 06:00) or manually via `bridge dispatch now`. Runs are **dry-run only** during the first week — the timer is not enabled until the decisions look right.
 
 ## Eligibility
 
@@ -27,12 +27,13 @@ The first failure reason is returned; dry-run uses this to explain every skip.
 
 ## Priority
 
-Issues are sorted by a four-rung ladder before applying caps:
+Issues are sorted by a five-rung ladder before applying caps:
 
-1. **Milestone due date** — Issues in milestones with earlier due dates sort first. Issues with no active milestone sort last.
-2. **Type** — Bug/fix issues (labels `bug` or `fix`, case-insensitive) sort first (rank 0), then feature issues (label `feat`, rank 1), then everything else (rank 2).
-3. **Size** — Issues labeled `size:s` sort first (rank 0), then `size:m` (rank 1), then `size:l` (rank 2). Unlabeled issues default to rank 1 (medium).
-4. **Age** — Older issues (earlier creation date) sort first within the same size bucket.
+1. **Repo priority** — If `repo_priority` is configured, a repo's rank is the index of the first pattern it matches (Go `path.Match` glob syntax — literal names match exactly; entries containing `*`, `?`, `[...]` match as patterns), scanned in list order. Repos matching no pattern sort after every configured entry. If `repo_priority` is unset or empty, this rung is skipped and ordering falls straight through to milestone due date, identical to the pre-existing behavior.
+2. **Milestone due date** — Issues in milestones with earlier due dates sort first. Issues with no active milestone sort last.
+3. **Type** — Bug/fix issues (labels `bug` or `fix`, case-insensitive) sort first (rank 0), then feature issues (label `feat`, rank 1), then everything else (rank 2).
+4. **Size** — Issues labeled `size:s` sort first (rank 0), then `size:m` (rank 1), then `size:l` (rank 2). Unlabeled issues default to rank 1 (medium).
+5. **Age** — Older issues (earlier creation date) sort first within the same size bucket.
 
 The sort is stable: equal-rank issues retain their input order.
 
@@ -108,7 +109,8 @@ Example with every key:
   "schedule": {
     "dispatch_at": "22:00",
     "retry_until": "06:00"
-  }
+  },
+  "repo_priority": ["agent-workflow", "ai-instructions", "*", "game-*"]
 }
 ```
 
@@ -120,6 +122,7 @@ Example with every key:
 | `limits.overrides` | object | {} | Per-repo overrides (key = bare repo name, value = per-repo WIP cap) |
 | `schedule.dispatch_at` | string | "22:00" | Time of day for the main dispatch tick (HH:MM, 24-hour format) |
 | `schedule.retry_until` | string | "06:00" | Last hour to run retry ticks; no ticks after this time |
+| `repo_priority` | array of strings | [] (rung skipped) | Ordered list of repo-name patterns (`path.Match` glob syntax); a repo's dispatch priority is the index of the first pattern it matches, scanned in order. Unmatched repos rank after every entry. Empty/absent disables this rung entirely |
 
 ## Running it
 
