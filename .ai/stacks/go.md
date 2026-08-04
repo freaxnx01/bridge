@@ -14,37 +14,13 @@ deliverable is a Go binary.
 
 ## Tech Stack
 
-| Layer | Technology |
-|---|---|
-| Language / toolchain | Go (latest stable), pinned in `go.mod` (`go 1.x`); Go modules only — no `GOPATH` or vendoring unless required |
-| CLI framework | [`spf13/cobra`](https://github.com/spf13/cobra) — command tree, flags, shell completion |
-| TUI | [Charm](https://github.com/charmbracelet) stack: `bubbletea` (Model-Update-View), `bubbles` (widgets), `lipgloss` (styling) |
-| HTTP services | Standard library `net/http` with the Go 1.22+ `ServeMux` (method + path patterns); a router (`chi`) only when middleware warrants it |
-| Logging | `log/slog` (structured) for diagnostics; `fmt.Fprintln(os.Stderr, …)` for user-facing CLI notices |
-| Configuration | Env vars (12-factor) + Cobra flags, folded into one config struct |
-| Testing | Standard library `testing`: table-driven tests, `t.Run` subtests, hand-rolled fakes. **No** `testify`, `mockery`, or `gomock` |
-| Lint / format | `golangci-lint` with a committed `.golangci.yml` (bundles `gofmt`/`goimports`, `go vet`, `staticcheck`, `errcheck`, …) |
-| Vulnerability scan | `govulncheck` (golang.org/x/vuln) in CI |
-| Build orchestration | [`just`](https://github.com/casey/just) recipes driving `go build` with `-ldflags` version injection; CI via GitHub Actions |
-| Release (optional) | `goreleaser` — only when multi-platform release artifacts are actually shipped, and only when the user asks |
+Go (latest stable, pinned in `go.mod`; modules only) · [`spf13/cobra`](https://github.com/spf13/cobra) for CLI · [Charm](https://github.com/charmbracelet) `bubbletea`/`bubbles`/`lipgloss` for TUI · stdlib `net/http` with the Go 1.22+ `ServeMux` · `log/slog` · stdlib `testing` with hand-rolled fakes — **no** `testify`/`mockery`/`gomock` · `golangci-lint` · `govulncheck` · `just` + GitHub Actions · `goreleaser` only on request.
+
+Full table and directory layout: [`.ai/references/go/tech-stack.md`](https://github.com/freaxnx01/ai-instructions/blob/main/.ai/references/go/tech-stack.md)
 
 ---
 
 ## Project Structure
-
-```text
-cmd/
-  <binary>/              ← one dir per binary; main package + Cobra root wiring only
-    main.go
-    root.go
-internal/                ← all non-public library code (the default home for logic)
-  <pkg>/                 ← cohesive packages, one responsibility each
-pkg/                     ← ONLY for code deliberately exported for external import
-tool/                    ← build/release helper scripts (build.sh, cross-compile, etc.)
-go.mod  go.sum
-.golangci.yml
-justfile
-```
 
 - **`internal/` is the default.** Anything not meant to be imported by another
   module goes here — the compiler enforces the boundary. Promote a package to
@@ -55,6 +31,8 @@ justfile
   its grab-bag of contents is two packages.
 - Package names are short, lower-case, no underscores or camelCase, and read
   well at the call site (`store.Open`, not `storepkg.OpenStore`).
+
+Directory tree: [`.ai/references/go/tech-stack.md`](https://github.com/freaxnx01/ai-instructions/blob/main/.ai/references/go/tech-stack.md)
 
 ---
 
@@ -208,95 +186,25 @@ For repos whose deliverable is an HTTP service (secondary to CLI/TUI):
 ## Testing
 
 Base TDD rules (tests first, never modify a test to pass, never stub logic to go
-green, run the full suite after changes, stop after 3 failed attempts) live in
-`base-instructions.md`. For this stack:
+green, run the full suite after changes) live in `base-instructions.md`. For this stack:
 
-### Layout & style
+- Tests are `*_test.go` beside the code — same package for white-box, `<pkg>_test`
+  for black-box; **table-driven with `t.Run` subtests** is the default shape
+- **Hand-rolled fakes only** — no `testify`, `mockery`, `gomock`, or any codegen mocks
+- Isolate with `t.TempDir()` / `t.Setenv()` / `t.Cleanup()`; golden files under
+  `testdata/` behind an `-update` flag guard
+- Name tests `TestFunc_StateUnderTest_ExpectedBehavior`
 
-- Tests are `*_test.go` next to the code, in the **same package** for white-box
-  tests or `<pkg>_test` for black-box/example tests. Prefer black-box for public
-  API tests.
-- **Table-driven** is the default shape:
+**TUI testing is two-tier and both tiers gate CI.** Tier 1 drives the `Model`
+in-process with Charm's `teatest` — the one sanctioned test helper beyond stdlib.
+Tier 2 runs the built binary in a real PTY via tmux and asserts on `capture-pane`.
 
-  ```go
-  func TestResolve_CaseInsensitivePrefix_ReturnsCanonical(t *testing.T) {
-      tests := []struct {
-          name, input, want string
-      }{
-          {"exact", "FlowHub", "FlowHub"},
-          {"lowercased", "flowhub", "FlowHub"},
-      }
-      for _, tt := range tests {
-          t.Run(tt.name, func(t *testing.T) {
-              got, err := Resolve(tt.input)
-              if err != nil {
-                  t.Fatalf("Resolve(%q): %v", tt.input, err)
-              }
-              if got != tt.want {
-                  t.Errorf("Resolve(%q) = %q, want %q", tt.input, got, tt.want)
-              }
-          })
-      }
-  }
-  ```
-
-- **Hand-rolled fakes only.** Define a small interface at the consumer and pass a
-  fake struct in tests. Do **not** add `testify`, `mockery`, `gomock`, or any
-  codegen mocking framework.
-- Use `t.TempDir()`, `t.Setenv()`, and `t.Cleanup()` — never leak files,
-  env state, or goroutines between tests. Scrub ambient env (e.g. `TMUX`,
-  `$HOME`-derived state) that would make a test environment-dependent.
-- **Golden files** for large expected outputs: store under `testdata/`, refresh
-  with an `-update` flag guard (`if *update { os.WriteFile(golden, got) }`).
-- `t.Parallel()` for independent tests, but only when they share no mutable
-  state; combine with `-race`.
-- Test naming follows the base idiom adapted to Go:
-  `TestFunc_StateUnderTest_ExpectedBehavior` (subtest names describe the case).
-
-### TUI testing (two tiers)
-
-Test TUIs at both levels; both gate CI.
-
-**Tier 1 — in-process `Model` (fast, the default).** Use Charm's `teatest`
-(`github.com/charmbracelet/x/exp/teatest`) — first-party to the TUI stack, not
-a mocking/assertion framework, so it's the one sanctioned test helper beyond
-stdlib. Drive the program with `tm.Send(...)` (keys/msgs), assert on the final
-model, and golden-file the rendered frames via `teatest.RequireEqualOutput`
-(refresh with `-update`). Most `Update`/`View` behaviour is covered here
-without a terminal.
-
-**Tier 2 — real PTY via tmux (true rendering).** Launch the built binary in a
-detached, isolated tmux session, `send-keys` to interact, `capture-pane` to
-"screenshot" the rendered screen. Rules that matter:
-
-- **Never launch in the foreground.** A Bubble Tea TUI runs in alt-screen/raw
-  mode and only exits on a quit key — a non-detached launch (`new-session`
-  without `-d`, or running the binary directly) blocks the turn forever.
-  Always `new-session -d`; every command returns instantly; guarantee teardown
-  with `trap '… kill-server' EXIT`.
-- **Isolate the socket** (`tmux -L <socket>`) so tests never touch ambient/real
-  tmux sessions; scrub `$TMUX` (base test rules). Nothing leaks.
-- **Size the pane** (`-x`/`-y`) for the layout — too small renders the fallback
-  and you "screenshot" the wrong thing.
-- **Wait for renders and `tea.Cmd`s** — sleep after launch and after each
-  send-keys; capturing too early grabs a half-painted frame.
-- **Drive with knowledge of the UI** — keys only do what the current state
-  allows (e.g. Enter-on-filter that opens only when one item matches needs a
-  *unique* filter). Point the binary at a fixture (`--base`).
-- **Deterministic fixtures beat real state** — build the world the UI reads
-  (e.g. a bare remote + worktrees in known states) so every cell is
-  reproducible and offline. Time/network-dependent sequences only verify if
-  you construct the conditions.
-
-```bash
-S=tuitest; trap "tmux -L $S kill-server 2>/dev/null" EXIT   # guaranteed cleanup
-tmux -L $S new-session -d -s t -x 215 -y 50 './bin/app --base "$FIXTURE"'
-sleep 1.5
-tmux -L $S capture-pane -p -t t                 # "screenshot" the live screen
-tmux -L $S send-keys -t t 'uniquefilter' Enter; sleep 0.5
-tmux -L $S capture-pane -p -t t                 # assert on snapshot
-tmux -L $S send-keys -t t 'q'                   # quit cleanly
-```
+- **Never launch a TUI in the foreground.** It runs in alt-screen/raw mode and only
+  exits on a quit key, so a non-detached launch **blocks the turn forever**. Always
+  `tmux -L <socket> new-session -d`, and guarantee teardown with
+  `trap '… kill-server' EXIT`.
+- Isolate the socket, size the pane, sleep between `send-keys` and `capture-pane`,
+  and drive from deterministic fixtures.
 
 ### Required after every change
 
@@ -304,6 +212,9 @@ tmux -L $S send-keys -t t 'q'                   # quit cleanly
 - `go vet ./...` clean
 - `golangci-lint run` clean
 - `go test -race ./...` passes the **full** suite, not just the new test
+
+Layout rules, the table-driven example, and the full tmux recipe:
+[`.ai/references/go/testing.md`](https://github.com/freaxnx01/ai-instructions/blob/main/.ai/references/go/testing.md)
 
 ---
 
