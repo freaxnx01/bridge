@@ -19,3 +19,4 @@ jobs:
       runner-labels: '["ubuntu-latest"]'
       default-model: claude-sonnet-5
       pipeline-ref: v1
+      pre-preview: true
