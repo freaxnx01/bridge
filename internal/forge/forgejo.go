@@ -552,3 +552,55 @@ func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) 
 	}
 	return out, nil
 }
+
+// GetIssue fetches a single issue's body plus its full comment thread, in
+// chronological order. Comment-count truncation is the MCP handler's job,
+// not the client's — this returns everything the forge has.
+func (c *ForgejoClient) GetIssue(ctx context.Context, owner, repo string, number int) (Issue, []Comment, error) {
+	var raw struct {
+		Number  int    `json:"number"`
+		Title   string `json:"title"`
+		HTMLURL string `json:"html_url"`
+		State   string `json:"state"`
+		Body    string `json:"body"`
+		Labels  []struct {
+			Name string `json:"name"`
+		} `json:"labels"`
+		UpdatedAt time.Time `json:"updated_at"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.get(ctx, path, &raw); err != nil {
+		return Issue{}, nil, err
+	}
+	labels := make([]string, 0, len(raw.Labels))
+	for _, l := range raw.Labels {
+		labels = append(labels, l.Name)
+	}
+	issue := Issue{
+		Forge: "forgejo", Repo: owner + "/" + repo,
+		Number: raw.Number, Title: raw.Title, URL: raw.HTMLURL,
+		State: raw.State, Body: raw.Body, Labels: labels,
+		Updated: raw.UpdatedAt, Created: raw.CreatedAt,
+	}
+
+	var rawComments []struct {
+		ID     int    `json:"id"`
+		Body   string `json:"body"`
+		Poster struct {
+			Login string `json:"login"`
+		} `json:"poster"`
+		CreatedAt time.Time `json:"created_at"`
+	}
+	commentsPath := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", owner, repo, number)
+	if err := c.get(ctx, commentsPath, &rawComments); err != nil {
+		return Issue{}, nil, err
+	}
+	comments := make([]Comment, 0, len(rawComments))
+	for _, rc := range rawComments {
+		comments = append(comments, Comment{
+			ID: rc.ID, Author: rc.Poster.Login, Body: rc.Body, Created: rc.CreatedAt,
+		})
+	}
+	return issue, comments, nil
+}
