@@ -962,3 +962,49 @@ func TestGithubRemoveLabel(t *testing.T) {
 		})
 	}
 }
+
+func TestGithubGetIssue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/freaxnx01/bridge/issues/235":
+			w.Write([]byte(`{"number":235,"title":"feat(mcp): get_issue","body":"the body","html_url":"u235","state":"open","labels":[{"name":"area:mcp"}],"updated_at":"2026-08-11T00:00:00Z","created_at":"2026-08-01T00:00:00Z"}`))
+		case "/repos/freaxnx01/bridge/issues/235/comments":
+			w.Write([]byte(`[{"id":1,"body":"first","user":{"login":"alice"},"created_at":"2026-08-02T00:00:00Z"},{"id":2,"body":"second","user":{"login":"bob"},"created_at":"2026-08-03T00:00:00Z"}]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	issue, comments, err := c.GetIssue(context.Background(), "freaxnx01", "bridge", 235)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Number != 235 || issue.Body != "the body" || issue.State != "open" || issue.Labels[0] != "area:mcp" {
+		t.Errorf("issue: %+v", issue)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("want 2 comments, got %d: %+v", len(comments), comments)
+	}
+	if comments[0].ID != 1 || comments[0].Body != "first" || comments[0].Author != "alice" {
+		t.Errorf("comment[0]: %+v", comments[0])
+	}
+	if comments[1].Author != "bob" {
+		t.Errorf("comment[1]: %+v", comments[1])
+	}
+}
+
+func TestGithubGetIssue_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	_, _, err := c.GetIssue(context.Background(), "freaxnx01", "bridge", 9999)
+	if err == nil {
+		t.Fatal("want error for a non-existent issue, got nil")
+	}
+}

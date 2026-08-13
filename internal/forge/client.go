@@ -93,6 +93,7 @@ type Issue struct {
 	Title     string    `json:"title"`
 	URL       string    `json:"url"`
 	State     string    `json:"state,omitempty"`
+	Body      string    `json:"body,omitempty"`
 	Labels    []string  `json:"labels,omitempty"`
 	Milestone string    `json:"milestone,omitempty"`
 	Updated   time.Time `json:"updated,omitempty"`
@@ -112,6 +113,7 @@ type TreeEntry struct {
 // Comment is a single issue comment.
 type Comment struct {
 	ID      int       `json:"id"`
+	Author  string    `json:"author,omitempty"`
 	Body    string    `json:"body"`
 	Created time.Time `json:"created,omitempty"`
 }
