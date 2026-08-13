@@ -95,6 +95,11 @@ type issueCommenter interface {
 	CommentIssue(ctx context.Context, owner, repo string, number int, body string) (forge.Comment, error)
 }
 
+// issueReader is asserted by get_issue.
+type issueReader interface {
+	GetIssue(ctx context.Context, owner, repo string, number int) (forge.Issue, []forge.Comment, error)
+}
+
 // repoArchiver and repoDeleter are tier-3/4 capability stubs: declared so
 // Capabilities' switch is complete before those tiers are implemented, but no
 // concrete client satisfies them yet.
@@ -149,6 +154,9 @@ func Capabilities(r ForgeReader) []string {
 	}
 	if _, ok := r.(issueCommenter); ok {
 		capabilities = append(capabilities, "comment_issue")
+	}
+	if _, ok := r.(issueReader); ok {
+		capabilities = append(capabilities, "get_issue")
 	}
 	if _, ok := r.(repoArchiver); ok {
 		capabilities = append(capabilities, "archive_repo")

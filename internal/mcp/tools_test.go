@@ -235,6 +235,20 @@ func (f *fakeRepoUpdater) SetTopics(_ context.Context, _, _ string, topics []str
 	return topics, nil
 }
 
+// fakeIssueReader supplies the issueReader capability.
+type fakeIssueReader struct {
+	issue    forge.Issue
+	comments []forge.Comment
+	err      error
+}
+
+func (f *fakeIssueReader) GetIssue(_ context.Context, _, _ string, _ int) (forge.Issue, []forge.Comment, error) {
+	if f.err != nil {
+		return forge.Issue{}, nil, f.err
+	}
+	return f.issue, f.comments, nil
+}
+
 // fakeFull has every capability — the GitHub/Forgejo shape.
 type fakeFull struct {
 	*fakeReader
@@ -244,6 +258,7 @@ type fakeFull struct {
 	*fakeRepos
 	*fakeRepoUpdater
 	*fakePutFile
+	*fakeIssueReader
 }
 
 // newFakeFull builds a fully capable client. Tests set fields on the embedded
@@ -258,6 +273,7 @@ func newFakeFull(name string) *fakeFull {
 		fakeRepos:       &fakeRepos{forgeName: name},
 		fakeRepoUpdater: &fakeRepoUpdater{forgeName: name},
 		fakePutFile:     &fakePutFile{fakeFiles: files},
+		fakeIssueReader: &fakeIssueReader{},
 	}
 }
 
@@ -308,7 +324,7 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			client: newFakeFull("github"),
 			want: []string{
 				"list_repos", "list_issues", "read_file", "put_file", "list_tree", "create_issue", "create_repo",
-				"update_repo", "close_issue", "update_issue", "add_labels", "comment_issue",
+				"update_repo", "close_issue", "update_issue", "add_labels", "comment_issue", "get_issue",
 			},
 		},
 	}
