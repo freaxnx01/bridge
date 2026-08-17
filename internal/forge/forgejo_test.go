@@ -4,9 +4,11 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strconv"
 	"testing"
 )
 
@@ -562,5 +564,83 @@ func TestForgejoGetIssue_NotFound(t *testing.T) {
 	_, _, err := c.GetIssue(context.Background(), "freax", "notes", 9999)
 	if err == nil {
 		t.Fatal("want error for a non-existent issue, got nil")
+	}
+}
+
+// TestForgejoGetIssue_PaginatesComments covers a thread with more comments
+// than a single API page (forgejoCommentsPageSize): GetIssue must keep
+// paging until the full thread is fetched, not silently drop everything
+// past page 1.
+func TestForgejoGetIssue_PaginatesComments(t *testing.T) {
+	const totalComments = forgejoCommentsPageSize + 5
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/freax/notes/issues/12":
+			w.Write([]byte(`{"number":12,"title":"fix(x)","body":"the body","html_url":"u12","state":"open"}`))
+		case "/api/v1/repos/freax/notes/issues/12/comments":
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			if r.URL.Query().Get("limit") != strconv.Itoa(forgejoCommentsPageSize) {
+				t.Errorf("limit: %q", r.URL.Query().Get("limit"))
+			}
+			start := (page - 1) * forgejoCommentsPageSize
+			end := start + forgejoCommentsPageSize
+			if end > totalComments {
+				end = totalComments
+			}
+			var out []map[string]any
+			for i := start; i < end; i++ {
+				out = append(out, map[string]any{
+					"id": i + 1, "body": fmt.Sprintf("comment %d", i+1),
+					"poster": map[string]string{"login": "alice"}, "created_at": "2026-08-02T00:00:00Z",
+				})
+			}
+			b, _ := json.Marshal(out)
+			w.Write(b)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("token", srv.URL)
+	_, comments, err := c.GetIssue(context.Background(), "freax", "notes", 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != totalComments {
+		t.Fatalf("want %d comments, got %d", totalComments, len(comments))
+	}
+	if comments[0].ID != 1 || comments[totalComments-1].ID != totalComments {
+		t.Errorf("comments out of order: first=%d last=%d", comments[0].ID, comments[totalComments-1].ID)
+	}
+}
+
+// TestForgejoGetIssue_ZeroCommentsReturnsEmptySliceNotNil guards the
+// getIssueOutput.Comments JSON contract: it has no omitempty, so a nil slice
+// would serialize as "comments":null instead of "comments":[].
+func TestForgejoGetIssue_ZeroCommentsReturnsEmptySliceNotNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/freax/notes/issues/12":
+			w.Write([]byte(`{"number":12,"title":"fix(x)","body":"the body","html_url":"u12","state":"open"}`))
+		case "/api/v1/repos/freax/notes/issues/12/comments":
+			w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("token", srv.URL)
+	_, comments, err := c.GetIssue(context.Background(), "freax", "notes", 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comments == nil {
+		t.Fatal("want a non-nil empty slice for zero comments, got nil")
+	}
+	if len(comments) != 0 {
+		t.Fatalf("want 0 comments, got %d", len(comments))
 	}
 }

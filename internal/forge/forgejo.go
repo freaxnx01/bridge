@@ -584,23 +584,46 @@ func (c *ForgejoClient) GetIssue(ctx context.Context, owner, repo string, number
 		Updated: raw.UpdatedAt, Created: raw.CreatedAt,
 	}
 
-	var rawComments []struct {
-		ID     int    `json:"id"`
-		Body   string `json:"body"`
-		Poster struct {
-			Login string `json:"login"`
-		} `json:"poster"`
-		CreatedAt time.Time `json:"created_at"`
-	}
-	commentsPath := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments", owner, repo, number)
-	if err := c.get(ctx, commentsPath, &rawComments); err != nil {
+	comments, err := c.listIssueComments(ctx, owner, repo, number)
+	if err != nil {
 		return Issue{}, nil, err
 	}
-	comments := make([]Comment, 0, len(rawComments))
-	for _, rc := range rawComments {
-		comments = append(comments, Comment{
-			ID: rc.ID, Author: rc.Poster.Login, Body: rc.Body, Created: rc.CreatedAt,
-		})
-	}
 	return issue, comments, nil
+}
+
+// forgejoCommentsPageSize is the page size requested per call to the
+// comments endpoint. Forgejo's server-default page size (commonly 30) is
+// smaller than this, so an explicit limit= is required on every call, not
+// just the first — otherwise a thread with more comments than the default
+// page silently loses everything past page 1.
+const forgejoCommentsPageSize = 50
+
+// listIssueComments fetches owner/repo#number's full comment thread across
+// as many pages as it takes (bounded by maxCommentPages), in chronological
+// order.
+func (c *ForgejoClient) listIssueComments(ctx context.Context, owner, repo string, number int) ([]Comment, error) {
+	comments := make([]Comment, 0)
+	for page := 1; page <= maxCommentPages; page++ {
+		var rawComments []struct {
+			ID     int    `json:"id"`
+			Body   string `json:"body"`
+			Poster struct {
+				Login string `json:"login"`
+			} `json:"poster"`
+			CreatedAt time.Time `json:"created_at"`
+		}
+		commentsPath := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d/comments?limit=%d&page=%d", owner, repo, number, forgejoCommentsPageSize, page)
+		if err := c.get(ctx, commentsPath, &rawComments); err != nil {
+			return nil, err
+		}
+		for _, rc := range rawComments {
+			comments = append(comments, Comment{
+				ID: rc.ID, Author: rc.Poster.Login, Body: rc.Body, Created: rc.CreatedAt,
+			})
+		}
+		if len(rawComments) < forgejoCommentsPageSize {
+			break
+		}
+	}
+	return comments, nil
 }

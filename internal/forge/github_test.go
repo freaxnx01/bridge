@@ -4,10 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"strconv"
 	"strings"
 	"testing"
 )
@@ -1006,5 +1008,82 @@ func TestGithubGetIssue_NotFound(t *testing.T) {
 	_, _, err := c.GetIssue(context.Background(), "freaxnx01", "bridge", 9999)
 	if err == nil {
 		t.Fatal("want error for a non-existent issue, got nil")
+	}
+}
+
+// TestGithubGetIssue_PaginatesComments covers a thread with more comments
+// than a single API page (githubCommentsPageSize): GetIssue must keep
+// paging until the full thread is fetched, not silently stop after page 1.
+func TestGithubGetIssue_PaginatesComments(t *testing.T) {
+	const totalComments = githubCommentsPageSize + 5
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/freaxnx01/bridge/issues/235":
+			w.Write([]byte(`{"number":235,"title":"feat(mcp): get_issue","body":"the body","html_url":"u235","state":"open"}`))
+		case "/repos/freaxnx01/bridge/issues/235/comments":
+			page, _ := strconv.Atoi(r.URL.Query().Get("page"))
+			if r.URL.Query().Get("per_page") != strconv.Itoa(githubCommentsPageSize) {
+				t.Errorf("per_page: %q", r.URL.Query().Get("per_page"))
+			}
+			start := (page - 1) * githubCommentsPageSize
+			end := start + githubCommentsPageSize
+			if end > totalComments {
+				end = totalComments
+			}
+			var out []map[string]any
+			for i := start; i < end; i++ {
+				out = append(out, map[string]any{
+					"id": i + 1, "body": fmt.Sprintf("comment %d", i+1),
+					"user": map[string]string{"login": "alice"}, "created_at": "2026-08-02T00:00:00Z",
+				})
+			}
+			b, _ := json.Marshal(out)
+			w.Write(b)
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	_, comments, err := c.GetIssue(context.Background(), "freaxnx01", "bridge", 235)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != totalComments {
+		t.Fatalf("want %d comments, got %d", totalComments, len(comments))
+	}
+	if comments[0].ID != 1 || comments[totalComments-1].ID != totalComments {
+		t.Errorf("comments out of order: first=%d last=%d", comments[0].ID, comments[totalComments-1].ID)
+	}
+}
+
+// TestGithubGetIssue_ZeroCommentsReturnsEmptySliceNotNil guards the
+// getIssueOutput.Comments JSON contract: it has no omitempty, so a nil slice
+// would serialize as "comments":null instead of "comments":[].
+func TestGithubGetIssue_ZeroCommentsReturnsEmptySliceNotNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/freaxnx01/bridge/issues/235":
+			w.Write([]byte(`{"number":235,"title":"feat(mcp): get_issue","body":"the body","html_url":"u235","state":"open"}`))
+		case "/repos/freaxnx01/bridge/issues/235/comments":
+			w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	_, comments, err := c.GetIssue(context.Background(), "freaxnx01", "bridge", 235)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comments == nil {
+		t.Fatal("want a non-nil empty slice for zero comments, got nil")
+	}
+	if len(comments) != 0 {
+		t.Fatalf("want 0 comments, got %d", len(comments))
 	}
 }
