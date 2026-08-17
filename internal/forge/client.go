@@ -110,6 +110,14 @@ type TreeEntry struct {
 	SHA  string `json:"sha"`
 }
 
+// maxCommentPages bounds GetIssue's comment pagination loop so a runaway
+// thread can't page forever: each forge stops once it has paged this many
+// times, even if the forge reports more comments remain. Comment-count
+// truncation to the newest handful is the MCP handler's job (see
+// maxIssueComments in internal/mcp/tools_read.go) — this is only a safety
+// backstop against unbounded API calls.
+const maxCommentPages = 20
+
 // Comment is a single issue comment.
 type Comment struct {
 	ID      int       `json:"id"`
