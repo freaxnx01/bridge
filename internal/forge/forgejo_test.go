@@ -615,3 +615,32 @@ func TestForgejoGetIssue_PaginatesComments(t *testing.T) {
 		t.Errorf("comments out of order: first=%d last=%d", comments[0].ID, comments[totalComments-1].ID)
 	}
 }
+
+// TestForgejoGetIssue_ZeroCommentsReturnsEmptySliceNotNil guards the
+// getIssueOutput.Comments JSON contract: it has no omitempty, so a nil slice
+// would serialize as "comments":null instead of "comments":[].
+func TestForgejoGetIssue_ZeroCommentsReturnsEmptySliceNotNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/freax/notes/issues/12":
+			w.Write([]byte(`{"number":12,"title":"fix(x)","body":"the body","html_url":"u12","state":"open"}`))
+		case "/api/v1/repos/freax/notes/issues/12/comments":
+			w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("token", srv.URL)
+	_, comments, err := c.GetIssue(context.Background(), "freax", "notes", 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comments == nil {
+		t.Fatal("want a non-nil empty slice for zero comments, got nil")
+	}
+	if len(comments) != 0 {
+		t.Fatalf("want 0 comments, got %d", len(comments))
+	}
+}

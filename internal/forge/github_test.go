@@ -1058,3 +1058,32 @@ func TestGithubGetIssue_PaginatesComments(t *testing.T) {
 		t.Errorf("comments out of order: first=%d last=%d", comments[0].ID, comments[totalComments-1].ID)
 	}
 }
+
+// TestGithubGetIssue_ZeroCommentsReturnsEmptySliceNotNil guards the
+// getIssueOutput.Comments JSON contract: it has no omitempty, so a nil slice
+// would serialize as "comments":null instead of "comments":[].
+func TestGithubGetIssue_ZeroCommentsReturnsEmptySliceNotNil(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/repos/freaxnx01/bridge/issues/235":
+			w.Write([]byte(`{"number":235,"title":"feat(mcp): get_issue","body":"the body","html_url":"u235","state":"open"}`))
+		case "/repos/freaxnx01/bridge/issues/235/comments":
+			w.Write([]byte(`[]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	_, comments, err := c.GetIssue(context.Background(), "freaxnx01", "bridge", 235)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comments == nil {
+		t.Fatal("want a non-nil empty slice for zero comments, got nil")
+	}
+	if len(comments) != 0 {
+		t.Fatalf("want 0 comments, got %d", len(comments))
+	}
+}

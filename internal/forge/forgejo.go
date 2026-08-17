@@ -602,7 +602,7 @@ const forgejoCommentsPageSize = 50
 // as many pages as it takes (bounded by maxCommentPages), in chronological
 // order.
 func (c *ForgejoClient) listIssueComments(ctx context.Context, owner, repo string, number int) ([]Comment, error) {
-	var comments []Comment
+	comments := make([]Comment, 0)
 	for page := 1; page <= maxCommentPages; page++ {
 		var rawComments []struct {
 			ID     int    `json:"id"`
