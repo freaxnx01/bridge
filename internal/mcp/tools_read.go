@@ -248,6 +248,51 @@ func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in l
 	return nil, listIssuesOutput{Issues: issues}, nil
 }
 
+// maxIssueComments bounds get_issue's comment payload. When a thread exceeds
+// it, the newest maxIssueComments comments are kept (thread order preserved)
+// and CommentsTruncated is set — no offset/limit pagination in this
+// iteration; see the design doc.
+const maxIssueComments = 20
+
+type getIssueInput struct {
+	Forge       string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner       string `json:"owner" jsonschema:"repository owner"`
+	Repo        string `json:"repo" jsonschema:"repository name"`
+	IssueNumber int    `json:"issue_number" jsonschema:"issue number"`
+}
+
+type getIssueOutput struct {
+	Issue             forge.Issue     `json:"issue"`
+	Comments          []forge.Comment `json:"comments"`
+	TotalComments     int             `json:"total_comments"`
+	CommentsTruncated bool            `json:"comments_truncated,omitempty"`
+}
+
+// handleGetIssue returns an issue's body and comment thread. Comments are
+// capped at the newest maxIssueComments; a thread over the cap sets
+// CommentsTruncated with TotalComments reporting the true count, in place of
+// implementing offset/limit pagination.
+func (d Deps) handleGetIssue(ctx context.Context, _ *mcp.CallToolRequest, in getIssueInput) (*mcp.CallToolResult, getIssueOutput, error) {
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return nil, getIssueOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+	reader, ok := client.(issueReader)
+	if !ok {
+		return nil, getIssueOutput{}, fmt.Errorf("forge %q does not support reading issues", in.Forge)
+	}
+	issue, comments, err := reader.GetIssue(ctx, in.Owner, in.Repo, in.IssueNumber)
+	if err != nil {
+		return nil, getIssueOutput{}, fmt.Errorf("get issue %s/%s#%d: %w", in.Owner, in.Repo, in.IssueNumber, err)
+	}
+	out := getIssueOutput{Issue: issue, Comments: comments, TotalComments: len(comments)}
+	if len(comments) > maxIssueComments {
+		out.Comments = comments[len(comments)-maxIssueComments:]
+		out.CommentsTruncated = true
+	}
+	return nil, out, nil
+}
+
 type listGitForgesInput struct{}
 
 // forgeStatus describes one configured (forge, owner) target. Capabilities and

@@ -36,6 +36,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleListIssues)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_issue",
+		Description: "Read a single issue's body and comment thread (author, body, created, in order). Comments are capped at the newest 20; comments_truncated + total_comments signal when more exist.",
+	}, deps.handleGetIssue)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_git_forges",
 		Description: "List the configured forge targets, whether each is configured, and which tools it supports. Makes no network requests.",
 	}, deps.handleListGitForges)

@@ -521,3 +521,46 @@ func TestForgejoCommentIssue(t *testing.T) {
 		t.Fatalf("comment.Created is zero, want populated from response")
 	}
 }
+
+func TestForgejoGetIssue(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/repos/freax/notes/issues/12":
+			w.Write([]byte(`{"number":12,"title":"fix(x)","body":"the body","html_url":"u12","state":"open","labels":[{"name":"bug"}],"updated_at":"2026-08-11T00:00:00Z","created_at":"2026-08-01T00:00:00Z"}`))
+		case "/api/v1/repos/freax/notes/issues/12/comments":
+			w.Write([]byte(`[{"id":1,"body":"first","poster":{"login":"alice"},"created_at":"2026-08-02T00:00:00Z"},{"id":2,"body":"second","poster":{"login":"bob"},"created_at":"2026-08-03T00:00:00Z"}]`))
+		default:
+			t.Errorf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("token", srv.URL)
+	issue, comments, err := c.GetIssue(context.Background(), "freax", "notes", 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if issue.Number != 12 || issue.Body != "the body" || issue.State != "open" || issue.Labels[0] != "bug" {
+		t.Errorf("issue: %+v", issue)
+	}
+	if len(comments) != 2 {
+		t.Fatalf("want 2 comments, got %d: %+v", len(comments), comments)
+	}
+	if comments[0].Author != "alice" || comments[1].Author != "bob" {
+		t.Errorf("comments: %+v", comments)
+	}
+}
+
+func TestForgejoGetIssue_NotFound(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusNotFound)
+		w.Write([]byte(`{"message":"Not Found"}`))
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("token", srv.URL)
+	_, _, err := c.GetIssue(context.Background(), "freax", "notes", 9999)
+	if err == nil {
+		t.Fatal("want error for a non-existent issue, got nil")
+	}
+}

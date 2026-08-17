@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -201,7 +202,7 @@ func TestHandleListTree_TierOneClientReportsUnsupportedNotUnconfigured(t *testin
 func TestHandleListTree_ClientErrorPropagatesWrapped(t *testing.T) {
 	sentinel := errors.New("boom")
 	gh := newFakeFull("github")
-	gh.err = sentinel
+	gh.fakeTree.err = sentinel
 	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
 
 	_, _, err := d.handleListTree(context.Background(), nil,
@@ -483,8 +484,8 @@ func TestHandleListGitForges_ReportsConfiguredAndUnconfiguredTargets(t *testing.
 	if configured.Reason != "" {
 		t.Errorf("a configured target must carry no reason, got %q", configured.Reason)
 	}
-	if len(configured.Capabilities) != 12 {
-		t.Errorf("a fully capable client must report 12 tools, got %v", configured.Capabilities)
+	if len(configured.Capabilities) != 13 {
+		t.Errorf("a fully capable client must report 13 tools, got %v", configured.Capabilities)
 	}
 
 	unconfigured := out.Forges[1]
@@ -541,8 +542,8 @@ func TestHandleListGitForges_ReadOnlyDropsWriteCapabilities(t *testing.T) {
 			t.Errorf("read-only must not advertise write tools, got %v", out.Forges[0].Capabilities)
 		}
 	}
-	if len(out.Forges[0].Capabilities) != 4 {
-		t.Errorf("want the 4 read tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 5 {
+		t.Errorf("want the 5 read tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 
@@ -560,8 +561,8 @@ func TestHandleListGitForges_ReadOnlyFalseKeepsWriteCapabilities(t *testing.T) {
 	if out.ReadOnly {
 		t.Error("read_only must be false when Deps.ReadOnly is false")
 	}
-	if len(out.Forges[0].Capabilities) != 12 {
-		t.Errorf("want all 12 tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 13 {
+		t.Errorf("want all 13 tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 
@@ -591,5 +592,100 @@ func TestHandleListGitForges_EmptyDefaultOwnersReturnsEmptyListNotNil(t *testing
 	// says the field is an empty array.
 	if out.Forges == nil {
 		t.Error("Forges must be an empty slice, not nil, so it marshals to [] not null")
+	}
+}
+
+func TestHandleGetIssue_ReturnsIssueAndComments(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.issue = forge.Issue{Forge: "github", Number: 235, Title: "t", Body: "b"}
+	gh.comments = []forge.Comment{
+		{ID: 1, Author: "alice", Body: "c1"},
+		{ID: 2, Author: "bob", Body: "c2"},
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleGetIssue(context.Background(), nil,
+		getIssueInput{Forge: "github", Owner: "o", Repo: "r", IssueNumber: 235})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Issue.Number != 235 || out.Issue.Body != "b" {
+		t.Errorf("issue: %+v", out.Issue)
+	}
+	if len(out.Comments) != 2 || out.TotalComments != 2 || out.CommentsTruncated {
+		t.Errorf("comments: %+v total=%d truncated=%v", out.Comments, out.TotalComments, out.CommentsTruncated)
+	}
+}
+
+func TestHandleGetIssue_TruncatesToNewest20(t *testing.T) {
+	gh := newFakeFull("github")
+	comments := make([]forge.Comment, 25)
+	for i := range comments {
+		comments[i] = forge.Comment{ID: i, Body: fmt.Sprintf("c%d", i)}
+	}
+	gh.comments = comments
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleGetIssue(context.Background(), nil,
+		getIssueInput{Forge: "github", Owner: "o", Repo: "r", IssueNumber: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Comments) != 20 {
+		t.Fatalf("want 20 comments, got %d", len(out.Comments))
+	}
+	if !out.CommentsTruncated {
+		t.Error("want CommentsTruncated=true for a 25-comment thread")
+	}
+	if out.TotalComments != 25 {
+		t.Errorf("want TotalComments=25, got %d", out.TotalComments)
+	}
+	// Newest 20 kept: comments[5] through comments[24], still in order.
+	if out.Comments[0].ID != 5 {
+		t.Errorf("want the oldest kept comment to be ID 5, got %d", out.Comments[0].ID)
+	}
+	if out.Comments[19].ID != 24 {
+		t.Errorf("want the newest kept comment to be ID 24, got %d", out.Comments[19].ID)
+	}
+}
+
+func TestHandleGetIssue_UnconfiguredForgeErrors(t *testing.T) {
+	d := depsWith(map[string]*fakeFull{}, nil)
+	_, _, err := d.handleGetIssue(context.Background(), nil,
+		getIssueInput{Forge: "bogus", Owner: "o", Repo: "r", IssueNumber: 1})
+	if err == nil {
+		t.Fatal("want error for unknown forge, got nil")
+	}
+	if !strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("want a not-configured error, got %v", err)
+	}
+}
+
+func TestHandleGetIssue_TierOneClientReportsUnsupportedNotUnconfigured(t *testing.T) {
+	d := Deps{ClientFor: func(string, string) ForgeReader { return &fakeReader{name: "gitlab"} }}
+
+	_, _, err := d.handleGetIssue(context.Background(), nil,
+		getIssueInput{Forge: "gitlab", Owner: "o", Repo: "r", IssueNumber: 1})
+
+	if err == nil {
+		t.Fatal("want an error for a client without GetIssue, got nil")
+	}
+	if strings.Contains(err.Error(), "not configured") {
+		t.Fatalf("a resolved but incapable client must not be reported as unconfigured: %v", err)
+	}
+	if !strings.Contains(err.Error(), "does not support") {
+		t.Fatalf("want a does-not-support error, got %v", err)
+	}
+}
+
+func TestHandleGetIssue_ClientErrorPropagates(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.fakeIssueReader.err = errors.New("404 not found")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleGetIssue(context.Background(), nil,
+		getIssueInput{Forge: "github", Owner: "o", Repo: "r", IssueNumber: 9999})
+	if err == nil {
+		t.Fatal("want error to propagate, got nil")
 	}
 }
