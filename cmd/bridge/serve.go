@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,25 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().IntVar(&servePort, "port", 7777, "port to listen on")
 	cmd.Flags().StringVar(&serveHost, "host", "127.0.0.1", "host to bind to")
 	return cmd
+}
+
+// requireBearer gates a handler behind a static bearer token. When token is
+// empty, auth is disabled and next is returned unchanged (dev/LAN default). When
+// set, requests must carry "Authorization: Bearer <token>" (constant-time
+// compared) or receive 401.
+func requireBearer(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := []byte(r.Header.Get("Authorization"))
+		if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
@@ -138,7 +158,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/overview", overviewH)
 	apiMux.Handle("/api/repos/", reposH)
 	apiMux.Handle("/api/repos", reposH)
-	apiMux.Handle("/api/capture/", captureH)
+	apiToken := os.Getenv("BRIDGE_API_TOKEN")
+	apiMux.Handle("/api/capture/", requireBearer(apiToken, captureH))
 	apiMux.Handle("/api/agents", agentsH)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.
