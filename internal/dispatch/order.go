@@ -27,8 +27,12 @@ func typeRank(labels []string) int {
 			return 0
 		}
 	}
+	// Three spellings for one rung: "feat" is the Conventional Commits type,
+	// "enhancement" is GitHub's default label, and "feature" is the common
+	// hand-typed variant. Matching only one silently sinks the others to rung 2.
 	for _, l := range labels {
-		if strings.ToLower(l) == "feat" {
+		switch strings.ToLower(l) {
+		case "feat", "feature", "enhancement":
 			return 1
 		}
 	}

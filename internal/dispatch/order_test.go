@@ -115,3 +115,28 @@ func numbers(cs []Candidate) []int {
 	}
 	return out
 }
+
+func TestTypeRank(t *testing.T) {
+	tests := []struct {
+		name   string
+		labels []string
+		want   int
+	}{
+		{"bug is rung 0", []string{"bug"}, 0},
+		{"fix is rung 0", []string{"fix"}, 0},
+		{"feat is rung 1", []string{"feat"}, 1},
+		{"feature is rung 1", []string{"feature"}, 1},
+		{"enhancement is rung 1", []string{"enhancement"}, 1},
+		{"enhancement is case-insensitive", []string{"Enhancement"}, 1},
+		{"chore falls through to rung 2", []string{"chore"}, 2},
+		{"no labels falls through to rung 2", nil, 2},
+		{"bug outranks enhancement regardless of order", []string{"enhancement", "bug"}, 0},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := typeRank(tt.labels); got != tt.want {
+				t.Errorf("typeRank(%v) = %d, want %d", tt.labels, got, tt.want)
+			}
+		})
+	}
+}
