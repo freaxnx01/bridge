@@ -14,6 +14,7 @@ type Repo struct {
 	Forge         string    `json:"forge"`
 	Owner         string    `json:"owner"`
 	Visibility    string    `json:"visibility"`
+	Alias         string    `json:"alias,omitempty"`
 	Topics        []string  `json:"topics,omitempty"`
 	Desc          string    `json:"desc,omitempty"`
 	DefaultBranch string    `json:"default_branch,omitempty"`
@@ -58,6 +59,7 @@ func DiscoverRepos(root string) ([]Repo, error) {
 						Forge:      "github",
 						Owner:      owner.Name(),
 						Visibility: vis,
+						Alias:      readBridgeAlias(repoPath),
 					})
 				}
 			}
@@ -94,6 +96,7 @@ func DiscoverRepos(root string) ([]Repo, error) {
 					Path:  repoPath,
 					Forge: "gitlab",
 					Owner: owner.Name(),
+					Alias: readBridgeAlias(repoPath),
 				})
 			}
 		}
@@ -120,6 +123,7 @@ func DiscoverRepos(root string) ([]Repo, error) {
 				Path:  repoPath,
 				Forge: "forgejo",
 				Owner: "freax",
+				Alias: readBridgeAlias(repoPath),
 			})
 		}
 		return nil
@@ -158,6 +162,7 @@ func DiscoverRepos(root string) ([]Repo, error) {
 					Path:  repoPath,
 					Forge: "ado",
 					Owner: project.Name(),
+					Alias: readBridgeAlias(repoPath),
 				})
 			}
 		}
