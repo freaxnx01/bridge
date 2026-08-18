@@ -3,6 +3,7 @@ package main
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -39,6 +40,25 @@ func newServeCmd() *cobra.Command {
 	cmd.Flags().IntVar(&servePort, "port", 7777, "port to listen on")
 	cmd.Flags().StringVar(&serveHost, "host", "127.0.0.1", "host to bind to")
 	return cmd
+}
+
+// requireBearer gates a handler behind a static bearer token. When token is
+// empty, auth is disabled and next is returned unchanged (dev/LAN default). When
+// set, requests must carry "Authorization: Bearer <token>" (constant-time
+// compared) or receive 401.
+func requireBearer(token string, next http.Handler) http.Handler {
+	if token == "" {
+		return next
+	}
+	want := []byte("Bearer " + token)
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got := []byte(r.Header.Get("Authorization"))
+		if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
+			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 func runServe(cmd *cobra.Command, _ []string) error {
@@ -81,42 +101,49 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	captureH := &api.CaptureHandler{
-		Idea: func(c context.Context, target, text string) (string, error) {
+		Idea: func(c context.Context, p api.IdeaParams) (string, error) {
 			repos, _ := discoverAllRoots()
-			tgt, err := resolveCaptureTarget(target, os.Getenv("BRIDGE_IDEAS_LAB_REPO"), repos)
-			if err != nil {
-				return "", err
+			var tgt capture.Target
+			if p.Alias != "" {
+				r, err := core.ResolveAlias(p.Alias, repos)
+				if err != nil {
+					return "", err // ErrAliasNotFound / ErrAliasAmbiguous → mapped by the handler
+				}
+				tgt = capture.Target{Owner: r.Owner, Repo: r.Name}
+			} else {
+				resolved, err := resolveCaptureTarget(p.Target, os.Getenv("BRIDGE_IDEAS_LAB_REPO"), repos)
+				if err != nil {
+					return "", err
+				}
+				tgt = resolved
 			}
 			tok, ok := remote.GitHubToken(reposRoots(), tgt.Owner)
 			if !ok {
 				return "", fmt.Errorf("no github token for owner %q", tgt.Owner)
 			}
-			return capture.CaptureIdea(c, forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API")), tgt, text, time.Now())
+			return capture.CaptureIdea(c, forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API")), tgt, p.Text, time.Now())
 		},
-		Issue: func(c context.Context, owner, repo, title string) (forge.Issue, error) {
+		Issue: func(c context.Context, p api.IssueParams) (forge.Issue, error) {
 			repos, _ := discoverAllRoots()
-			tgt, err := resolveIssueTarget(owner+"/"+repo, repos)
+			var owner, repo, forgeName string
+			if p.Alias != "" {
+				r, err := core.ResolveAlias(p.Alias, repos)
+				if err != nil {
+					return forge.Issue{}, err // ErrAliasNotFound / ErrAliasAmbiguous → mapped by the handler
+				}
+				owner, repo, forgeName = r.Owner, r.Name, r.Forge
+			} else {
+				tgt, err := resolveIssueTarget(p.Owner+"/"+p.Repo, repos)
+				if err != nil {
+					return forge.Issue{}, err
+				}
+				owner, repo, forgeName = tgt.Owner, tgt.Repo, tgt.Forge
+			}
+			creator, err := issueCreatorFor(forgeName, owner)
 			if err != nil {
 				return forge.Issue{}, err
 			}
-			var creator capture.IssueCreator
-			switch tgt.Forge {
-			case "github":
-				tok, ok := remote.GitHubToken(reposRoots(), tgt.Owner)
-				if !ok {
-					return forge.Issue{}, fmt.Errorf("no github token for owner %q", tgt.Owner)
-				}
-				creator = forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API"))
-			case "forgejo":
-				tok, ok := remote.ForgejoToken(reposRoots())
-				if !ok {
-					return forge.Issue{}, fmt.Errorf("no forgejo token")
-				}
-				creator = forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API"))
-			default:
-				return forge.Issue{}, fmt.Errorf("forge %q not supported for issue capture", tgt.Forge)
-			}
-			return capture.CaptureIssue(c, creator, tgt.Owner, tgt.Repo, title)
+			return capture.CaptureIssue(c, creator, owner, repo, p.Title, p.Body)
 		},
 		Notify: notify,
 	}
@@ -131,7 +158,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/overview", overviewH)
 	apiMux.Handle("/api/repos/", reposH)
 	apiMux.Handle("/api/repos", reposH)
-	apiMux.Handle("/api/capture/", captureH)
+	apiToken := os.Getenv("BRIDGE_API_TOKEN")
+	apiMux.Handle("/api/capture/", requireBearer(apiToken, captureH))
 	apiMux.Handle("/api/agents", agentsH)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.

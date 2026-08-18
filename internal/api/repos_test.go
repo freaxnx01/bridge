@@ -14,7 +14,28 @@ import (
 
 func fakeRepos() []core.Repo {
 	return []core.Repo{
-		{Owner: "alice", Name: "myrepo", Forge: "github"},
+		{Owner: "alice", Name: "myrepo", Forge: "github", Alias: "mr"},
+	}
+}
+
+func TestReposHandler_List_SerializesAlias(t *testing.T) {
+	h := &ReposHandler{Discover: func() ([]core.Repo, error) { return fakeRepos(), nil }}
+	r := httptest.NewRequest(http.MethodGet, "/api/repos", nil)
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, r)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+	if !strings.Contains(w.Body.String(), `"alias":"mr"`) {
+		t.Errorf("response body missing alias: %s", w.Body.String())
+	}
+	var got []core.Repo
+	if err := json.NewDecoder(w.Body).Decode(&got); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(got) != 1 || got[0].Alias != "mr" {
+		t.Errorf("alias did not round-trip: %+v", got)
 	}
 }
 

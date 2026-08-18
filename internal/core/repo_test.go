@@ -99,3 +99,30 @@ func TestRepoTypeZeroLastUsed(t *testing.T) {
 		t.Errorf("zero LastUsed expected")
 	}
 }
+
+func TestDiscoverRepos_SetsAliasFromBridgeYAML(t *testing.T) {
+	root := t.TempDir()
+	// github/<owner>/public/<repo> layout with a .git dir and a .bridge.yaml.
+	repoPath := filepath.Join(root, "github", "freaxnx01", "public", "demo")
+	if err := os.MkdirAll(filepath.Join(repoPath, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	writeBridgeYAML(t, repoPath, "alias: demo\n")
+
+	repos, err := DiscoverRepos(root)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var found *Repo
+	for i := range repos {
+		if repos[i].Name == "demo" {
+			found = &repos[i]
+		}
+	}
+	if found == nil {
+		t.Fatalf("repo 'demo' not discovered in %v", repos)
+	}
+	if found.Alias != "demo" {
+		t.Fatalf("Alias = %q, want %q", found.Alias, "demo")
+	}
+}
