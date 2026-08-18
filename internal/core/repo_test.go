@@ -113,16 +113,17 @@ func TestDiscoverRepos_SetsAliasFromBridgeYAML(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	var found *Repo
+	found := -1
 	for i := range repos {
 		if repos[i].Name == "demo" {
-			found = &repos[i]
+			found = i
+			break
 		}
 	}
-	if found == nil {
+	if found < 0 {
 		t.Fatalf("repo 'demo' not discovered in %v", repos)
 	}
-	if found.Alias != "demo" {
-		t.Fatalf("Alias = %q, want %q", found.Alias, "demo")
+	if repos[found].Alias != "demo" {
+		t.Fatalf("Alias = %q, want %q", repos[found].Alias, "demo")
 	}
 }
