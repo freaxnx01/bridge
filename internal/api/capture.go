@@ -58,7 +58,7 @@ func (h *CaptureHandler) captureIdea(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "text and either alias or target are required")
 		return
 	}
-	url, err := h.Idea(r.Context(), IdeaParams{Target: req.Target, Alias: req.Alias, Text: req.Text})
+	url, err := h.Idea(r.Context(), IdeaParams(req))
 	if err != nil {
 		writeCaptureError(w, err)
 		return
@@ -87,13 +87,7 @@ func (h *CaptureHandler) captureIssue(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "title and either alias or owner+repo are required")
 		return
 	}
-	issue, err := h.Issue(r.Context(), IssueParams{
-		Owner: req.Owner,
-		Repo:  req.Repo,
-		Alias: req.Alias,
-		Title: req.Title,
-		Body:  req.Body,
-	})
+	issue, err := h.Issue(r.Context(), IssueParams(req))
 	if err != nil {
 		writeCaptureError(w, err)
 		return
