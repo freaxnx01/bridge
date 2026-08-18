@@ -155,7 +155,7 @@ func TestCaptureIssue_TrimsAndCreates(t *testing.T) {
 		ret: forge.Issue{Forge: "github", Repo: "freaxnx01/bridge", Number: 142,
 			Title: "flicker", URL: "https://github.com/freaxnx01/bridge/issues/142"},
 	}
-	got, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "  flicker  ")
+	got, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "  flicker  ", "")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -170,9 +170,26 @@ func TestCaptureIssue_TrimsAndCreates(t *testing.T) {
 	}
 }
 
+func TestCaptureIssue_ForwardsBody(t *testing.T) {
+	fake := &fakeIssueCreator{ret: forge.Issue{Number: 7, URL: "https://forge/issues/7"}}
+	got, err := CaptureIssue(context.Background(), fake, "freaxnx01", "bridge", "  Login 500  ", "detail body")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if fake.gotTitle != "Login 500" {
+		t.Fatalf("title = %q", fake.gotTitle)
+	}
+	if fake.gotBody != "detail body" {
+		t.Fatalf("body = %q, want %q", fake.gotBody, "detail body")
+	}
+	if got.Number != 7 {
+		t.Fatalf("issue = %+v", got)
+	}
+}
+
 func TestCaptureIssue_EmptyTitleRejected(t *testing.T) {
 	w := &fakeIssueCreator{}
-	if _, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "   "); err == nil {
+	if _, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "   ", ""); err == nil {
 		t.Errorf("empty title must error")
 	}
 }

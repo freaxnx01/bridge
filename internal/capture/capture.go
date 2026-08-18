@@ -77,15 +77,14 @@ type IssueCreator interface {
 	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
 }
 
-// CaptureIssue creates a title-only issue on the chosen repo's forge and
-// returns the created Issue. The body is always empty by design (title-only
-// capture); a future ergonomics step can add an optional body.
-func CaptureIssue(ctx context.Context, w IssueCreator, owner, repo, title string) (forge.Issue, error) {
+// CaptureIssue creates an issue on the chosen repo's forge and returns the
+// created Issue. body is passed through to the forge as-is.
+func CaptureIssue(ctx context.Context, w IssueCreator, owner, repo, title, body string) (forge.Issue, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return forge.Issue{}, fmt.Errorf("empty issue title")
 	}
-	return w.CreateIssue(ctx, owner, repo, title, "")
+	return w.CreateIssue(ctx, owner, repo, title, body)
 }
 
 // slug turns idea text into a filename-safe slug (lowercase, non-alnum -> "-",

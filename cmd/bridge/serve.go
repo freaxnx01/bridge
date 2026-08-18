@@ -116,7 +116,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			default:
 				return forge.Issue{}, fmt.Errorf("forge %q not supported for issue capture", tgt.Forge)
 			}
-			return capture.CaptureIssue(c, creator, tgt.Owner, tgt.Repo, title)
+			return capture.CaptureIssue(c, creator, tgt.Owner, tgt.Repo, title, "")
 		},
 		Notify: notify,
 	}

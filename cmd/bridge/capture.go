@@ -119,7 +119,7 @@ func runCaptureIssue(cmd *cobra.Command, args []string) error {
 	default:
 		return fmt.Errorf("forge %q is not supported for issue capture", tgt.Forge)
 	}
-	is, err := capture.CaptureIssue(cmd.Context(), creator, tgt.Owner, tgt.Repo, title)
+	is, err := capture.CaptureIssue(cmd.Context(), creator, tgt.Owner, tgt.Repo, title, "")
 	if err != nil {
 		return err
 	}
