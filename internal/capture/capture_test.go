@@ -163,7 +163,7 @@ func TestCaptureIssue_TrimsAndCreates(t *testing.T) {
 		t.Errorf("title not trimmed: %q", w.gotTitle)
 	}
 	if w.gotBody != "" {
-		t.Errorf("body must be empty (title-only capture), got %q", w.gotBody)
+		t.Errorf("empty body is forwarded as-is, got %q", w.gotBody)
 	}
 	if got.Number != 142 || got.URL == "" {
 		t.Errorf("returned issue: %+v", got)

@@ -148,3 +148,31 @@ func TestCaptureIdea_AliasHappyPath(t *testing.T) {
 		t.Fatalf("code=%d params=%+v", w.Code, got)
 	}
 }
+
+func TestCaptureIdea_UnknownAlias_Returns404(t *testing.T) {
+	h := &CaptureHandler{
+		Idea: func(_ context.Context, _ IdeaParams) (string, error) {
+			return "", core.ErrAliasNotFound
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/capture/idea", strings.NewReader(`{"alias":"nope","text":"x"}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("status = %d", w.Code)
+	}
+}
+
+func TestCaptureIdea_AmbiguousAlias_Returns409(t *testing.T) {
+	h := &CaptureHandler{
+		Idea: func(_ context.Context, _ IdeaParams) (string, error) {
+			return "", core.ErrAliasAmbiguous
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/capture/idea", strings.NewReader(`{"alias":"br","text":"x"}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+	if w.Code != http.StatusConflict {
+		t.Fatalf("status = %d", w.Code)
+	}
+}
