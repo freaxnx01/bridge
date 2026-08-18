@@ -74,6 +74,28 @@ func resolveIssueTarget(target string, repos []core.Repo) (issueTarget, error) {
 	return issueTarget{Owner: match.Owner, Repo: match.Name, Forge: match.Forge}, nil
 }
 
+// issueCreatorFor picks the right forge client (with its token) for creating an
+// issue on the given forge/owner. Shared by the CLI and the WebUI capture paths
+// so both the alias and owner/repo flows select the client identically.
+func issueCreatorFor(forgeName, owner string) (capture.IssueCreator, error) {
+	switch forgeName {
+	case "github":
+		tok, ok := remote.GitHubToken(reposRoots(), owner)
+		if !ok {
+			return nil, fmt.Errorf("no github token for owner %q (need an .envrc GH_TOKEN with repo scope)", owner)
+		}
+		return forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API")), nil
+	case "forgejo":
+		tok, ok := remote.ForgejoToken(reposRoots())
+		if !ok {
+			return nil, fmt.Errorf("no forgejo token (need a git-forgejo .envrc with FORGEJO_TOKEN)")
+		}
+		return forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API")), nil
+	default:
+		return nil, fmt.Errorf("forge %q is not supported for issue capture", forgeName)
+	}
+}
+
 var captureIssueCmd = &cobra.Command{
 	Use:   "issue",
 	Short: "Capture an issue (title from stdin) on a chosen repo",
@@ -102,22 +124,9 @@ func runCaptureIssue(cmd *cobra.Command, args []string) error {
 	if title == "" {
 		return fmt.Errorf("no title on stdin")
 	}
-	var creator capture.IssueCreator
-	switch tgt.Forge {
-	case "github":
-		tok, ok := remote.GitHubToken(reposRoots(), tgt.Owner)
-		if !ok {
-			return fmt.Errorf("no github token for owner %q (need an .envrc GH_TOKEN with repo scope)", tgt.Owner)
-		}
-		creator = forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API"))
-	case "forgejo":
-		tok, ok := remote.ForgejoToken(reposRoots())
-		if !ok {
-			return fmt.Errorf("no forgejo token (need a git-forgejo .envrc with FORGEJO_TOKEN)")
-		}
-		creator = forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API"))
-	default:
-		return fmt.Errorf("forge %q is not supported for issue capture", tgt.Forge)
+	creator, err := issueCreatorFor(tgt.Forge, tgt.Owner)
+	if err != nil {
+		return err
 	}
 	is, err := capture.CaptureIssue(cmd.Context(), creator, tgt.Owner, tgt.Repo, title, "")
 	if err != nil {
