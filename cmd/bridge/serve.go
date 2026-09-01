@@ -85,7 +85,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 
 	reposH := &api.ReposHandler{
-		Discover: func() ([]core.Repo, error) { return discoverAllRoots() },
+		// reposWithMeta, not discoverAllRoots: discovery alone leaves Desc and Topics
+		// empty, because those live in the repo-meta.json cache rather than on disk in
+		// the clone. GET /api/repos is what FlowHub's Skills:Bridge catalogue reads, and
+		// its repo inference matches on name + description — served un-enriched, every
+		// description is blank and inference silently degrades to name-only matching.
+		Discover: reposWithMeta,
 		Issues: func(c context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
 			cl := clientFor(forgeName)
 			if cl == nil {
@@ -102,7 +107,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	captureH := &api.CaptureHandler{
 		Idea: func(c context.Context, p api.IdeaParams) (string, error) {
-			repos, _ := discoverAllRoots()
+			repos, _ := reposWithMeta()
 			var tgt capture.Target
 			if p.Alias != "" {
 				r, err := core.ResolveAlias(p.Alias, repos)
@@ -124,7 +129,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return capture.CaptureIdea(c, forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API")), tgt, p.Text, time.Now())
 		},
 		Issue: func(c context.Context, p api.IssueParams) (forge.Issue, error) {
-			repos, _ := discoverAllRoots()
+			repos, _ := reposWithMeta()
 			var owner, repo, forgeName string
 			if p.Alias != "" {
 				r, err := core.ResolveAlias(p.Alias, repos)
