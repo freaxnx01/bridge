@@ -430,3 +430,49 @@ func TestViewPicker_HintLine_AdvertisesCtrlRRefresh(t *testing.T) {
 		t.Errorf("picker hint should advertise both r and ^r for refresh; got:\n%s", out)
 	}
 }
+
+func TestView_Dash_FrameHeightStable_AcrossWorktreeSelection(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge"}
+	m.dashRows = []dashRow{
+		{worktree: "sparse", branch: "wt-sparse", path: "/r/sparse"},
+		{worktree: "busy", branch: "wt-busy", path: "/r/busy"},
+	}
+	m.details = map[string]*worktreeDetails{
+		"/r/sparse": {
+			branches:      []branchInfo{{name: "main", current: true}},
+			commits:       []commitInfo{{sha: "abc1234", subject: "init"}},
+			branchesState: loadOK,
+			commitsState:  loadOK,
+			statusState:   loadOK,
+		},
+		"/r/busy": {
+			branches: []branchInfo{
+				{name: "main"}, {name: "wt-busy", current: true}, {name: "wt-a"},
+				{name: "wt-b"}, {name: "wt-c"}, {name: "wt-d"},
+			},
+			commits: []commitInfo{
+				{sha: "aaa1111", subject: "one"}, {sha: "bbb2222", subject: "two"},
+				{sha: "ccc3333", subject: "three"}, {sha: "ddd4444", subject: "four"},
+			},
+			status: []statusFile{
+				{code: "M ", path: "a.go"}, {code: "??", path: "b.go"}, {code: "M ", path: "c.go"},
+			},
+			branchesState: loadOK,
+			commitsState:  loadOK,
+			statusState:   loadOK,
+		},
+	}
+
+	m.dashSel = 0
+	sparse := lipgloss.Height(m.View())
+
+	m.dashSel = 1
+	busy := lipgloss.Height(m.View())
+
+	if sparse != busy {
+		t.Errorf("dashboard frame height changed with selection: sparse-worktree=%d lines, busy-worktree=%d lines", sparse, busy)
+	}
+}
