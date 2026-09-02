@@ -316,6 +316,7 @@ func (m Model) viewDash() string {
 		headerTitle += "  " + stAccent.Render("✎ "+m.notesNames())
 	}
 	header := panel(w, headerTitle, stMuted.Render(m.repo.Path))
+	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · ? legend · esc back · q quit")
 
 	var body string
 	if w < dashTwoColMin {
@@ -341,14 +342,17 @@ func (m Model) viewDash() string {
 			}
 			return m.backlogColumn(rightW, h)
 		}
-		// Stretch the shorter column so both close their bottom border on the
-		// same line: render each at natural height, take the taller, re-render.
-		h := max(lipgloss.Height(panel(leftW, "Sessions & Worktrees", listBody)), lipgloss.Height(rightAt(0)))
+		// Height budget from terminal size + fixed chrome (header/hint), NOT from
+		// either column's natural content height — detailColumn's natural height
+		// depends on the *selected* worktree's branch/commit/status data, which
+		// would otherwise make the frame resize every time the cursor moves.
+		h := m.height - lipgloss.Height(header) - lipgloss.Height(hint)
+		if h < 3 {
+			h = 3
+		}
 		left := panelH(leftW, h, "Sessions & Worktrees", listBody)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, left, rightAt(h))
 	}
-
-	hint := m.hintLine("↑↓ move · tab panes · ⏎ attach/launch · n new worktree · ? legend · esc back · q quit")
 
 	out := header + "\n" + body + "\n" + hint
 	if m.modal != nil {
