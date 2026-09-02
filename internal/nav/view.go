@@ -398,7 +398,9 @@ func (m Model) dashListBody(compact bool) string {
 				dot, name, trunc(r.branch, 14), agent, la, m.dirtyView(r))
 		}
 		if i == m.dashSel && m.dashFocus == dashFocusWorktrees {
-			line = stSel.Render(line)
+			line = stSel.Render(stAccent.Render("▸ ") + line)
+		} else {
+			line = "  " + line
 		}
 		b.WriteString(line + "\n")
 	}

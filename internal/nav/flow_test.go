@@ -220,6 +220,29 @@ func TestDashListBody_BaseRowDetachedUsesRepoName(t *testing.T) {
 	}
 }
 
+func TestDashListBody_SelectedRowUsesAccentMarker(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.dashFocus = dashFocusWorktrees
+	m.dashSel = 1
+	m.dashRows = []dashRow{
+		{isBase: true, branch: "main", path: "/r", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+		{worktree: "fix", branch: "worktree-fix", path: "/r/.worktrees/fix", dirtyState: loadOK, dirty: dirtyInfo{clean: true}},
+	}
+	body := m.dashListBody(false)
+	lines := strings.Split(body, "\n")
+	if !strings.Contains(lines[1], "▸ ") {
+		t.Errorf("selected row should contain accent marker \"▸ \":\n%s", lines[1])
+	}
+	if strings.HasPrefix(stripANSI(lines[0]), "▸ ") {
+		t.Errorf("unselected row should not have accent marker:\n%s", lines[0])
+	}
+	if !strings.HasPrefix(stripANSI(lines[0]), "  ·") {
+		t.Errorf("unselected row should have two-space gutter before dot glyph:\n%s", lines[0])
+	}
+}
+
 func TestFlow_Dashboard_BaseRowPinned_Golden(t *testing.T) {
 	s := newSession(t, Config{})
 	s.m.screen = screenDash
