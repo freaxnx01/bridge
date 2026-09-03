@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/overview"
 )
 
@@ -59,6 +60,9 @@ type Model struct {
 }
 
 func initialModel(cfg Config) Model {
+	if cfg.Backend == nil {
+		cfg.Backend = launcher.NewBackend()
+	}
 	ti := textinput.New()
 	ti.Placeholder = "filter…"
 	ti.Prompt = "filter: "
@@ -81,7 +85,7 @@ func (m Model) Init() tea.Cmd {
 	cmds := []tea.Cmd{
 		m.spin.Tick,
 		loadLocalReposCmd(m.cfg.ReposRoots),
-		loadSessionsCmd(m.cfg.SlotsPath),
+		loadSessionsCmd(m.cfg.Backend, m.cfg.SlotsPath),
 		loadRemoteCmd(m.cfg.RemoteCache),
 	}
 	if m.cfg.RecentPath != "" {

@@ -13,6 +13,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/gitauth"
+	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
@@ -48,9 +49,9 @@ func loadRecentCmd(path string) tea.Cmd {
 	}
 }
 
-func loadSessionsCmd(slotsPath string) tea.Cmd {
+func loadSessionsCmd(b launcher.Backend, slotsPath string) tea.Cmd {
 	return func() tea.Msg {
-		live, _ := core.LiveSessions()
+		live, _ := b.Live()
 		slots, _ := core.LoadSlots(slotsPath)
 		return sessionsMsg{rows: buildSessionRows(live, slots, time.Now())}
 	}
@@ -115,12 +116,12 @@ func registerSlotCmd(slotsPath string, slot core.Slot) tea.Cmd {
 	}
 }
 
-func loadDashRowsCmd(repo core.Repo, slotsPath string) tea.Cmd {
+func loadDashRowsCmd(b launcher.Backend, repo core.Repo, slotsPath string) tea.Cmd {
 	return func() tea.Msg {
 		wts, _ := worktree.List(worktree.ExecRunner{}, repo.Path)
 		primary, _ := worktree.Primary(worktree.ExecRunner{}, repo.Path)
 		slots, _ := core.LoadSlots(slotsPath)
-		live, _ := core.LiveSessions()
+		live, _ := b.Live()
 		return dashRowsMsg{rows: buildDashRows(repo, primary.Branch, wts, slots, live, time.Now())}
 	}
 }
