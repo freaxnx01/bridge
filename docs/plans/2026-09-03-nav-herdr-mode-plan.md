@@ -10,6 +10,8 @@
 
 **Spec:** [`docs/specs/2026-09-03-nav-herdr-mode-design.md`](../specs/2026-09-03-nav-herdr-mode-design.md)
 
+**Issue:** [#260](https://github.com/freaxnx01/bridge/issues/260)
+
 ## Global Constraints
 
 - **No new Go modules.** Everything here is stdlib plus packages already in `go.mod`. Do not add a JSON library, an assertion library, or a mocking library.
