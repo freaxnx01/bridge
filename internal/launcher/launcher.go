@@ -1,5 +1,7 @@
-// Package launcher constructs the argv that the parent shell should exec
-// to land the user inside a session.
+// Package launcher starts agent sessions. It constructs the argv that a parent
+// shell should exec to land the user inside a tmux (or Windows Terminal)
+// session, and defines the Backend seam that lets another multiplexer — see
+// internal/herdr — host those sessions instead.
 package launcher
 
 import "github.com/freaxnx01/bridge/internal/agents"
