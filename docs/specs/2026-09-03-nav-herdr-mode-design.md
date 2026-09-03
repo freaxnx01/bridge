@@ -93,10 +93,22 @@ The herdr backend is **not** behind a build tag. `tmux.go` is `//go:build
 choices; Herdr selection is a *runtime* choice, so the package compiles on
 every GOOS and is selected by env.
 
-### The seam: `nav.Backend`
+### The seam: `launcher.Backend`
 
-nav defines the interface it consumes, per the Go overlay's *accept interfaces,
-define them at the consumer*. In `internal/nav/types.go`:
+**Correction to an earlier draft of this spec.** The seam was first specified
+as `nav.Backend`, with `Plan` also living in `internal/nav`. That forces
+`internal/herdr` to import `internal/nav` — a ~7,500-line Bubble Tea package —
+for two type declarations, dragging the whole TUI into the backend's dependency
+graph and making the backend impossible to test without it.
+
+Instead the seam lives in **`internal/launcher`**, which already owns "how do
+we start a session". Its package doc widens from *constructs argv* to *starts
+sessions*; `Tmux` and `WT` keep their argv methods unchanged and gain a thin
+`Backend` wrapper around them. `internal/herdr` then imports only `launcher`,
+`core` and `agents`; `internal/nav` refers to `launcher.Backend`; and no new
+package is introduced. Import direction stays one-way with no cycle.
+
+In `internal/launcher/backend.go`:
 
 ```go
 // Backend is the session backend nav launches into. A nil Config.Backend
@@ -105,9 +117,9 @@ type Backend interface {
     // Launch prepares a launch of spec in dir under the given slot. It must be
     // idempotent: a slot that is already live resolves to the same result as
     // Attach.
-    Launch(slot, dir string, spec agents.AgentSpec) (LaunchPlan, error)
+    Launch(slot, dir string, spec agents.AgentSpec) (Plan, error)
     // Attach prepares focusing/attaching the existing session for slot.
-    Attach(slot string) (LaunchPlan, error)
+    Attach(slot string) (Plan, error)
     // Live returns the sessions this backend currently has, each carrying the
     // slot id everything downstream matches on.
     Live() ([]core.Session, error)
@@ -119,25 +131,36 @@ today, so **nav's existing agent resolution, `NameArgs` labelling and slot-id
 derivation in `launchPlan` are untouched** — only `launcher.New()` becomes
 `m.cfg.Backend`.
 
-### `LaunchPlan`: exec-or-run without a flag argument
+`launcher.NewBackend()` returns the default tmux/WT backend: `Launch` and
+`Attach` wrap the existing `LaunchArgv`/`AttachArgv` into an `ExecPlan`, and
+`Live` delegates to `core.LiveSessions()`. Today's behaviour therefore travels
+through the new seam unchanged, which is what makes it testable against the
+existing tmux expectations.
+
+### `launcher.Plan`: exec-or-run without a flag argument
 
 A tmux launch replaces nav's terminal; a Herdr launch does not. That is a sum
 type, and Go's idiomatic encoding is a struct with unexported alternatives plus
 constructors, so the invariant cannot be broken by a caller:
 
 ```go
-// LaunchPlan is one prepared launch. Exactly one alternative is set; the two
+// Plan is one prepared launch. Exactly one alternative is set; the two
 // constructors are the only way to build a valid value.
-type LaunchPlan struct {
+type Plan struct {
     exec []string                    // tmux/WT: hand nav's terminal over
     run  func(context.Context) error // herdr: run out-of-band, nav survives
 }
 
 // ExecPlan is a launch that replaces nav's terminal (tmux, Windows Terminal).
-func ExecPlan(argv []string) LaunchPlan { return LaunchPlan{exec: argv} }
+func ExecPlan(argv []string) Plan { return Plan{exec: argv} }
 
 // RunPlan is a launch performed out-of-band; nav stays on screen.
-func RunPlan(fn func(context.Context) error) LaunchPlan { return LaunchPlan{run: fn} }
+func RunPlan(fn func(context.Context) error) Plan { return Plan{run: fn} }
+
+// Argv and Run expose the alternatives to the runner without letting a caller
+// construct an invalid Plan: exactly one is non-empty/non-nil.
+func (p Plan) Argv() []string                  { return p.exec }
+func (p Plan) Run() func(context.Context) error { return p.run }
 ```
 
 Deliberately **not** `(argv []string, isExec bool, err error)` — a boolean that
@@ -159,12 +182,19 @@ New package `internal/herdr`, wrapping the `herdr` CLI (`$HERDR_BIN_PATH`,
 falling back to `herdr` on `PATH`). Every command returns JSON on stdout;
 responses are decoded into typed structs, never string-matched.
 
-The `agent list`, `tab list`, `pane list`, `workspace list` and `agent get`
-response shapes below were verified against the live CLI. The **`tab create`**
-and **`agent start`** shapes (`.result.root_pane.pane_id`, `.result.tab.tab_id`)
-come from Herdr's own skill documentation and are *not* yet verified — both are
-mutating commands that would have littered the live session. Capturing them is
-the first task of the implementation plan, before any parsing code is written.
+The `agent list`, `tab list`, `pane list`, `workspace list`, `agent get` and
+`tab create` response shapes were verified against the live CLI; `tab create`
+was probed with a throwaway `--no-focus` tab that was closed immediately, and
+confirms `.result.root_pane.pane_id`, `.result.tab.tab_id` and that `--label`
+round-trips into `.result.tab.label`.
+
+Only **`agent start`** remains unverified — probing it would have launched a
+real agent. Its risk is low: the backend needs only success-versus-error from
+it, which is carried by the exit code and the shared `{"id":…,"result":…}`
+envelope, not by any field unique to that response. The implementation plan
+carries every verified payload verbatim so the parsers can be built and tested
+with **no Herdr server present** — which is what lets this ship through the
+agent-workflow CI pipeline.
 
 **`Launch(slot, dir, spec)`**
 
@@ -226,6 +256,11 @@ key — see discovery below.
 `ErrNoSession` sentinel when nothing matches, which `Launch` treats as "create".
 
 **`Live()`** — `herdr agent list`, then map each agent to a `core.Session`.
+Entries are keyed on the presence of the `agent` field, not on `agent_status`:
+a pane with no agent reports `agent_status: "unknown"`, which is also a real
+state for a pane that *does* host an unclassifiable agent. Verified against the
+live CLI — a freshly created tab's root pane comes back as
+`{"agent_status":"unknown", …}` with no `agent` key.
 
 ### Discovery: cwd → slot id
 
@@ -325,12 +360,11 @@ default:
 // Backend is the session backend nav launches into and reads live sessions
 // from. Nil selects the tmux/Windows-Terminal default. Injected by cmd/bridge
 // so internal/nav stays free of backend selection.
-Backend Backend
+Backend launcher.Backend
 ```
 
-`internal/nav` gains a small default implementation wrapping today's behaviour
-(`launcher.New()` + `core.LiveSessions()`), so `Model` never branches on nil:
-`initialModel` substitutes it once when `cfg.Backend == nil`.
+`initialModel` substitutes `launcher.NewBackend()` once when
+`cfg.Backend == nil`, so `Model` never branches on nil afterwards.
 
 Call sites changed in nav, all mechanical:
 
