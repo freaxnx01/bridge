@@ -277,6 +277,15 @@ switches gain cases:
 
 - `internal/nav/view.go:372` — dashboard worktree list
 
+And the legend must follow. `legendEntries` (`internal/nav/view.go:44`) is the
+declared single source for every rendered status glyph, and
+`TestLegend_CoversAuditedGlyphs` **fails the build** if a glyph changes without
+the table and that test's expected set being updated together. The Herdr
+statuses therefore need their own entries — notably `●` in `stWarn` for
+"agent blocked (needs input)", which is a glyph/style combination the legend
+does not currently carry. Missing this is a build break, not a cosmetic
+omission.
+
 `Session.LastActivity` stays the zero value in Herdr mode. Consequences,
 both accepted:
 
