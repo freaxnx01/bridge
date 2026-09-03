@@ -7,7 +7,7 @@ Herdr session, it launches coding agents as **Herdr tabs** instead of wrapping
 them in tmux — making them first-class, Herdr-recognized agents rather than
 opaque panes running tmux.
 
-Source issue: none yet (design-first; file before implementation).
+Source issue: [#260](https://github.com/freaxnx01/bridge/issues/260).
 
 ## Problem
 
