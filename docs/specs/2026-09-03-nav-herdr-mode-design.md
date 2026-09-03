@@ -159,20 +159,45 @@ New package `internal/herdr`, wrapping the `herdr` CLI (`$HERDR_BIN_PATH`,
 falling back to `herdr` on `PATH`). Every command returns JSON on stdout;
 responses are decoded into typed structs, never string-matched.
 
+The `agent list`, `tab list`, `pane list`, `workspace list` and `agent get`
+response shapes below were verified against the live CLI. The **`tab create`**
+and **`agent start`** shapes (`.result.root_pane.pane_id`, `.result.tab.tab_id`)
+come from Herdr's own skill documentation and are *not* yet verified — both are
+mutating commands that would have littered the live session. Capturing them is
+the first task of the implementation plan, before any parsing code is written.
+
 **`Launch(slot, dir, spec)`**
 
 1. `Attach(slot)` first — if an agent is already live for this slot, return
    that plan. This is the `tmux new-session -A` idempotency that Herdr does not
    provide: `herdr tab create` *always* creates, so without this every Enter on
    a live row spawns a duplicate tab.
-2. `herdr tab create --cwd <dir> --label <slot> --no-focus` → read
-   `.result.root_pane.pane_id`.
-3. `herdr agent start <name> --kind <kind> --pane <pane_id> -- <spec.Args...>`.
-4. `herdr tab focus <tab_id>`.
+2. `herdr tab create --workspace <ws> --cwd <dir> --label <slot> --no-focus` →
+   read `.result.root_pane.pane_id`.
+3. Wait for that pane to reach an interactive prompt (see below).
+4. `herdr agent start <name> --kind <kind> --pane <pane_id> -- <spec.Args...>`.
+5. `herdr tab focus <tab_id>`.
 
-Steps 2–4 run inside the returned `RunPlan` closure, not while building it, so
+Steps 2–5 run inside the returned `RunPlan` closure, not while building it, so
 nav can render a `starting <agent> in <repo>…` status while they execute and
 the `context.Context` bounds them.
+
+**Workspace is pinned, not inherited.** `herdr tab create` without
+`--workspace` lands in the *focused* workspace, which may belong to another
+Herdr client. The backend always passes nav's own `$HERDR_WORKSPACE_ID`, so the
+new tab is deterministic regardless of where the user's focus happens to be.
+
+**Pane readiness (step 3).** `herdr agent start` requires a pane already at its
+interactive prompt with no foreground command; a freshly created pane is still
+running shell init. That matters concretely here — the shell profile loads
+`direnv`, which can delay the prompt past the first attempt. This is a distinct
+failure from `agent_not_ready` (which means the agent *did* launch and is
+blocked) and needs a distinct remedy: the backend retries `agent start` with
+bounded exponential backoff, ~5 attempts inside a 10 s budget, before giving up
+and reporting the failure to nav's status line. The tab is left in place so the
+user lands in a correct-directory shell rather than nothing. (`pane
+wait-output` on a prompt pattern was considered and rejected: it would need to
+know the user's prompt string, which bridge has no business guessing.)
 
 **Agent kind.** `agents.AgentSpec.Name` maps to a Herdr kind. `claude`,
 `copilot` and `opencode` are all in Herdr's kind list verbatim. `code` (VS
@@ -365,6 +390,14 @@ in the PR.
 Gates, as ever: `gofmt -l .` empty, `go vet ./...`, `golangci-lint run`,
 `go test -race ./...`.
 
+## Documentation
+
+`BRIDGE_LAUNCHER` is a new user-facing setting, so per CLAUDE.md's
+Configuration rules it is documented in `README.md` alongside
+`BRIDGE_DEFAULT_AGENT`, with its precedence (explicit value → `HERDR_ENV`
+autodetection → tmux default) stated explicitly. `CHANGELOG.md` gains an
+`[Unreleased] / Added` entry.
+
 ## Risks
 
 - **Herdr CLI drift.** The backend depends on `herdr`'s JSON field names. The
@@ -376,6 +409,13 @@ Gates, as ever: `gofmt -l .` empty, `go vet ./...`, `golangci-lint run`,
 - **`agent start` latency.** It blocks until Herdr detects the agent, default
   30 s timeout. Running inside the `RunPlan` closure keeps nav responsive, and
   nav shows a status line for the duration.
+
+- **Worktrees outside `.worktrees/`.** `SlotIDForPath` inverts bridge's
+  standard layout, so a worktree created by hand somewhere else maps to no slot
+  id and shows no session — where tmux discovery, going through `slots.json`,
+  would have found it. Bridge-created worktrees are always under `.worktrees/`
+  (CLAUDE.md), so this only affects hand-created ones. Accepted; a `slots.json`
+  cross-check is a cheap follow-up if it ever bites.
 
 - **Slot-id collision across roots.** Two repos with the same basename under
   different roots map to the same slot id. This is pre-existing (`core.SlotID`
@@ -389,3 +429,10 @@ Gates, as ever: `gofmt -l .` empty, `go vet ./...`, `golangci-lint run`,
 3. WebUI / `internal/api/repos.go` session data under Herdr
 4. Herdr-mode e2e tier using an isolated `herdr --session` server
 5. Status-rank sort for dashboard rows in Herdr mode
+6. Workspace-per-repo topology. This session's only workspace is labelled
+   `bridge`, hinting the user may treat a Herdr workspace as a project. If so,
+   "workspace per repo, tab per slot" is a better shape than "tab per slot in
+   the current workspace". Evidence is weak (one workspace may simply mean one
+   active project), so this cycle keeps tabs in nav's own workspace and revisits
+   after real use.
+7. `slots.json` cross-check in `Live()` to catch worktrees outside `.worktrees/`
