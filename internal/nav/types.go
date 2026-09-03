@@ -8,6 +8,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/overview"
 )
 
@@ -211,7 +212,11 @@ type Config struct {
 	RecentPath   string
 	DefaultAgent string // BRIDGE_DEFAULT_AGENT ("" => no auto-launch agent; nav uses claude)
 	AgentArgs    []string
-	Clone        func(ref forge.RepoRef) (core.Repo, error)
+	// Backend is the session backend nav launches into and reads live sessions
+	// from. Nil selects the tmux/Windows-Terminal default. Injected by
+	// cmd/bridge so internal/nav stays free of backend selection.
+	Backend launcher.Backend
+	Clone   func(ref forge.RepoRef) (core.Repo, error)
 	// CreateRepo creates a repo on the named forge (forgejo|github) at the given
 	// visibility, clones it, and returns the local repo. Nil disables Ctrl+N.
 	CreateRepo func(name, forgeName string, private bool) (core.Repo, error)

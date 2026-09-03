@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
@@ -136,9 +137,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case execDoneMsg:
 		// Returned from a detached tmux attach/launch: refresh the screen we're on.
 		if m.screen == screenDash {
-			return m, loadDashRowsCmd(m.repo, m.cfg.SlotsPath)
+			return m, loadDashRowsCmd(m.cfg.Backend, m.repo, m.cfg.SlotsPath)
 		}
-		return m, loadSessionsCmd(m.cfg.SlotsPath)
+		return m, loadSessionsCmd(m.cfg.Backend, m.cfg.SlotsPath)
 	case slotRegisteredMsg:
 		return m, nil
 
@@ -436,7 +437,12 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		case "enter":
 			if m.sessionSel >= 0 && m.sessionSel < len(m.sessions) {
 				if sl := m.sessions[m.sessionSel].slotID; sl != "" {
-					return m, execArgvCmd(launcher.New().AttachArgv(sl))
+					plan, err := m.cfg.Backend.Attach(sl)
+					if err != nil {
+						m.status = err.Error()
+						return m, nil
+					}
+					return m, runPlanCmd(plan)
 				}
 			}
 		}
@@ -612,7 +618,7 @@ func (m Model) updateDash(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.screen = screenPicker
 		m.pickerFocus = focusList
-		return m, loadSessionsCmd(m.cfg.SlotsPath)
+		return m, loadSessionsCmd(m.cfg.Backend, m.cfg.SlotsPath)
 	case "tab":
 		return m.cycledDashFocus(1), nil
 	case "shift+tab":
@@ -844,7 +850,7 @@ func (m Model) enterDash(repo core.Repo) (tea.Model, tea.Cmd) {
 	m.todosScroll = 0
 	m.notesState = loadPending
 	m.status = "ready"
-	cmds := []tea.Cmd{loadDashRowsCmd(repo, m.cfg.SlotsPath), loadNotesCmd(repo.Path)}
+	cmds := []tea.Cmd{loadDashRowsCmd(m.cfg.Backend, repo, m.cfg.SlotsPath), loadNotesCmd(repo.Path)}
 	if c := m.repoIssuesCmd(repo); c != nil {
 		m.issuesState = loadPending
 		cmds = append(cmds, c)
@@ -868,10 +874,11 @@ func (m Model) repoIssuesCmd(repo core.Repo) tea.Cmd {
 
 // launchPlan decides attach-vs-launch for a row. For a new session it returns
 // the slot to register; for an attach it returns slot == "".
-func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err error) {
-	l := launcher.New()
+func (m Model) launchPlan(row dashRow) (plan launcher.Plan, slot, agent string, err error) {
+	b := m.cfg.Backend
 	if row.hasSession && row.slotID != "" {
-		return l.AttachArgv(row.slotID), "", "", nil
+		plan, err = b.Attach(row.slotID)
+		return plan, "", "", err
 	}
 	agent = m.cfg.DefaultAgent
 	if agent == "" {
@@ -879,7 +886,7 @@ func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err e
 	}
 	spec, err := agents.Resolve(agent)
 	if err != nil {
-		return nil, "", "", err
+		return launcher.Plan{}, "", "", err
 	}
 	if m.cfg.NameArgs != nil {
 		if na := m.cfg.NameArgs(agent, m.repo, row.worktree, row.displayLabel); len(na) > 0 {
@@ -890,31 +897,30 @@ func (m Model) launchPlan(row dashRow) (argv []string, slot, agent string, err e
 		spec.Args = append(append([]string{}, spec.Args...), m.cfg.AgentArgs...)
 	}
 	slot = core.SlotID(m.repo.Name, row.worktree)
-	// nav runs the launch through tea.ExecProcess (it owns the terminal), so it
-	// nests tmux directly via `new-session -A` rather than emitting a
-	// switch-client directive like the shell open path (issue #114). $TMUX is
-	// cleared in launchRow so the nested attach is permitted.
-	argv, err = l.LaunchArgv(slot, row.path, spec)
+	// The backend decides whether this replaces nav's terminal (tmux nests
+	// directly via `new-session -A`; $TMUX is cleared in runPlanCmd) or runs
+	// out-of-band leaving nav on screen (Herdr).
+	plan, err = b.Launch(slot, row.path, spec)
 	if err != nil {
-		return nil, "", "", err
+		return launcher.Plan{}, "", "", err
 	}
-	return argv, slot, agent, nil
+	return plan, slot, agent, nil
 }
 
-// launchArgvFor returns the argv to attach an existing session, or to create +
-// launch the default agent in a session-less worktree.
+// launchArgvFor returns the argv of an exec plan for a row, for tests and
+// callers that assert on the tmux command line. A run plan has no argv.
 func (m Model) launchArgvFor(row dashRow) ([]string, error) {
-	argv, _, _, err := m.launchPlan(row)
-	return argv, err
+	plan, _, _, err := m.launchPlan(row)
+	return plan.Argv(), err
 }
 
 func (m Model) launchRow(row dashRow) (tea.Model, tea.Cmd) {
-	argv, slot, agent, err := m.launchPlan(row)
+	plan, slot, agent, err := m.launchPlan(row)
 	if err != nil {
 		m.status = err.Error()
 		return m, nil
 	}
-	exe := execArgvCmd(argv)
+	exe := runPlanCmd(plan)
 	if slot == "" {
 		return m, exe // attaching an already-registered session
 	}
@@ -989,9 +995,15 @@ func (m Model) cyclePickerFocus() Model {
 	return m
 }
 
-// execArgvCmd runs argv via tea.ExecProcess with $TMUX cleared so a tmux
-// attach/new-session nests under the current server (see launchRow / issue #114).
-func execArgvCmd(argv []string) tea.Cmd {
+// runPlanCmd turns a launcher.Plan into a tea.Cmd. An exec plan runs through
+// tea.ExecProcess with $TMUX cleared, so a nested tmux attach is permitted and
+// nav's terminal is handed over. A run plan executes out-of-band and nav stays
+// rendered — the Herdr path, where the agent lands in its own tab.
+func runPlanCmd(plan launcher.Plan) tea.Cmd {
+	if run := plan.Run(); run != nil {
+		return func() tea.Msg { return execDoneMsg{err: run(context.Background())} }
+	}
+	argv := plan.Argv()
 	if len(argv) == 0 {
 		return nil
 	}
