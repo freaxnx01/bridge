@@ -511,12 +511,10 @@ func TestSessionDot_BlockedIsVisuallyDistinctFromWorking(t *testing.T) {
 	if stWarn.GetForeground() == stOk.GetForeground() {
 		t.Fatal("stWarn and stOk share a foreground; sessionDot cannot make blocked visually distinct")
 	}
-	if sessionDot("blocked") == sessionDot("working") && stWarn.Render("●") == stOk.Render("●") {
-		// Colorless render (no TTY): the rendered strings are equal but the
-		// styles differ — the check that matters is above.
-		return
-	}
-	if sessionDot("blocked") == sessionDot("working") {
+	// With a color profile the glyphs must actually differ. Without one every
+	// Render is a no-op, so equal strings prove nothing and the style check
+	// above is the whole test.
+	if stWarn.Render("●") != stOk.Render("●") && sessionDot("blocked") == sessionDot("working") {
 		t.Error("a blocked agent needs the user; it must not render like a working one")
 	}
 }
