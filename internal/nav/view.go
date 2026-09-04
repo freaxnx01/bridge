@@ -36,6 +36,26 @@ type legendEntry struct {
 	group   string
 }
 
+// sessionDot maps a session state to its styled glyph. It is the single place
+// a state becomes a dot, shared by the picker's Active-sessions panel and the
+// dashboard's worktree list. Every glyph it can return must have an entry in
+// legendEntries below.
+//
+// tmux reports attached/detached; Herdr reports its agent lifecycle
+// (working/idle/blocked/done/unknown). Both vocabularies land here.
+func sessionDot(state string) string {
+	switch state {
+	case "attached", "working":
+		return stOk.Render("●")
+	case "blocked":
+		return stWarn.Render("●")
+	case "detached", "idle", "done":
+		return stMuted.Render("○")
+	default:
+		return stMuted.Render("·")
+	}
+}
+
 // legendEntries documents every status glyph the picker/dashboard render. It
 // is the single source viewLegend renders from, and is guarded by
 // TestLegend_CoversAuditedGlyphs: adding, removing, or changing an entry here
@@ -43,8 +63,9 @@ type legendEntry struct {
 // change a rendered status glyph, update this table (and the primary
 // render site's comment pointing back here).
 var legendEntries = []legendEntry{
-	{"●", stOk, "session attached", "Session"},
-	{"○", stMuted, "session detached", "Session"},
+	{"●", stOk, "session attached (tmux) · agent working (Herdr)", "Session"},
+	{"●", stWarn, "agent blocked — waiting on you (Herdr)", "Session"},
+	{"○", stMuted, "session detached (tmux) · agent idle or done (Herdr)", "Session"},
 	{"·", stMuted, "no session (dashboard row)", "Session"},
 
 	{"●N", stBad, "N modified/changed files", "Git status"},
@@ -223,10 +244,7 @@ func (m Model) viewPicker() string {
 	if len(m.sessions) > 0 {
 		var b strings.Builder
 		for i, s := range m.sessions {
-			dot := stMuted.Render("○")
-			if s.state == "attached" {
-				dot = stOk.Render("●")
-			}
+			dot := sessionDot(s.state)
 			line := fmt.Sprintf("%s %-24s %-16s %-8s %s",
 				dot, trunc(s.repoLabel, 24), trunc(s.worktree, 16), s.agent, s.lastAccessed)
 			if m.pickerFocus == focusSessions && i == m.sessionSel {
@@ -367,13 +385,7 @@ func (m Model) viewDash() string {
 func (m Model) dashListBody(compact bool) string {
 	var b strings.Builder
 	for i, r := range m.dashRows {
-		dot := stMuted.Render("·")
-		switch r.state {
-		case "attached":
-			dot = stOk.Render("●")
-		case "detached":
-			dot = stMuted.Render("○")
-		}
+		dot := sessionDot(r.state)
 		agent := r.agent
 		if agent == "" {
 			agent = "—"

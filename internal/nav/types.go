@@ -67,7 +67,7 @@ type sessionRow struct {
 	repoLabel    string
 	worktree     string
 	agent        string
-	state        string // attached | detached
+	state        string // tmux: attached|detached · Herdr: working|idle|blocked|done|unknown
 	lastAccessed string
 }
 
@@ -78,7 +78,7 @@ type dashRow struct {
 	path         string
 	agent        string // "" when no live session
 	slotID       string // "" when no live session
-	state        string // attached | detached | ""
+	state        string // tmux: attached|detached · Herdr: working|idle|blocked|done|unknown · "" when no session
 	lastAccessed string // "" when no live session
 	hasSession   bool
 	dirty        dirtyInfo

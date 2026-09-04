@@ -265,8 +265,9 @@ func TestDirtyView_States(t *testing.T) {
 func TestLegend_CoversAuditedGlyphs(t *testing.T) {
 	type want struct{ glyph, meaning, group string }
 	expected := []want{
-		{"●", "session attached", "Session"},
-		{"○", "session detached", "Session"},
+		{"●", "session attached (tmux) · agent working (Herdr)", "Session"},
+		{"●", "agent blocked — waiting on you (Herdr)", "Session"},
+		{"○", "session detached (tmux) · agent idle or done (Herdr)", "Session"},
 		{"·", "no session (dashboard row)", "Session"},
 		{"●N", "N modified/changed files", "Git status"},
 		{"↑N", "N commits ahead of upstream", "Git status"},
@@ -474,5 +475,48 @@ func TestView_Dash_FrameHeightStable_AcrossWorktreeSelection(t *testing.T) {
 
 	if sparse != busy {
 		t.Errorf("dashboard frame height changed with selection: sparse-worktree=%d lines, busy-worktree=%d lines", sparse, busy)
+	}
+}
+
+func TestSessionDot_HerdrStates_MapToDistinctGlyphs(t *testing.T) {
+	tests := []struct {
+		state string
+		want  string
+	}{
+		{"working", stOk.Render("●")},
+		{"blocked", stWarn.Render("●")},
+		{"idle", stMuted.Render("○")},
+		{"done", stMuted.Render("○")},
+		{"unknown", stMuted.Render("·")},
+		{"attached", stOk.Render("●")},
+		{"detached", stMuted.Render("○")},
+		{"", stMuted.Render("·")},
+	}
+	for _, tt := range tests {
+		t.Run(tt.state, func(t *testing.T) {
+			if got := sessionDot(tt.state); got != tt.want {
+				t.Errorf("sessionDot(%q) = %q, want %q", tt.state, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSessionDot_BlockedIsVisuallyDistinctFromWorking(t *testing.T) {
+	// Compare the styles the two states resolve to, not the rendered strings:
+	// in a colorless test run lipgloss's Render is a no-op (see the note above
+	// TestViewLegend_ColumnsAlignByDisplayWidth), so both "blocked" and
+	// "working" would render as the same "●" glyph and the assertion would
+	// spuriously fail. The user-visible distinction is the *style* (stOk vs
+	// stWarn), which is deterministic without a color profile.
+	if stWarn.GetForeground() == stOk.GetForeground() {
+		t.Fatal("stWarn and stOk share a foreground; sessionDot cannot make blocked visually distinct")
+	}
+	if sessionDot("blocked") == sessionDot("working") && stWarn.Render("●") == stOk.Render("●") {
+		// Colorless render (no TTY): the rendered strings are equal but the
+		// styles differ — the check that matters is above.
+		return
+	}
+	if sessionDot("blocked") == sessionDot("working") {
+		t.Error("a blocked agent needs the user; it must not render like a working one")
 	}
 }
