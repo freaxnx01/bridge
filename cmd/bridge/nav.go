@@ -30,7 +30,7 @@ var navCmd = &cobra.Command{
 			RecentPath:   filepath.Join(cacheRoot(), "mru"),
 			DefaultAgent: os.Getenv("BRIDGE_DEFAULT_AGENT"),
 			AgentArgs:    strings.Fields(os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS")),
-			Backend:      selectBackend(os.Getenv),
+			Backend:      selectBackend(os.Getenv, os.Stderr),
 			Version:      version,
 			DebugKeys:    navDebugPath(),
 			Once:         navOnce,
