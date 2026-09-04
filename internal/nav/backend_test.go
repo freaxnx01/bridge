@@ -156,14 +156,17 @@ func TestUpdate_ExecDoneMsgWithError_ShowsItInTheStatusLine(t *testing.T) {
 	}
 }
 
-func TestUpdate_ExecDoneMsgWithoutError_LeavesStatusAlone(t *testing.T) {
+func TestUpdate_ExecDoneMsgWithoutError_ClearsAStaleFailure(t *testing.T) {
+	// A launch fails, the user retries, the retry succeeds. If a clean return
+	// leaves the status untouched, the old failure stays on screen contradicting
+	// what just happened.
 	m := initialModel(Config{Backend: &fakeBackend{}})
 	m.screen = screenDash
 	m.repo = core.Repo{Name: "bridge", Path: "/repos/bridge"}
-	m.status = "ready"
+	m.status = "herdr: pane never became available after 5 attempts"
 
 	out, _ := m.Update(execDoneMsg{})
-	if got := out.(Model).status; got != "ready" {
-		t.Errorf("status = %q, want it untouched on a clean return", got)
+	if got := out.(Model).status; strings.Contains(got, "never became available") {
+		t.Errorf("status = %q, want the stale failure cleared after a clean return", got)
 	}
 }

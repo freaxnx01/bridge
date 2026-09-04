@@ -120,8 +120,9 @@ type scriptedRunner struct {
 	// live models the server's own state: agents that `agent start` created.
 	// A later `agent list` must see them, or a second launch of the same slot
 	// looks unlaunched and the test passes only when goroutines happen to race.
-	live    []string // cwd of each started agent
-	lastCwd string   // --cwd of the most recent `tab create`
+	live    []string    // cwd of each started agent
+	tabs    [][2]string // {tab_id, label} of each created tab
+	lastCwd string      // --cwd of the most recent `tab create`
 }
 
 // newScriptedRunner builds a runner from testdata files, keyed by subcommand.
@@ -164,11 +165,20 @@ func (s *scriptedRunner) run(_ context.Context, args ...string) ([]byte, error) 
 	}
 	switch key {
 	case "tab create":
+		label := ""
 		for i := 0; i < len(args)-1; i++ {
-			if args[i] == "--cwd" {
+			switch args[i] {
+			case "--cwd":
 				s.lastCwd = args[i+1]
+			case "--label":
+				label = args[i+1]
 			}
 		}
+		// The fixture always reports tab w3:t4; record it under the label that
+		// was actually requested, which is what a real server does.
+		s.tabs = append(s.tabs, [2]string{"w3:t4", label})
+	case "tab list":
+		return tabListJSON(s.tabs), nil
 	case "agent start":
 		if s.lastCwd != "" {
 			s.live = append(s.live, s.lastCwd)
@@ -182,6 +192,20 @@ func (s *scriptedRunner) run(_ context.Context, args ...string) ([]byte, error) 
 		return body, nil
 	}
 	return []byte(`{"id":"x","result":{"type":"ok"}}`), nil
+}
+
+// tabListJSON renders a `tab list` envelope for the given {tab_id, label} pairs.
+func tabListJSON(tabs [][2]string) []byte {
+	var b strings.Builder
+	b.WriteString(`{"id":"cli:tab:list","result":{"tabs":[`)
+	for i, tb := range tabs {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"tab_id":%q,"label":%q,"workspace_id":"w3"}`, tb[0], tb[1])
+	}
+	b.WriteString(`],"type":"tab_list"}}`)
+	return []byte(b.String())
 }
 
 // agentListJSON renders an `agent list` envelope for the given agent cwds, in
@@ -656,5 +680,87 @@ func TestLaunch_InvalidArguments_StillFailFastWhileBuilding(t *testing.T) {
 	}
 	if n := r.n(); n != 0 {
 		t.Errorf("validation issued %d CLI calls; want 0", n)
+	}
+}
+
+func TestLive_AgentInAnotherWorkspace_IsIgnored(t *testing.T) {
+	// `herdr agent list` has no --workspace flag, so it reports every
+	// workspace's agents. nav is pinned to one, and `tab create` pins the same
+	// one — discovery must agree, or nav shows a session it cannot attach to
+	// without yanking the user into someone else's workspace.
+	run := func(context.Context, ...string) ([]byte, error) {
+		return []byte(`{"id":"x","result":{"agents":[
+			{"agent":"claude","agent_status":"idle","cwd":"/repos/bridge","pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"},
+			{"agent":"claude","agent_status":"working","cwd":"/repos/other","pane_id":"w3:p2","tab_id":"w3:t2","workspace_id":"w3"}
+		],"type":"agent_list"}}`), nil
+	}
+	got, err := (&Client{Run: run, Workspace: "w3"}).Live()
+	if err != nil {
+		t.Fatalf("Live: %v", err)
+	}
+	if len(got) != 1 || got[0].SlotID != "other" {
+		t.Fatalf("got %+v, want only the w3 agent", got)
+	}
+}
+
+func TestAttach_AgentInAnotherWorkspace_DoesNotYankTheUserAcross(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if args[0] == "agent" {
+			return []byte(`{"id":"x","result":{"agents":[
+				{"agent":"claude","agent_status":"idle","cwd":"/repos/bridge","pane_id":"w1:p1","tab_id":"w1:t1","workspace_id":"w1"}
+			],"type":"agent_list"}}`), nil
+		}
+		return []byte(`{"id":"x","result":{"tabs":[],"type":"tab_list"}}`), nil
+	}
+	plan, err := (&Client{Run: run, Workspace: "w3"}).Attach("bridge")
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if !errors.Is(plan.Run()(context.Background()), ErrNoSession) {
+		t.Error("an agent in workspace w1 must not satisfy an attach for a w3-pinned client")
+	}
+	for _, a := range calls {
+		if len(a) >= 3 && a[0] == "tab" && a[1] == "focus" && strings.HasPrefix(a[2], "w1:") {
+			t.Errorf("focused %v — that is another workspace", a)
+		}
+	}
+}
+
+func TestLaunch_NonAgentSpecRelaunched_FocusesTheLabelledTabInsteadOfCreating(t *testing.T) {
+	// `code` runs via `pane run`, so Herdr registers no agent for it and the
+	// cwd lookup can never find it. Without a fallback every Enter on the row
+	// opens another tab — the tmux backend has no such hole, because
+	// `new-session -A` is idempotent regardless of what runs inside.
+	sr := newLaunchRunner(t)
+	c := &Client{Run: sr.run, Workspace: "w3", retryDelay: time.Millisecond}
+	spec := agents.AgentSpec{Name: "code", Bin: "code", Args: []string{"."}}
+
+	first, err := c.Launch("bridge", "/repos/bridge", spec)
+	if err != nil {
+		t.Fatalf("Launch 1: %v", err)
+	}
+	if err := first.Run()(context.Background()); err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	second, err := c.Launch("bridge", "/repos/bridge", spec)
+	if err != nil {
+		t.Fatalf("Launch 2: %v", err)
+	}
+	if err := second.Run()(context.Background()); err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+
+	creates := 0
+	sr.mu.Lock()
+	for _, a := range sr.calls {
+		if len(a) >= 2 && a[0] == "tab" && a[1] == "create" {
+			creates++
+		}
+	}
+	sr.mu.Unlock()
+	if creates != 1 {
+		t.Errorf("tab create calls = %d, want 1 — an agent-less tab must still be found by its slot label", creates)
 	}
 }
