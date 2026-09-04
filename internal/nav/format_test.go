@@ -1,6 +1,7 @@
 package nav
 
 import (
+	"strings"
 	"testing"
 	"time"
 
@@ -383,5 +384,54 @@ func TestMatchesAllTerms(t *testing.T) {
 				t.Errorf("matchesAllTerms(%v) = %v, want %v", tt.terms, got, tt.want)
 			}
 		})
+	}
+}
+
+func TestLastAccessedFor_ZeroTimestamp_ShowsTheStateInstead(t *testing.T) {
+	// Herdr reports no timestamps, so LastActivity is the zero value. Feeding
+	// that to humanLastAccessed yields "106751d 23h" — the age of the zero
+	// time — which is what shipped before this. The state is the useful thing
+	// to show there.
+	tests := []struct {
+		name string
+		sess core.Session
+		want string
+	}{
+		{"working", core.Session{State: "working"}, "working"},
+		{"blocked", core.Session{State: "blocked"}, "blocked"},
+		{"idle", core.Session{State: "idle"}, "idle"},
+		{"no state either", core.Session{}, "—"},
+	}
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := lastAccessedFor(tt.sess, now); got != tt.want {
+				t.Errorf("lastAccessedFor = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestLastAccessedFor_RealTimestamp_StillHumanizesTheAge(t *testing.T) {
+	// tmux does report timestamps; that path must not change.
+	now := time.Date(2026, 9, 4, 12, 0, 0, 0, time.UTC)
+	sess := core.Session{State: "attached", LastActivity: now.Add(-3 * time.Hour)}
+	if got := lastAccessedFor(sess, now); got != "3h 0m" {
+		t.Errorf("lastAccessedFor = %q, want %q", got, "3h 0m")
+	}
+}
+
+func TestBuildSessionRows_HerdrSessionWithNoTimestamp_ShowsStateNotABogusAge(t *testing.T) {
+	live := []core.Session{{SlotID: "bridge", TmuxName: "bridge", State: "working"}}
+	slots := []core.Slot{{ID: "bridge", Repo: "bridge", Agent: "claude"}}
+	rows := buildSessionRows(live, slots, time.Now())
+	if len(rows) != 1 {
+		t.Fatalf("rows = %d, want 1", len(rows))
+	}
+	if strings.Contains(rows[0].lastAccessed, "106751") {
+		t.Errorf("lastAccessed = %q — the zero timestamp leaked into the UI", rows[0].lastAccessed)
+	}
+	if rows[0].lastAccessed != "working" {
+		t.Errorf("lastAccessed = %q, want %q", rows[0].lastAccessed, "working")
 	}
 }
