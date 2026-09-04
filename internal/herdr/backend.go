@@ -2,8 +2,12 @@ package herdr
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"strings"
+	"time"
 
+	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/launcher"
 )
@@ -68,4 +72,96 @@ func (c *Client) tabFor(ctx context.Context, slot string) (string, error) {
 		}
 	}
 	return "", fmt.Errorf("%w: %s", ErrNoSession, slot)
+}
+
+// startAttempts and defaultRetryDelay bound the wait for a freshly created
+// pane to reach its interactive prompt. `herdr agent start` requires a settled
+// shell, but a new pane is still running profile init — which on a host with
+// direnv hooks can take a moment. Five attempts on a doubling delay from 250ms
+// spans ~4s of shell startup, well inside a user's patience.
+const (
+	startAttempts     = 5
+	defaultRetryDelay = 250 * time.Millisecond
+)
+
+// Launch opens a Herdr tab in dir running spec's agent, then focuses it.
+//
+// It is idempotent, as launcher.Backend requires: a slot whose agent is already
+// live resolves as Attach would, because `herdr tab create` always creates and
+// would otherwise leave a duplicate tab behind on every launch.
+func (c *Client) Launch(slot, dir string, spec agents.AgentSpec) (launcher.Plan, error) {
+	if slot == "" {
+		return launcher.Plan{}, errors.New("herdr: empty slot")
+	}
+	if dir == "" {
+		return launcher.Plan{}, errors.New("herdr: empty dir")
+	}
+	if spec.Bin == "" {
+		return launcher.Plan{}, errors.New("herdr: agent has no Bin")
+	}
+	if plan, err := c.Attach(slot); err == nil {
+		return plan, nil
+	} else if !errors.Is(err, ErrNoSession) {
+		return launcher.Plan{}, err
+	}
+	return launcher.RunPlan(func(ctx context.Context) error {
+		tab, err := c.tabCreate(ctx, dir, slot)
+		if err != nil {
+			return err
+		}
+		// A GUI editor is not a Herdr agent kind: run it in the pane and let it
+		// take focus itself.
+		if _, ok := agentKinds[spec.Name]; !ok {
+			cmd := strings.Join(append([]string{spec.Bin}, spec.Args...), " ")
+			return c.call(ctx, nil, "pane", "run", tab.PaneID, cmd)
+		}
+		if err := c.startAgent(ctx, tab.PaneID, slot, spec); err != nil &&
+			!errors.Is(err, ErrAgentNotReady) {
+			// The tab is left in place: a shell in the right directory beats
+			// nothing, and nav reports the error.
+			return err
+		}
+		// Reached on success and on ErrAgentNotReady alike — in the latter case
+		// the agent is up and waiting on a prompt, so the user must see it.
+		return c.call(ctx, nil, "tab", "focus", tab.TabID)
+	}), nil
+}
+
+// startAgent runs `herdr agent start`, retrying while the pane is still
+// reaching its interactive prompt. ErrAgentNotReady is returned immediately: it
+// means the agent did start and is blocked, which retrying cannot improve.
+func (c *Client) startAgent(ctx context.Context, pane, slot string, spec agents.AgentSpec) error {
+	live, err := c.agentList(ctx)
+	if err != nil {
+		return err
+	}
+	taken := make([]string, 0, len(live))
+	for _, a := range live {
+		if a.Agent != "" {
+			taken = append(taken, a.Agent)
+		}
+	}
+	args := []string{"agent", "start", agentName(slot, taken), "--kind", agentKinds[spec.Name], "--pane", pane}
+	if len(spec.Args) > 0 {
+		args = append(args, "--")
+		args = append(args, spec.Args...)
+	}
+	delay := c.retryDelay
+	if delay <= 0 {
+		delay = defaultRetryDelay
+	}
+	var lastErr error
+	for attempt := 0; attempt < startAttempts; attempt++ {
+		lastErr = c.call(ctx, nil, args...)
+		if lastErr == nil || errors.Is(lastErr, ErrAgentNotReady) || errors.Is(lastErr, ErrCLIUsage) {
+			return lastErr
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(delay):
+		}
+		delay *= 2
+	}
+	return fmt.Errorf("herdr: agent start gave up after %d attempts: %w", startAttempts, lastErr)
 }

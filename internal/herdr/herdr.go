@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Sentinel errors callers match with errors.Is.
@@ -46,6 +47,19 @@ type Client struct {
 	// Workspace pins every created tab to nav's own workspace, so a tab never
 	// lands in whichever workspace another Herdr client happens to focus.
 	Workspace string
+	// retryDelay is the base backoff between `agent start` attempts while a
+	// freshly created pane is still running shell init. Zero means the default
+	// (see defaultRetryDelay); tests set it small.
+	retryDelay time.Duration
+}
+
+// agentKinds maps a bridge agent name to its Herdr kind. An agent absent here
+// is not a Herdr-recognized agent (VS Code is a GUI launch, not an agent) and
+// runs via `pane run` instead.
+var agentKinds = map[string]string{
+	"claude":   "claude",
+	"copilot":  "copilot",
+	"opencode": "opencode",
 }
 
 // New returns a Client driving the herdr binary named by $HERDR_BIN_PATH,
