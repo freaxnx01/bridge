@@ -12,6 +12,7 @@ import (
 	"os"
 	"os/exec"
 	"strings"
+	"time"
 )
 
 // Sentinel errors callers match with errors.Is.
@@ -24,6 +25,11 @@ var (
 	// ErrCLIUsage reports a malformed command line — a bridge bug, not a
 	// Herdr outage.
 	ErrCLIUsage = errors.New("herdr: cli usage error")
+	// ErrPaneBusy reports that the target pane is not an available shell — it
+	// is still running shell init, or has a foreground command. This is the
+	// only retryable `agent start` failure: waiting fixes it, and nothing else
+	// in that call gets better by being repeated.
+	ErrPaneBusy = errors.New("herdr: pane is not an available shell")
 )
 
 // ExitError carries a herdr CLI exit status. Exit 1 is a server error whose
@@ -46,6 +52,10 @@ type Client struct {
 	// Workspace pins every created tab to nav's own workspace, so a tab never
 	// lands in whichever workspace another Herdr client happens to focus.
 	Workspace string
+	// retryDelay is the base backoff between `agent start` attempts while a
+	// freshly created pane is still running shell init. Zero means the default
+	// (see defaultRetryDelay); tests set it small.
+	retryDelay time.Duration
 }
 
 // New returns a Client driving the herdr binary named by $HERDR_BIN_PATH,
@@ -124,6 +134,9 @@ func (c *Client) call(ctx context.Context, out any, args ...string) error {
 		if env.Error.Code == "agent_not_ready" {
 			return fmt.Errorf("%w: %s", ErrAgentNotReady, env.Error.Message)
 		}
+		if env.Error.Code == "agent_pane_busy" {
+			return fmt.Errorf("%w: %s", ErrPaneBusy, env.Error.Message)
+		}
 		return fmt.Errorf("herdr: %s: %s (%s)", strings.Join(args, " "), env.Error.Message, env.Error.Code)
 	}
 	if out == nil {
@@ -168,4 +181,13 @@ func (c *Client) tabCreate(ctx context.Context, dir, label string) (tabCreated, 
 		return tabCreated{}, errors.New("herdr: tab create returned no root pane")
 	}
 	return tabCreated{PaneID: res.RootPane.PaneID, TabID: res.Tab.TabID, Label: res.Tab.Label}, nil
+}
+
+// agentKinds maps a bridge agent name to its Herdr kind. An agent absent here
+// is not a Herdr-recognized agent (VS Code is a GUI launch, not an agent) and
+// runs via `pane run` instead.
+var agentKinds = map[string]string{
+	"claude":   "claude",
+	"copilot":  "copilot",
+	"opencode": "opencode",
 }
