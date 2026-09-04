@@ -2,8 +2,9 @@
 │  Legend                                                                                          │
 │                                                                                                  │
 │ Session                                                                                          │
-│   ●             session attached                                                                 │
-│   ○             session detached                                                                 │
+│   ●             session attached (tmux) · agent working (Herdr)                                  │
+│   ●             agent blocked — waiting on you (Herdr)                                           │
+│   ○             session detached (tmux) · agent idle or done (Herdr)                             │
 │   ·             no session (dashboard row)                                                       │
 │                                                                                                  │
 │ Git status                                                                                       │
