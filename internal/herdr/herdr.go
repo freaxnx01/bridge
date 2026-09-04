@@ -118,6 +118,18 @@ type agentInfo struct {
 	Cwd         string `json:"cwd"`
 	PaneID      string `json:"pane_id"`
 	TabID       string `json:"tab_id"`
+	// WorkspaceID matters because `herdr agent list` takes no --workspace flag
+	// and reports every workspace's agents, while tabCreate pins ours. Without
+	// it, discovery and creation disagree.
+	WorkspaceID string `json:"workspace_id"`
+}
+
+// tabInfo is one entry of `herdr tab list`. Label is what tabCreate set, which
+// is the bridge slot id — the only handle on a tab hosting no agent.
+type tabInfo struct {
+	TabID       string `json:"tab_id"`
+	Label       string `json:"label"`
+	WorkspaceID string `json:"workspace_id"`
 }
 
 // tabCreated is the useful subset of `herdr tab create`.
@@ -170,6 +182,21 @@ func (c *Client) agentList(ctx context.Context) ([]agentInfo, error) {
 		return nil, err
 	}
 	return res.Agents, nil
+}
+
+// tabList enumerates the tabs in the client's workspace.
+func (c *Client) tabList(ctx context.Context) ([]tabInfo, error) {
+	var res struct {
+		Tabs []tabInfo `json:"tabs"`
+	}
+	args := []string{"tab", "list"}
+	if c.Workspace != "" {
+		args = append(args, "--workspace", c.Workspace)
+	}
+	if err := c.call(ctx, &res, args...); err != nil {
+		return nil, err
+	}
+	return res.Tabs, nil
 }
 
 func (c *Client) tabCreate(ctx context.Context, dir, label string) (tabCreated, error) {

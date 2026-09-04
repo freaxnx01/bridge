@@ -141,6 +141,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// before it executed, so nothing was returned to report there.
 		if msg.err != nil {
 			m.status = msg.err.Error()
+		} else {
+			// Clear any earlier failure: a retry that succeeded must not leave
+			// the previous error sitting on screen contradicting it.
+			m.status = "ready"
 		}
 		// Refresh the screen we're on.
 		if m.screen == screenDash {

@@ -31,6 +31,9 @@ func (c *Client) Live() ([]core.Session, error) {
 		if a.Agent == "" {
 			continue
 		}
+		if !c.inWorkspace(a.WorkspaceID) {
+			continue
+		}
 		slot := SlotIDForPath(a.Cwd)
 		if slot == "" {
 			continue
@@ -70,14 +73,34 @@ func (c *Client) tabFor(ctx context.Context, slot string) (string, error) {
 		return "", err
 	}
 	for _, a := range agentsLive {
-		if a.Agent == "" {
+		if a.Agent == "" || !c.inWorkspace(a.WorkspaceID) {
 			continue
 		}
 		if SlotIDForPath(a.Cwd) == slot {
 			return a.TabID, nil
 		}
 	}
+	// Fall back to the tab label. A spec that is not a Herdr agent kind (the
+	// `code` editor) runs via `pane run`, so Herdr registers no agent for it and
+	// the cwd lookup above can never match — without this every Enter on that
+	// row would open another tab. tabCreate labels every tab with its slot id,
+	// so the label is the one handle on an agent-less tab.
+	tabs, err := c.tabList(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, tb := range tabs {
+		if tb.Label == slot && c.inWorkspace(tb.WorkspaceID) {
+			return tb.TabID, nil
+		}
+	}
 	return "", fmt.Errorf("%w: %s", ErrNoSession, slot)
+}
+
+// inWorkspace reports whether id belongs to the workspace this client is pinned
+// to. An unpinned client (no HERDR_WORKSPACE_ID) accepts everything.
+func (c *Client) inWorkspace(id string) bool {
+	return c.Workspace == "" || id == "" || id == c.Workspace
 }
 
 // startAttempts and defaultRetryDelay bound the wait for a freshly created
