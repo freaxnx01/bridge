@@ -11,6 +11,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - `bridge dispatch`: **`repo_priority`** in `dispatch.json` — an ordered list of repo-name patterns (`path.Match` glob syntax) that becomes the ordering ladder's new first rung, ahead of milestone due date. A repo's rank is the index of the first pattern it matches; unmatched repos sort after every configured entry. This lets software-factory repos dispatch before `game-*` prototypes regardless of what each repo has queued. Absent or empty (the default) skips the rung, so existing configs order exactly as before. (#222)
 - `internal/herdr`: `(*Client).Attach` and `(*Client).Launch`, completing `launcher.Backend` for Herdr mode. `Launch` opens a tab, starts the agent, and focuses it — idempotent via an attach-first check re-evaluated at plan-execution time (not build time), with concurrent same-slot launches collapsed via `singleflight`. `agent start` retries only on a busy pane (`agent_pane_busy` → `ErrPaneBusy`, mapped from Herdr's real CLI error code) with capped exponential backoff (~4s worst case); `agent_not_ready` focuses the tab and reports success since the agent is up and waiting on a prompt. The `code` agent runs via `pane run` instead, without stealing focus. (#264)
+- `bridge nav` Herdr mode: inside a Herdr session, agents launch as Herdr tabs
+  instead of tmux sessions, so they are recognized by `herdr agent list` and
+  its idle/working/blocked lifecycle. Selected automatically via `HERDR_ENV`,
+  overridable with `BRIDGE_LAUNCHER=tmux|herdr`.
 
 ## [2.9.0] - 2026-07-26
 

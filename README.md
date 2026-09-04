@@ -219,6 +219,15 @@ export BRIDGE_DEFAULT_AGENT_ARGS="--remote-control --dangerously-skip-permission
 
 Both apply to `bridge <repo>`, `bridge open <repo>`, and the interactive picker. Explicit `--agent X` on the command line overrides `BRIDGE_DEFAULT_AGENT`; the `*_ARGS` env var is only appended when the agent comes from the env-var default (so launching `--agent code` doesn't get Claude's flags). Unset both and you're back to cd-only.
 
+- `BRIDGE_LAUNCHER` — which multiplexer `bridge nav` launches agent sessions
+  into: `tmux` or `herdr`. Unset (the default) autodetects: `herdr` when
+  `HERDR_ENV=1` (Herdr sets it in every managed pane), otherwise `tmux`.
+  In Herdr mode nav opens one tab per session and stays running in its own
+  tab, and the dashboard shows Herdr's agent lifecycle — including which
+  agents are **blocked** waiting on you. Precedence: this variable, then
+  `HERDR_ENV` autodetection, then the tmux default. Note that the shell
+  `bridge open <repo>` path still uses tmux.
+
 Known agents: `claude`, `copilot`, `opencode`, `code`. See `internal/agents/agents.go`.
 
 ### `exec` vs child launch (and the SSH "fall-through")
