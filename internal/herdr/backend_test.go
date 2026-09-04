@@ -3,8 +3,10 @@ package herdr
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -104,14 +106,6 @@ func TestAttach_LiveSlot_ReturnsARunPlanThatFocusesTheTab(t *testing.T) {
 	}
 }
 
-func TestAttach_UnknownSlot_ReturnsErrNoSession(t *testing.T) {
-	run, _ := fixtureRunner(t, "agent_list.json")
-	_, err := (&Client{Run: run}).Attach("not-a-live-slot")
-	if !errors.Is(err, ErrNoSession) {
-		t.Errorf("err = %v, want ErrNoSession", err)
-	}
-}
-
 // scriptedRunner replays a response per subcommand and records argv. Keys are
 // "<group> <sub>", e.g. "tab create". A key listed in failures fails that many
 // times (returning failBody with exit 1) before its normal response, which is
@@ -123,6 +117,11 @@ type scriptedRunner struct {
 	failBody  map[string][]byte
 	attempts  map[string]int
 	calls     [][]string
+	// live models the server's own state: agents that `agent start` created.
+	// A later `agent list` must see them, or a second launch of the same slot
+	// looks unlaunched and the test passes only when goroutines happen to race.
+	live    []string // cwd of each started agent
+	lastCwd string   // --cwd of the most recent `tab create`
 }
 
 // newScriptedRunner builds a runner from testdata files, keyed by subcommand.
@@ -163,10 +162,41 @@ func (s *scriptedRunner) run(_ context.Context, args ...string) ([]byte, error) 
 		s.failures[key] = n - 1
 		return s.failBody[key], &ExitError{Code: 1}
 	}
+	switch key {
+	case "tab create":
+		for i := 0; i < len(args)-1; i++ {
+			if args[i] == "--cwd" {
+				s.lastCwd = args[i+1]
+			}
+		}
+	case "agent start":
+		if s.lastCwd != "" {
+			s.live = append(s.live, s.lastCwd)
+		}
+	case "agent list":
+		if len(s.live) > 0 {
+			return agentListJSON(s.live), nil
+		}
+	}
 	if body, ok := s.responses[key]; ok {
 		return body, nil
 	}
 	return []byte(`{"id":"x","result":{"type":"ok"}}`), nil
+}
+
+// agentListJSON renders an `agent list` envelope for the given agent cwds, in
+// the shape captured from the live CLI.
+func agentListJSON(cwds []string) []byte {
+	var b strings.Builder
+	b.WriteString(`{"id":"cli:agent:list","result":{"agents":[`)
+	for i, cwd := range cwds {
+		if i > 0 {
+			b.WriteString(",")
+		}
+		fmt.Fprintf(&b, `{"agent":"claude","agent_status":"idle","cwd":%q,"pane_id":"w3:p6","tab_id":"w3:t4","workspace_id":"w3"}`, cwd)
+	}
+	b.WriteString(`],"type":"agent_list"}}`)
+	return []byte(b.String())
 }
 
 func (s *scriptedRunner) argvFor(group, sub string) []string {
@@ -339,23 +369,27 @@ func TestLaunch_NonRetryableStartError_FailsImmediatelyWithoutRetrying(t *testin
 	}
 }
 
-func TestLaunch_AttachPrecheckFailsWithRealError_PropagatesWithoutCreatingATab(t *testing.T) {
-	sr := newLaunchRunner(t)
-	// The Attach pre-check itself fails for a reason that is NOT "no session".
+func TestLaunch_AttachLookupFailsWithRealError_PropagatesWithoutCreatingATab(t *testing.T) {
+	// The run-time attach check fails for a reason that is NOT "no session".
 	// That must propagate, not fall through into creating a duplicate tab.
+	sr := newLaunchRunner(t)
 	sr.failures["agent list"] = 99
 	sr.failBody["agent list"] = []byte(`{"id":"cli:agent:list","error":{"code":"server_unavailable","message":"herdr server is shutting down"}}`)
 
 	c := &Client{Run: sr.run, Workspace: "w3", retryDelay: time.Millisecond}
-	_, err := c.Launch("bridge", "/repos/bridge", agents.AgentSpec{Name: "claude", Bin: "claude"})
-	if err == nil {
-		t.Fatal("expected the backend error to propagate from the Attach pre-check")
+	plan, err := c.Launch("bridge", "/repos/bridge", agents.AgentSpec{Name: "claude", Bin: "claude"})
+	if err != nil {
+		t.Fatalf("Launch must not fail while building the plan: %v", err)
 	}
-	if errors.Is(err, ErrNoSession) {
+	runErr := plan.Run()(context.Background())
+	if runErr == nil {
+		t.Fatal("expected the backend error to propagate from the attach lookup")
+	}
+	if errors.Is(runErr, ErrNoSession) {
 		t.Error("a real backend error must not be flattened into ErrNoSession")
 	}
 	if sr.argvFor("tab", "create") != nil {
-		t.Error("a failed pre-check must not create a tab — that is how duplicates appear")
+		t.Error("a failed lookup must not create a tab — that is how duplicates appear")
 	}
 }
 
@@ -397,6 +431,42 @@ func TestLaunch_ConcurrentSameSlot_CreatesExactlyOneTab(t *testing.T) {
 	sr.mu.Unlock()
 	if creates != 1 {
 		t.Errorf("tab create calls = %d, want exactly 1 — a double Enter must not open two tabs", creates)
+	}
+}
+
+func TestLaunch_SecondLaunchAfterTheFirstCompletes_FocusesInsteadOfCreating(t *testing.T) {
+	// The sequential half of the same guarantee. singleflight only collapses
+	// genuinely concurrent calls, so once the first launch has finished it is
+	// the run-time attach check that must prevent the duplicate.
+	sr := newLaunchRunner(t)
+	c := &Client{Run: sr.run, Workspace: "w3", retryDelay: time.Millisecond}
+	spec := agents.AgentSpec{Name: "claude", Bin: "claude"}
+
+	first, err := c.Launch("bridge", "/repos/bridge", spec)
+	if err != nil {
+		t.Fatalf("Launch 1: %v", err)
+	}
+	if err := first.Run()(context.Background()); err != nil {
+		t.Fatalf("run 1: %v", err)
+	}
+	second, err := c.Launch("bridge", "/repos/bridge", spec)
+	if err != nil {
+		t.Fatalf("Launch 2: %v", err)
+	}
+	if err := second.Run()(context.Background()); err != nil {
+		t.Fatalf("run 2: %v", err)
+	}
+
+	creates := 0
+	sr.mu.Lock()
+	for _, a := range sr.calls {
+		if len(a) >= 2 && a[0] == "tab" && a[1] == "create" {
+			creates++
+		}
+	}
+	sr.mu.Unlock()
+	if creates != 1 {
+		t.Errorf("tab create calls = %d, want 1 — the second launch must focus the live tab", creates)
 	}
 }
 
@@ -510,3 +580,81 @@ func TestLaunch_EmptySlotOrDir_IsAnError(t *testing.T) {
 
 // Compile-time proof that *Client satisfies the seam nav injects.
 var _ launcher.Backend = (*Client)(nil)
+
+// countingRunner records every subcommand and can be told to fail the test if
+// it is called at all — the way to prove a method performs no I/O.
+type countingRunner struct {
+	mu    sync.Mutex
+	calls [][]string
+	body  []byte
+}
+
+func (r *countingRunner) run(_ context.Context, args ...string) ([]byte, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.calls = append(r.calls, args)
+	if r.body != nil {
+		return r.body, nil
+	}
+	return []byte(`{"id":"x","result":{"type":"ok"}}`), nil
+}
+
+func (r *countingRunner) n() int {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return len(r.calls)
+}
+
+func TestAttach_BuildingThePlan_PerformsNoIO(t *testing.T) {
+	// nav calls Attach from inside Update(), the Bubble Tea event loop. Any
+	// subprocess call here freezes the UI and hangs nav outright if the herdr
+	// server stalls, so the lookup must happen when the plan runs.
+	r := &countingRunner{}
+	if _, err := (&Client{Run: r.run, Workspace: "w3"}).Attach("bridge"); err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if n := r.n(); n != 0 {
+		t.Errorf("Attach issued %d CLI calls while building the plan; want 0", n)
+	}
+}
+
+func TestAttach_UnknownSlot_ReportsErrNoSessionWhenThePlanRuns(t *testing.T) {
+	run, _ := fixtureRunner(t, "agent_list.json")
+	plan, err := (&Client{Run: run}).Attach("not-a-live-slot")
+	if err != nil {
+		t.Fatalf("Attach must not fail while building the plan: %v", err)
+	}
+	if !errors.Is(plan.Run()(context.Background()), ErrNoSession) {
+		t.Error("running the plan for an unknown slot must report ErrNoSession")
+	}
+}
+
+func TestLaunch_BuildingThePlan_PerformsNoIO(t *testing.T) {
+	r := &countingRunner{}
+	if _, err := (&Client{Run: r.run, Workspace: "w3"}).Launch(
+		"bridge", "/repos/bridge", agents.AgentSpec{Name: "claude", Bin: "claude"}); err != nil {
+		t.Fatalf("Launch: %v", err)
+	}
+	if n := r.n(); n != 0 {
+		t.Errorf("Launch issued %d CLI calls while building the plan; want 0", n)
+	}
+}
+
+func TestLaunch_InvalidArguments_StillFailFastWhileBuilding(t *testing.T) {
+	// Validation is pure, so it stays synchronous: nav can show it immediately.
+	r := &countingRunner{}
+	c := &Client{Run: r.run, Workspace: "w3"}
+	for _, tt := range []struct{ name, slot, dir string }{
+		{"empty slot", "", "/repos/bridge"},
+		{"empty dir", "bridge", ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := c.Launch(tt.slot, tt.dir, agents.AgentSpec{Name: "claude", Bin: "claude"}); err == nil {
+				t.Error("expected a synchronous validation error")
+			}
+		})
+	}
+	if n := r.n(); n != 0 {
+		t.Errorf("validation issued %d CLI calls; want 0", n)
+	}
+}

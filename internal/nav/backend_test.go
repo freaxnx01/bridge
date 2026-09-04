@@ -3,6 +3,7 @@ package nav
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/freaxnx01/bridge/internal/agents"
@@ -137,5 +138,32 @@ func TestRunPlanCmd_RunPlanError_ReportsErrorInMsg(t *testing.T) {
 func TestRunPlanCmd_EmptyPlan_ReturnsNil(t *testing.T) {
 	if runPlanCmd(launcher.Plan{}) != nil {
 		t.Error("an empty plan has nothing to run")
+	}
+}
+
+func TestUpdate_ExecDoneMsgWithError_ShowsItInTheStatusLine(t *testing.T) {
+	// Backends that do their work when the plan runs (Herdr) report failure
+	// through execDoneMsg, not from the Update call that built the plan. If
+	// this message drops the error, every such failure is silent.
+	m := initialModel(Config{Backend: &fakeBackend{}})
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/repos/bridge"}
+
+	out, _ := m.Update(execDoneMsg{err: errors.New("herdr: pane never became available")})
+	got := out.(Model).status
+	if !strings.Contains(got, "pane never became available") {
+		t.Errorf("status = %q, want it to carry the execDoneMsg error", got)
+	}
+}
+
+func TestUpdate_ExecDoneMsgWithoutError_LeavesStatusAlone(t *testing.T) {
+	m := initialModel(Config{Backend: &fakeBackend{}})
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/repos/bridge"}
+	m.status = "ready"
+
+	out, _ := m.Update(execDoneMsg{})
+	if got := out.(Model).status; got != "ready" {
+		t.Errorf("status = %q, want it untouched on a clean return", got)
 	}
 }

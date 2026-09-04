@@ -135,7 +135,14 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repoModal = nil
 		return m.enterDash(msg.repo)
 	case execDoneMsg:
-		// Returned from a detached tmux attach/launch: refresh the screen we're on.
+		// Returned from a detached tmux attach/launch, or from a backend that
+		// does its work when the plan runs (Herdr). For the latter this is the
+		// only place a launch failure can surface: Update built the plan long
+		// before it executed, so nothing was returned to report there.
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		}
+		// Refresh the screen we're on.
 		if m.screen == screenDash {
 			return m, loadDashRowsCmd(m.cfg.Backend, m.repo, m.cfg.SlotsPath)
 		}
