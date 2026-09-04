@@ -12,6 +12,24 @@ import (
 	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
+// lastAccessedFor renders a session's "last accessed" cell.
+//
+// tmux reports real timestamps, so the cell is the humanized age. Herdr reports
+// none — `agent list`, `agent get` and `pane list` carry no time field — which
+// leaves LastActivity at the zero value. Humanizing that produced the age of
+// the zero time ("106751d 23h") in the UI, so a session with no timestamp shows
+// its lifecycle state instead: the useful thing to know about a Herdr agent is
+// whether it is working, blocked or idle, not when it was last touched.
+func lastAccessedFor(sess core.Session, now time.Time) string {
+	if !sess.LastActivity.IsZero() {
+		return humanLastAccessed(now.Sub(sess.LastActivity))
+	}
+	if sess.State != "" {
+		return sess.State
+	}
+	return "—"
+}
+
 // humanLastAccessed renders d as at most two descending units (d/h/m).
 // Sub-minute durations render as "0m".
 func humanLastAccessed(d time.Duration) string {
@@ -193,7 +211,7 @@ func buildDashRows(repo core.Repo, baseBranch string, wts []worktree.Entry, slot
 				row.slotID = sl.ID
 				row.agent = sl.Agent
 				row.state = sess.State
-				row.lastAccessed = humanLastAccessed(now.Sub(sess.LastActivity))
+				row.lastAccessed = lastAccessedFor(sess, now)
 			}
 		}
 		rows = append(rows, row)
@@ -218,7 +236,7 @@ func baseRow(repo core.Repo, branch string, slots []core.Slot, liveBySlot map[st
 	row.hasSession = true
 	row.slotID = id
 	row.state = sess.State
-	row.lastAccessed = humanLastAccessed(now.Sub(sess.LastActivity))
+	row.lastAccessed = lastAccessedFor(sess, now)
 	for _, sl := range slots {
 		if sl.ID == id { // the bare-<repo> slot carries the agent
 			row.agent = sl.Agent

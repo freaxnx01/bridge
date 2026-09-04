@@ -71,7 +71,7 @@ func buildSessionRows(live []core.Session, slots []core.Slot, now time.Time) []s
 		row := sessionRow{
 			slotID:       s.SlotID,
 			state:        s.State,
-			lastAccessed: humanLastAccessed(now.Sub(s.LastActivity)),
+			lastAccessed: lastAccessedFor(s, now),
 		}
 		if sl, ok := bySlot[s.SlotID]; ok {
 			row.repoLabel = sl.Repo
