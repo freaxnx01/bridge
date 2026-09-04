@@ -32,9 +32,22 @@ func (p Plan) Run() func(context.Context) error { return p.run }
 
 // Backend starts and discovers agent sessions. It is the seam between nav and
 // the multiplexer actually hosting the agents.
+//
+// Launch and Attach are called from inside nav's Update — the Bubble Tea event
+// loop — so they MUST NOT perform I/O. They only build a Plan; every subprocess
+// call, network round trip or retry belongs inside that Plan's execution, which
+// nav runs as a tea.Cmd. An implementation that shells out while building a
+// Plan blocks every re-render and keypress, and hangs nav for as long as the
+// call takes. Pure argument validation is fine and should stay synchronous, so
+// nav can report it immediately.
+//
+// Live is the exception: it does I/O by definition, and nav only ever calls it
+// from inside a tea.Cmd (loadSessionsCmd, loadDashRowsCmd).
 type Backend interface {
 	// Launch prepares a launch of spec in dir under slot. It must be
-	// idempotent: a slot that is already live resolves as Attach would.
+	// idempotent: a slot that is already live resolves as Attach would. That
+	// check belongs inside the returned Plan, not here — a decision made while
+	// building the Plan is already stale by the time nav runs it.
 	Launch(slot, dir string, spec agents.AgentSpec) (Plan, error)
 	// Attach prepares focusing or attaching the existing session for slot.
 	Attach(slot string) (Plan, error)

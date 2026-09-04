@@ -45,14 +45,20 @@ func (c *Client) Live() ([]core.Session, error) {
 }
 
 // Attach focuses the Herdr tab hosting slot's agent. It returns a run plan, so
-// nav stays on screen while focus moves to the agent's tab. Returns a wrapped
-// ErrNoSession when no live agent matches the slot.
+// nav stays on screen while focus moves to the agent's tab.
+//
+// Building the plan performs no I/O, as launcher.Backend requires: nav calls
+// Attach from inside Update, the Bubble Tea event loop, where a subprocess call
+// would block every re-render and keypress and hang nav outright if the Herdr
+// server stalled. Both the lookup and the focus happen when the plan runs, so a
+// slot with no live agent reports a wrapped ErrNoSession from there — nav
+// surfaces it through execDoneMsg.
 func (c *Client) Attach(slot string) (launcher.Plan, error) {
-	tab, err := c.tabFor(context.Background(), slot)
-	if err != nil {
-		return launcher.Plan{}, err
-	}
 	return launcher.RunPlan(func(ctx context.Context) error {
+		tab, err := c.tabFor(ctx, slot)
+		if err != nil {
+			return err
+		}
 		return c.call(ctx, nil, "tab", "focus", tab)
 	}), nil
 }
@@ -90,7 +96,15 @@ const (
 //
 // It is idempotent, as launcher.Backend requires: a slot whose agent is already
 // live resolves as Attach would, because `herdr tab create` always creates and
-// would otherwise leave a duplicate tab behind on every launch.
+// would otherwise leave a duplicate tab behind on every launch. Two things
+// enforce that, and both are needed. The live check runs inside the plan, at
+// execution time — nav builds the plan in Update but runs it later in a
+// tea.Cmd, so a check made here would already be stale. And singleflight
+// collapses launches of the same slot that overlap, which the check alone
+// cannot catch because both would pass it before either created a tab.
+//
+// Only argument validation is synchronous, so nav can report it at once; every
+// subprocess call happens when the plan runs.
 func (c *Client) Launch(slot, dir string, spec agents.AgentSpec) (launcher.Plan, error) {
 	if slot == "" {
 		return launcher.Plan{}, errors.New("herdr: empty slot")
@@ -100,15 +114,6 @@ func (c *Client) Launch(slot, dir string, spec agents.AgentSpec) (launcher.Plan,
 	}
 	if spec.Bin == "" {
 		return launcher.Plan{}, errors.New("herdr: agent has no Bin")
-	}
-	// A synchronous precheck surfaces a genuine backend failure (a dead
-	// server, an unreachable Herdr) immediately from Launch itself, rather
-	// than only once the plan runs. ErrNoSession is not an error here — it
-	// just means nothing is live *yet*; the authoritative, non-stale
-	// create-or-focus decision is made again inside the closure below, at
-	// execution time, which is what actually prevents the duplicate tab.
-	if _, err := c.tabFor(context.Background(), slot); err != nil && !errors.Is(err, ErrNoSession) {
-		return launcher.Plan{}, err
 	}
 	return launcher.RunPlan(func(ctx context.Context) error {
 		// singleflight collapses concurrent launches of the SAME slot into one
