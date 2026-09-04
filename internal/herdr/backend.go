@@ -2,8 +2,10 @@ package herdr
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/launcher"
 )
 
 // Live reports the agents Herdr currently hosts, as core.Session values keyed
@@ -36,4 +38,34 @@ func (c *Client) Live() ([]core.Session, error) {
 		})
 	}
 	return out, nil
+}
+
+// Attach focuses the Herdr tab hosting slot's agent. It returns a run plan, so
+// nav stays on screen while focus moves to the agent's tab. Returns a wrapped
+// ErrNoSession when no live agent matches the slot.
+func (c *Client) Attach(slot string) (launcher.Plan, error) {
+	tab, err := c.tabFor(context.Background(), slot)
+	if err != nil {
+		return launcher.Plan{}, err
+	}
+	return launcher.RunPlan(func(ctx context.Context) error {
+		return c.call(ctx, nil, "tab", "focus", tab)
+	}), nil
+}
+
+// tabFor returns the tab id hosting slot's agent, or a wrapped ErrNoSession.
+func (c *Client) tabFor(ctx context.Context, slot string) (string, error) {
+	agents, err := c.agentList(ctx)
+	if err != nil {
+		return "", err
+	}
+	for _, a := range agents {
+		if a.Agent == "" {
+			continue
+		}
+		if SlotIDForPath(a.Cwd) == slot {
+			return a.TabID, nil
+		}
+	}
+	return "", fmt.Errorf("%w: %s", ErrNoSession, slot)
 }
