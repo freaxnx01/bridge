@@ -34,6 +34,17 @@ func (h *restHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		restCall(w, r, h.deps.handleListTree)
 	case "search_code":
 		restCall(w, r, h.deps.handleSearchCode)
+	case "put_file":
+		// MCP enforces this by not registering the tool on a read-only server
+		// (internal/mcp/server.go:82-93); REST has no registration step, so
+		// the check is explicit here. The path allowlist, confirm=true draft
+		// gate and sha-required-on-update check all live inside handlePutFile —
+		// reimplementing any of them here is how the two transports drift.
+		if h.deps.ReadOnly {
+			restError(w, http.StatusForbidden, "write tools are disabled on this server")
+			return
+		}
+		restCall(w, r, h.deps.handlePutFile)
 	default:
 		restError(w, http.StatusNotFound, "unknown tool")
 	}

@@ -118,3 +118,43 @@ func TestRESTHandler_ReadFile_HandlerErrorIs500(t *testing.T) {
 		t.Fatalf("want 500, got %d (%s)", w.Code, w.Body.String())
 	}
 }
+
+func TestRESTHandler_PutFile_RefusedWhenReadOnly(t *testing.T) {
+	gh := newFakeFull("github")
+	deps := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	deps.ReadOnly = true
+
+	w := restRequest(t, deps, "put_file",
+		`{"forge":"github","owner":"o","repo":"r","path":"docs/x.md","content":"hi","message":"m","confirm":true}`)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("want 403, got %d (%s)", w.Code, w.Body.String())
+	}
+	if gh.fakePutFile.putCalled {
+		t.Fatalf("put_file must not have been called on a read-only server")
+	}
+}
+
+func TestRESTHandler_PutFile_WithoutConfirmReturnsDraft(t *testing.T) {
+	// The confirm gate lives inside handlePutFile — REST must not pre-empt it,
+	// and a draft is a successful response, not an error.
+	gh := newFakeFull("github")
+	deps := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	w := restRequest(t, deps, "put_file",
+		`{"forge":"github","owner":"o","repo":"r","path":"docs/x.md","content":"hi","message":"m"}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	var out putFileOutput
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if !out.Draft {
+		t.Fatalf("want draft=true, got %+v", out)
+	}
+	if gh.fakePutFile.putCalled {
+		t.Fatalf("put_file must not have been called without confirm=true")
+	}
+}
