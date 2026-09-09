@@ -20,9 +20,19 @@ jobs:
       default-model: claude-sonnet-5
       pipeline-ref: v1
       pre-preview: true
-      # v1 has no auto turn-budget heuristic (classify-turns.sh is unreleased,
-      # main-only as of 2026-08-12) — its default max-turns is 30, too low
-      # for a multi-task /enrich plan (issue #235's 4-task plan hit
-      # error_max_turns with nothing committed). 120 matches the heuristic's
-      # own tier for a 4-task plan once that feature ships.
+      # The pinned v1 ref has no auto turn-budget heuristic — classify-turns.sh
+      # is on agent-workflow's main but has never been released, because the
+      # moving v1 tag is 134 commits stale (agent-workflow#261). Until v1 moves,
+      # this pin's default max-turns is 30 and every budget here is manual. 120
+      # matches the heuristic's own tier for a 4-task plan (issue #235's 4-task
+      # plan hit error_max_turns at the old 30 cap with nothing committed).
       max-turns: 120
+      # NOTE: `claude-timeout-minutes` is what this stub actually needs and it
+      # CANNOT be set here — the input does not exist at v1 (added later in
+      # agent-workflow 5287459), and naming an unknown input against a pinned
+      # ref fails as a bare startup_failure with no diagnostic
+      # (agent-workflow#262). Without it the action's own 10-minute default
+      # applies: issue #254's run was SIGKILLed at ~10.5 minutes with `exit
+      # 124` mid-implementation, nowhere near its 120-turn budget, and the
+      # truncated result file then surfaced only as "RESULT_FILE not valid
+      # JSON". Set it as soon as this stub can move off v1.
