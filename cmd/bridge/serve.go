@@ -19,6 +19,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/capture"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
+	imcp "github.com/freaxnx01/bridge/internal/mcp"
 	"github.com/freaxnx01/bridge/internal/overview"
 	"github.com/freaxnx01/bridge/internal/remote"
 	"github.com/freaxnx01/bridge/internal/web"
@@ -165,6 +166,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/repos", reposH)
 	apiToken := os.Getenv("BRIDGE_API_TOKEN")
 	apiMux.Handle("/api/capture/", requireBearer(apiToken, captureH))
+	// /api/tools/ shares the same Deps construction as bridge mcp serve so the
+	// two transports cannot drift on PathAllowlist, ReadOnly, or the client
+	// resolver. See buildMCPDeps in mcp.go and internal/mcp/rest.go.
+	toolDeps, err := buildMCPDeps()
+	if err != nil {
+		return err
+	}
+	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(toolDeps)))
 	apiMux.Handle("/api/agents", agentsH)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.
