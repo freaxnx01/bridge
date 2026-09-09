@@ -177,3 +177,30 @@ header) still apply regardless of the UI.
 | `list_repos` returns fewer repos than expected, with entries in `warnings` | A target's forge token couldn't be resolved (missing direnv scope) or its API call failed — check the warning text for which `(forge, owner)` and why |
 | `read_file`/`list_repos` with an `owner` but no `forge` errors out | This is intentional — `forge` is required alongside an explicit `owner` to avoid silently guessing which forge |
 | `create_issue` call "succeeds" but nothing shows up on GitHub/Forgejo | You didn't pass `confirm: true` — the response is a draft by design |
+
+---
+
+## REST API — the file toolset
+
+`read_file`, `list_tree`, `search_code` and `put_file` are also reachable
+over plain HTTP from `bridge serve` (the WebUI process), for clients that
+don't speak MCP:
+
+| Method | Path | Body |
+|---|---|---|
+| `POST` | `/api/tools/read_file` | same JSON as the MCP `read_file` tool |
+| `POST` | `/api/tools/list_tree` | same JSON as the MCP `list_tree` tool |
+| `POST` | `/api/tools/search_code` | same JSON as the MCP `search_code` tool |
+| `POST` | `/api/tools/put_file` | same JSON as the MCP `put_file` tool |
+
+Guarded by the same `BRIDGE_API_TOKEN` bearer that guards `/api/capture/`
+(reads included). `put_file` returns **403** when the server was built
+with `ReadOnly: true` — the exact behaviour MCP achieves by not
+registering the tool. `put_file` without `confirm: true` returns the
+handler's draft as a `200`, not an error. `search_code` is GitHub-only:
+a Forgejo target returns its warning in the response body rather than a
+silent empty result, so a caller can fall back to `list_tree` +
+`read_file`.
+
+Design and rationale:
+[`docs/superpowers/specs/2026-09-09-rest-file-tools-design.md`](superpowers/specs/2026-09-09-rest-file-tools-design.md).
