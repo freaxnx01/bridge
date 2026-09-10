@@ -170,3 +170,23 @@ func TestUpdate_ExecDoneMsgWithoutError_ClearsAStaleFailure(t *testing.T) {
 		t.Errorf("status = %q, want the stale failure cleared after a clean return", got)
 	}
 }
+
+// The reported bug: under the Herdr backend every launch happens inside the run
+// plan, so execDoneMsg is the only place a failure can surface. It was written
+// to Model.status, which nothing rendered — Enter on a dashboard row failed
+// silently and looked like a dead key.
+func TestExecDone_RunPlanError_IsReportedInTheFooter(t *testing.T) {
+	m := initialModel(Config{Backend: &fakeBackend{}})
+	m.width, m.height = 120, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+
+	failing := launcher.RunPlan(func(context.Context) error {
+		return errors.New("herdr: pane never became available after 5 attempts")
+	})
+	out, _ := m.Update(runPlanCmd(failing)())
+
+	if got := out.(Model).View(); !strings.Contains(got, "pane never became available") {
+		t.Error("a failed run plan must be visible on screen, not just stored in Model.status")
+	}
+}

@@ -801,17 +801,44 @@ func repoIssueTag(r repoRow) string {
 	return "  " + stWarn.Render(fmt.Sprintf("●%d", r.issueCount))
 }
 
-// hintLine renders the muted hint left-aligned with the version pinned to the
-// bottom-right of the terminal width.
+// hintLine renders the bottom line of a screen: the status notice when there is
+// one, otherwise the muted key hints. Model.status is where every nav outcome
+// already routes — backend launch/attach failures (execDoneMsg), clone and
+// worktree-create failures, agent resolution, and the overview's "⏎ show
+// link/path" — so a screen that never draws it reports nothing at all, and a
+// keypress whose effect is invisible looks like a dead key.
+//
+// The notice replaces the hint text instead of adding a line, so the frame
+// height does not depend on whether there is something to say (issues
+// #256/#258: the dashboard grid must not bounce).
 func (m Model) hintLine(left string) string {
-	l := stMuted.Render(left)
+	if notice := m.statusNotice(); notice != "" {
+		return m.footerLine(stText.Render(notice))
+	}
+	return m.footerLine(stMuted.Render(left))
+}
+
+// statusNotice is the status worth showing the user, or "" when there is
+// nothing to report. "ready" is the settled state, not a notice — it is what
+// entering a dashboard and every successful run plan set, so rendering it would
+// permanently displace the hints with a word that carries no information.
+func (m Model) statusNotice() string {
+	if m.status == "ready" {
+		return ""
+	}
+	return m.status
+}
+
+// footerLine lays out an already-styled left segment with the version pinned to
+// the bottom-right of the terminal width.
+func (m Model) footerLine(left string) string {
 	if m.cfg.Version == "" || m.width <= 0 {
-		return l
+		return left
 	}
 	r := stMuted.Render(m.cfg.Version)
-	gap := m.width - lipgloss.Width(l) - lipgloss.Width(r)
+	gap := m.width - lipgloss.Width(left) - lipgloss.Width(r)
 	if gap < 1 {
 		gap = 1
 	}
-	return l + strings.Repeat(" ", gap) + r
+	return left + strings.Repeat(" ", gap) + r
 }

@@ -518,3 +518,73 @@ func TestSessionDot_BlockedIsVisuallyDistinctFromWorking(t *testing.T) {
 		t.Error("a blocked agent needs the user; it must not render like a working one")
 	}
 }
+
+// The footer is the only place nav can report an outcome. Model.status is where
+// every error already routes (backend failures, clone/worktree failures, agent
+// resolution), so a status the view never draws makes those failures silent —
+// under the Herdr backend a failed launch leaves nav's screen untouched, which
+// is indistinguishable from a dead keypress.
+func TestViewDash_StatusNotice_ShownInTheFooter(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.status = "herdr: pane never became available after 5 attempts"
+
+	if got := m.View(); !strings.Contains(got, "pane never became available") {
+		t.Errorf("dashboard must render the status notice; footer was:\n%s", lastLine(got))
+	}
+}
+
+func TestViewPicker_StatusNotice_ShownInTheFooter(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.screen = screenPicker
+	m.status = "clone failed: repository not found"
+
+	if got := m.View(); !strings.Contains(got, "repository not found") {
+		t.Errorf("picker must render the status notice; footer was:\n%s", lastLine(got))
+	}
+}
+
+// "ready" is the settled state, not a notice: it must not displace the hints.
+func TestViewDash_ReadyStatus_KeepsTheHintLine(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.status = "ready"
+
+	got := m.View()
+	if !strings.Contains(got, "attach/launch") {
+		t.Error(`a "ready" status must leave the hint line in place`)
+	}
+	if strings.Contains(lastLine(got), "ready") {
+		t.Errorf(`"ready" must not be rendered as a notice; footer was: %s`, lastLine(got))
+	}
+}
+
+// A status notice replaces the hint text rather than adding a line, so the
+// frame height stays fixed (issues #256/#258 — the dashboard grid must not
+// bounce).
+func TestViewDash_StatusNotice_DoesNotChangeFrameHeight(t *testing.T) {
+	base := initialModel(Config{})
+	base.width, base.height = 120, 40
+	base.screen = screenDash
+	base.repo = core.Repo{Name: "bridge", Path: "/r"}
+
+	quiet := base
+	quiet.status = "ready"
+	noisy := base
+	noisy.status = "herdr: tab create failed"
+
+	if h1, h2 := lipgloss.Height(quiet.View()), lipgloss.Height(noisy.View()); h1 != h2 {
+		t.Errorf("frame height changed with a status notice: %d -> %d", h1, h2)
+	}
+}
+
+// lastLine is the rendered footer — the final non-empty line of a view.
+func lastLine(view string) string {
+	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
+	return lines[len(lines)-1]
+}
