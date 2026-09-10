@@ -47,8 +47,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m = m.normalizeForgeFilter()
 			return m, m.issueCountCmds(msg.rows)
 		}
+		// remoteState alone reports this: the Repos panel title renders
+		// "remote unavailable (cached rows shown)" from it. Routing the same
+		// words through m.status too would print them twice and, since a notice
+		// displaces the hint line, cost the picker every key hint on the first
+		// screen of an offline start — with no clear point, as a later
+		// successful remoteMsg does not reset the status.
 		m.remoteState = loadErr
-		m.status = "remote unavailable (cached rows shown)"
 		return m, nil
 
 	case dashRowsMsg:

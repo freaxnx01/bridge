@@ -16,6 +16,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   its idle/working/blocked lifecycle. Selected automatically via `HERDR_ENV`,
   overridable with `BRIDGE_LAUNCHER=tmux|herdr`.
 
+### Fixed
+
+- `bridge nav`: the status line is now rendered. `Model.status` is where every
+  nav outcome already routed — backend launch/attach failures, clone and
+  worktree-create failures, agent resolution, the overview's `⏎ show link/path`
+  — but no screen ever drew it, so all of them were silent. Under the Herdr
+  backend the entire launch runs inside the plan, which made a failed Enter on a
+  dashboard row indistinguishable from a dead keypress. The notice replaces the
+  hint text rather than adding a line, so the frame height is unchanged.
+- `bridge nav` Herdr mode: attaching an existing session now focuses the pane
+  hosting the agent (`agent focus`) instead of only its tab (`tab focus`).
+  Focusing the tab moved nothing when that tab was already the focused one — the
+  case when nav runs in another pane of the agent's own tab — so Enter on the row
+  did nothing at all. The tab-label fallback for an agent-less tab (a `pane run`
+  spec such as `code`) still uses `tab focus`, the only handle it has.
+
 ## [2.9.0] - 2026-07-26
 
 ### Added

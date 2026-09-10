@@ -47,8 +47,31 @@ func (c *Client) Live() ([]core.Session, error) {
 	return out, nil
 }
 
-// Attach focuses the Herdr tab hosting slot's agent. It returns a run plan, so
-// nav stays on screen while focus moves to the agent's tab.
+// focusTarget is where a slot's session lives. An agent occupies a pane, so
+// pane is the precise handle and is set whenever a live agent matched; tab is
+// the fallback for a tab hosting no agent, which has no pane worth focusing.
+// Exactly one of the two is set.
+type focusTarget struct {
+	pane string
+	tab  string
+}
+
+// focusArgs is the herdr CLI invocation that lands the user on the target.
+//
+// `tab focus` is deliberately NOT used for an agent: it moves focus no further
+// than the tab, so it is a silent no-op whenever that tab is already focused —
+// the case when nav runs in another pane of the agent's own tab — and in any
+// multi-pane tab it leaves focus on whichever pane it was already on. The agent
+// surface accepts the hosting pane id and focuses the pane itself.
+func (t focusTarget) focusArgs() []string {
+	if t.pane != "" {
+		return []string{"agent", "focus", t.pane}
+	}
+	return []string{"tab", "focus", t.tab}
+}
+
+// Attach focuses the Herdr pane hosting slot's agent. It returns a run plan, so
+// nav stays on screen while focus moves to the agent.
 //
 // Building the plan performs no I/O, as launcher.Backend requires: nav calls
 // Attach from inside Update, the Bubble Tea event loop, where a subprocess call
@@ -58,26 +81,27 @@ func (c *Client) Live() ([]core.Session, error) {
 // surfaces it through execDoneMsg.
 func (c *Client) Attach(slot string) (launcher.Plan, error) {
 	return launcher.RunPlan(func(ctx context.Context) error {
-		tab, err := c.tabFor(ctx, slot)
+		target, err := c.targetFor(ctx, slot)
 		if err != nil {
 			return err
 		}
-		return c.call(ctx, nil, "tab", "focus", tab)
+		return c.call(ctx, nil, target.focusArgs()...)
 	}), nil
 }
 
-// tabFor returns the tab id hosting slot's agent, or a wrapped ErrNoSession.
-func (c *Client) tabFor(ctx context.Context, slot string) (string, error) {
+// targetFor resolves slot to the pane hosting its agent, or to an agent-less
+// tab carrying its label, or a wrapped ErrNoSession.
+func (c *Client) targetFor(ctx context.Context, slot string) (focusTarget, error) {
 	agentsLive, err := c.agentList(ctx)
 	if err != nil {
-		return "", err
+		return focusTarget{}, err
 	}
 	for _, a := range agentsLive {
 		if a.Agent == "" || !c.inWorkspace(a.WorkspaceID) {
 			continue
 		}
 		if SlotIDForPath(a.Cwd) == slot {
-			return a.TabID, nil
+			return focusTarget{pane: a.PaneID}, nil
 		}
 	}
 	// Fall back to the tab label. A spec that is not a Herdr agent kind (the
@@ -87,14 +111,14 @@ func (c *Client) tabFor(ctx context.Context, slot string) (string, error) {
 	// so the label is the one handle on an agent-less tab.
 	tabs, err := c.tabList(ctx)
 	if err != nil {
-		return "", err
+		return focusTarget{}, err
 	}
 	for _, tb := range tabs {
 		if tb.Label == slot && c.inWorkspace(tb.WorkspaceID) {
-			return tb.TabID, nil
+			return focusTarget{tab: tb.TabID}, nil
 		}
 	}
-	return "", fmt.Errorf("%w: %s", ErrNoSession, slot)
+	return focusTarget{}, fmt.Errorf("%w: %s", ErrNoSession, slot)
 }
 
 // inWorkspace reports whether id belongs to the workspace this client is pinned
@@ -157,9 +181,9 @@ func (c *Client) launchOnce(ctx context.Context, slot, dir string, spec agents.A
 		// already stale by the time the tab is created: a second Enter on the
 		// same row during that window would pass its own stale check and open a
 		// duplicate tab, which is precisely what attach-first exists to prevent.
-		tab, err := c.tabFor(ctx, slot)
+		target, err := c.targetFor(ctx, slot)
 		if err == nil {
-			return c.call(ctx, nil, "tab", "focus", tab)
+			return c.call(ctx, nil, target.focusArgs()...)
 		}
 		if !errors.Is(err, ErrNoSession) {
 			return err

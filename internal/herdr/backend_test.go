@@ -76,15 +76,20 @@ func TestLive_UnmappablePath_IsSkipped(t *testing.T) {
 	}
 }
 
-func TestAttach_LiveSlot_ReturnsARunPlanThatFocusesTheTab(t *testing.T) {
+// An agent occupies a PANE. Resolving a slot only as far as its tab means
+// `tab focus` is a no-op whenever that tab is already the focused one — the
+// case when nav runs in a second pane of the agent's own tab — so Enter on the
+// row moves nothing and reports nothing. `agent focus <pane>` lands the user on
+// the agent itself.
+func TestAttach_LiveSlot_ReturnsARunPlanThatFocusesTheAgentsPane(t *testing.T) {
 	body, _ := fixtureRunner(t, "agent_list.json")
 	var calls [][]string
 	run := func(ctx context.Context, args ...string) ([]byte, error) {
 		calls = append(calls, args)
-		if args[0] == "agent" {
+		if len(args) >= 2 && args[0] == "agent" && args[1] == "list" {
 			return body(ctx, args...)
 		}
-		return []byte(`{"id":"cli:tab:focus","result":{"type":"ok"}}`), nil
+		return []byte(`{"id":"cli:agent:focus","result":{"type":"ok"}}`), nil
 	}
 	plan, err := (&Client{Run: run, Workspace: "w3"}).Attach("bridge-wt-foo")
 	if err != nil {
@@ -100,9 +105,9 @@ func TestAttach_LiveSlot_ReturnsARunPlanThatFocusesTheTab(t *testing.T) {
 	if err := fn(context.Background()); err != nil {
 		t.Fatalf("run: %v", err)
 	}
-	last := calls[len(calls)-1]
-	if len(last) < 3 || last[0] != "tab" || last[1] != "focus" || last[2] != "w3:t2" {
-		t.Errorf("argv = %v, want [tab focus w3:t2]", last)
+	// agent_list.json puts bridge-wt-foo's agent in pane w3:p4 of tab w3:t2.
+	if got := strings.Join(calls[len(calls)-1], " "); got != "agent focus w3:p4" {
+		t.Errorf("argv = %q, want %q", got, "agent focus w3:p4")
 	}
 }
 
@@ -308,9 +313,9 @@ func TestLaunch_SlotAlreadyLive_FocusesInsteadOfCreatingASecondTab(t *testing.T)
 	if sr.argvFor("tab", "create") != nil {
 		t.Error("a live slot must not create a second tab")
 	}
-	focus := sr.argvFor("tab", "focus")
-	if focus == nil || focus[2] != "w3:t2" {
-		t.Errorf("tab focus argv = %v, want [tab focus w3:t2]", focus)
+	focus := sr.argvFor("agent", "focus")
+	if focus == nil || focus[2] != "w3:p4" {
+		t.Errorf("agent focus argv = %v, want [agent focus w3:p4] — the agent's pane, not just its tab", focus)
 	}
 }
 
@@ -523,9 +528,9 @@ func TestLaunch_SlotGoesLiveBeforeThePlanRuns_FocusesInsteadOfCreating(t *testin
 	if sr.argvFor("tab", "create") != nil {
 		t.Error("the slot went live before the plan ran — it must focus, not create")
 	}
-	focus := sr.argvFor("tab", "focus")
-	if focus == nil || focus[2] != "w3:t2" {
-		t.Errorf("tab focus argv = %v, want [tab focus w3:t2]", focus)
+	focus := sr.argvFor("agent", "focus")
+	if focus == nil || focus[2] != "w3:p4" {
+		t.Errorf("agent focus argv = %v, want [agent focus w3:p4] — the agent's pane, not just its tab", focus)
 	}
 }
 
@@ -722,7 +727,7 @@ func TestAttach_AgentInAnotherWorkspace_DoesNotYankTheUserAcross(t *testing.T) {
 		t.Error("an agent in workspace w1 must not satisfy an attach for a w3-pinned client")
 	}
 	for _, a := range calls {
-		if len(a) >= 3 && a[0] == "tab" && a[1] == "focus" && strings.HasPrefix(a[2], "w1:") {
+		if len(a) >= 3 && a[1] == "focus" && strings.HasPrefix(a[2], "w1:") {
 			t.Errorf("focused %v — that is another workspace", a)
 		}
 	}
@@ -762,5 +767,61 @@ func TestLaunch_NonAgentSpecRelaunched_FocusesTheLabelledTabInsteadOfCreating(t 
 	sr.mu.Unlock()
 	if creates != 1 {
 		t.Errorf("tab create calls = %d, want 1 — an agent-less tab must still be found by its slot label", creates)
+	}
+}
+
+// The tab-label fallback exists for a spec that is not a Herdr agent kind (the
+// `code` editor runs via `pane run`, so Herdr registers no agent for it). There
+// is no pane to focus through the agent surface, so that case must keep using
+// `tab focus`.
+func TestAttach_AgentLessLabelledTab_StillFocusesTheTab(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if len(args) >= 2 && args[0] == "agent" && args[1] == "list" {
+			return []byte(`{"id":"x","result":{"agents":[],"type":"agent_list"}}`), nil
+		}
+		if len(args) >= 2 && args[0] == "tab" && args[1] == "list" {
+			return []byte(`{"id":"x","result":{"tabs":[{"tab_id":"w3:t7","label":"bridge","workspace_id":"w3"}],"type":"tab_list"}}`), nil
+		}
+		return []byte(`{"id":"x","result":{"type":"ok"}}`), nil
+	}
+	plan, err := (&Client{Run: run, Workspace: "w3"}).Attach("bridge")
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if err := plan.Run()(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.Join(calls[len(calls)-1], " "); got != "tab focus w3:t7" {
+		t.Errorf("argv = %q, want %q", got, "tab focus w3:t7")
+	}
+}
+
+// Herdr's `done` is not an exited agent: it is the same underlying idle state
+// as `idle`, reached when unseen background work finished, and a focus command
+// is what marks it seen. So a done agent is a real session and attaching to it
+// must focus its pane like any other — not error, and not fall through to the
+// tab-label branch.
+func TestAttach_DoneAgent_IsAliveAndItsPaneIsFocused(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if len(args) >= 2 && args[0] == "agent" && args[1] == "list" {
+			return []byte(`{"id":"x","result":{"agents":[
+				{"agent":"claude","agent_status":"done","cwd":"/repos/bridge","pane_id":"w3:p8","tab_id":"w3:t8","workspace_id":"w3"}
+			],"type":"agent_list"}}`), nil
+		}
+		return []byte(`{"id":"x","result":{"type":"ok"}}`), nil
+	}
+	plan, err := (&Client{Run: run, Workspace: "w3"}).Attach("bridge")
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if err := plan.Run()(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.Join(calls[len(calls)-1], " "); got != "agent focus w3:p8" {
+		t.Errorf("argv = %q, want %q", got, "agent focus w3:p8")
 	}
 }
