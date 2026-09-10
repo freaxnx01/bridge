@@ -137,6 +137,23 @@ func TestUpdatePicker_Esc_KeepsForgeFilter(t *testing.T) {
 	}
 }
 
+func TestUpdatePicker_Q_StillQuitsOnFirstPressWithFilterSet(t *testing.T) {
+	// esc gaining a second meaning must not make the picker hard to leave:
+	// q from a non-filter focus still quits immediately, filter or no filter.
+	m := initialModel(Config{})
+	m.filter.SetValue("workflow")
+	m.pickerFocus = focusList
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if cmd == nil {
+		t.Fatalf("q from focusList should quit on the first press")
+	}
+	if msg := cmd(); msg != tea.Quit() {
+		t.Errorf("q from focusList should return tea.Quit, got %#v", msg)
+	}
+}
+
 func TestUpdatePicker_Esc_WithLegendOpenClosesLegendNotFilter(t *testing.T) {
 	// The legend intercept (update.go:245-252) runs ahead of updatePicker.
 	m := initialModel(Config{})
@@ -194,10 +211,10 @@ func TestFlow_FilterSurvivesDashRoundTripThenEscClears(t *testing.T) {
 - [ ] **Step 2: Run the tests to verify they fail**
 
 ```bash
-go test ./internal/nav -run 'TestUpdatePicker_Esc|TestFlow_FilterSurvivesDashRoundTripThenEscClears' -v
+go test ./internal/nav -run 'TestUpdatePicker_Esc|TestUpdatePicker_Q_StillQuits|TestFlow_FilterSurvivesDashRoundTripThenEscClears' -v
 ```
 
-Expected: FAIL. `TestUpdatePicker_Esc_ClearsNonEmptyFilter`, `_ClearsFromFocusList`, `_WhitespaceOnlyFilterCountsAsSet` and the flow test fail because esc still quits unconditionally, so the filter is never cleared and a non-nil quit command comes back. `_EmptyFilterStillQuits`, `_KeepsForgeFilter` and `_WithLegendOpenClosesLegendNotFilter` should already PASS — they pin behaviour that must not regress.
+Expected: FAIL. `TestUpdatePicker_Esc_ClearsNonEmptyFilter`, `_ClearsFromFocusList`, `_WhitespaceOnlyFilterCountsAsSet` and the flow test fail because esc still quits unconditionally, so the filter is never cleared and a non-nil quit command comes back. `_EmptyFilterStillQuits`, `_KeepsForgeFilter`, `_WithLegendOpenClosesLegendNotFilter` and `TestUpdatePicker_Q_StillQuitsOnFirstPressWithFilterSet` should already PASS — they pin behaviour that must not regress.
 
 - [ ] **Step 3: Write the minimal implementation**
 
@@ -231,10 +248,10 @@ with:
 - [ ] **Step 4: Run the tests to verify they pass**
 
 ```bash
-go test ./internal/nav -run 'TestUpdatePicker_Esc|TestFlow_FilterSurvivesDashRoundTripThenEscClears' -v
+go test ./internal/nav -run 'TestUpdatePicker_Esc|TestUpdatePicker_Q_StillQuits|TestFlow_FilterSurvivesDashRoundTripThenEscClears' -v
 ```
 
-Expected: PASS, all seven.
+Expected: PASS, all eight.
 
 Then the full package, to catch anything that relied on esc quitting:
 
@@ -293,7 +310,7 @@ func TestViewPicker_HintLine_AdvertisesEscClear(t *testing.T) {
 }
 ```
 
-If `view_test.go` does not already import `strings`, add it. `stripANSI` is the existing helper in `internal/nav/navtest_test.go:110-116`.
+`view_test.go` already imports `strings` (`view_test.go:1-11`); `stripANSI` is the existing helper at `internal/nav/navtest_test.go:115`.
 
 - [ ] **Step 2: Run the test to verify it fails**
 
