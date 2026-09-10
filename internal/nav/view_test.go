@@ -578,8 +578,15 @@ func TestViewDash_StatusNotice_DoesNotChangeFrameHeight(t *testing.T) {
 	noisy := base
 	noisy.status = "herdr: tab create failed"
 
-	if h1, h2 := lipgloss.Height(quiet.View()), lipgloss.Height(noisy.View()); h1 != h2 {
+	qv, nv := quiet.View(), noisy.View()
+	if h1, h2 := lipgloss.Height(qv), lipgloss.Height(nv); h1 != h2 {
 		t.Errorf("frame height changed with a status notice: %d -> %d", h1, h2)
+	}
+	// lipgloss.Height counts newlines, so it cannot see a line the terminal
+	// soft-wraps into an extra row. Without this the test would certify a
+	// stability it never actually checked.
+	if got := widestLine(nv); got > noisy.width {
+		t.Errorf("widest line = %d, want <= %d — a wrapped footer adds a row", got, noisy.width)
 	}
 }
 
@@ -587,4 +594,88 @@ func TestViewDash_StatusNotice_DoesNotChangeFrameHeight(t *testing.T) {
 func lastLine(view string) string {
 	lines := strings.Split(strings.TrimRight(view, "\n"), "\n")
 	return lines[len(lines)-1]
+}
+
+// widestLine is the rendered width of the widest line in a view — what the
+// terminal actually has to fit. lipgloss.Height counts newlines only, so it is
+// blind to a line the terminal soft-wraps; only this catches an overflow.
+func widestLine(view string) int {
+	widest := 0
+	for _, line := range strings.Split(view, "\n") {
+		if w := lipgloss.Width(line); w > widest {
+			widest = w
+		}
+	}
+	return widest
+}
+
+// Model.status is arbitrary text — a herdr server message, an err.Error(), a
+// clone path. The hint text it replaces was fixed and known to fit; a notice
+// that overruns the width soft-wraps, making the frame one row taller than the
+// terminal and scrolling the grid (#256/#258).
+func TestViewDash_LongStatusNotice_StaysWithinTerminalWidth(t *testing.T) {
+	m := initialModel(Config{Version: "dev"})
+	m.width, m.height = 120, 40
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.status = "herdr: " + strings.Repeat("x", 200)
+
+	if got := widestLine(m.View()); got > m.width {
+		t.Errorf("widest line = %d, want <= %d — a long notice must be truncated", got, m.width)
+	}
+}
+
+// A gitError carries git's full CombinedOutput, so "worktree create failed: …"
+// routinely spans several lines. The footer is a one-line budget on both
+// screens: view.go subtracts lipgloss.Height(hint) from the panel height, so a
+// taller footer silently shrinks the panels or overflows the frame.
+func TestStatusNotice_MultilineStatus_RendersAsOneFooterLine(t *testing.T) {
+	rows := make([]repoRow, 40)
+	for i := range rows {
+		rows[i] = repoRow{label: "github/public/repo"}
+	}
+	for _, screen := range []struct {
+		name  string
+		setup func(*Model)
+	}{
+		{"dash", func(m *Model) { m.screen = screenDash; m.repo = core.Repo{Name: "bridge", Path: "/r"} }},
+		{"picker", func(m *Model) { m.screen = screenPicker; m.localRepos = rows }},
+	} {
+		t.Run(screen.name, func(t *testing.T) {
+			base := initialModel(Config{Version: "dev"})
+			base.width, base.height = 120, 40
+			screen.setup(&base)
+
+			quiet := base
+			quiet.status = "ready"
+			noisy := base
+			noisy.status = "worktree create failed: fatal: boom\nhint: one\nhint: two"
+
+			if h1, h2 := lipgloss.Height(quiet.View()), lipgloss.Height(noisy.View()); h1 != h2 {
+				t.Errorf("frame height %d -> %d: a multi-line status must not grow the footer", h1, h2)
+			}
+		})
+	}
+}
+
+// The Repos panel title already reports an unreachable remote (view.go), so
+// routing the same words through Model.status renders them twice — and, now
+// that a notice displaces the hint line, costs the picker every key hint on the
+// first screen of an offline start. Nothing clears it either: a later
+// successful remoteMsg leaves status untouched.
+func TestPicker_RemoteUnavailable_KeepsHintsAndSaysItOnce(t *testing.T) {
+	m := initialModel(Config{Version: "dev"})
+	m.width, m.height = 120, 40
+	m.screen = screenPicker
+	m.localRepos = []repoRow{{label: "github/public/bridge"}}
+
+	out, _ := m.Update(remoteErrMsg{})
+	view := out.(Model).View()
+
+	if !strings.Contains(view, "q quit") {
+		t.Error("an unreachable remote must not cost the picker its key hints")
+	}
+	if n := strings.Count(view, "remote unavailable"); n != 1 {
+		t.Errorf("rendered %d times, want 1 — the Repos panel title is the one place for it", n)
+	}
 }
