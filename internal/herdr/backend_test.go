@@ -797,3 +797,31 @@ func TestAttach_AgentLessLabelledTab_StillFocusesTheTab(t *testing.T) {
 		t.Errorf("argv = %q, want %q", got, "tab focus w3:t7")
 	}
 }
+
+// Herdr's `done` is not an exited agent: it is the same underlying idle state
+// as `idle`, reached when unseen background work finished, and a focus command
+// is what marks it seen. So a done agent is a real session and attaching to it
+// must focus its pane like any other — not error, and not fall through to the
+// tab-label branch.
+func TestAttach_DoneAgent_IsAliveAndItsPaneIsFocused(t *testing.T) {
+	var calls [][]string
+	run := func(_ context.Context, args ...string) ([]byte, error) {
+		calls = append(calls, args)
+		if len(args) >= 2 && args[0] == "agent" && args[1] == "list" {
+			return []byte(`{"id":"x","result":{"agents":[
+				{"agent":"claude","agent_status":"done","cwd":"/repos/bridge","pane_id":"w3:p8","tab_id":"w3:t8","workspace_id":"w3"}
+			],"type":"agent_list"}}`), nil
+		}
+		return []byte(`{"id":"x","result":{"type":"ok"}}`), nil
+	}
+	plan, err := (&Client{Run: run, Workspace: "w3"}).Attach("bridge")
+	if err != nil {
+		t.Fatalf("Attach: %v", err)
+	}
+	if err := plan.Run()(context.Background()); err != nil {
+		t.Fatalf("run: %v", err)
+	}
+	if got := strings.Join(calls[len(calls)-1], " "); got != "agent focus w3:p8" {
+		t.Errorf("argv = %q, want %q", got, "agent focus w3:p8")
+	}
+}
