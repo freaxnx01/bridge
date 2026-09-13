@@ -80,10 +80,10 @@ type searchCodeOutput struct {
 // come back.
 func (d Deps) handleSearchCode(ctx context.Context, _ *mcp.CallToolRequest, in searchCodeInput) (*mcp.CallToolResult, searchCodeOutput, error) {
 	if in.Query == "" {
-		return nil, searchCodeOutput{}, fmt.Errorf("search code: query is required")
+		return nil, searchCodeOutput{}, invalidInput(fmt.Errorf("search code: query is required"))
 	}
 	if in.Repo != "" && (in.Forge == "" || in.Owner == "") {
-		return nil, searchCodeOutput{}, fmt.Errorf("search code: repo %q requires forge and owner", in.Repo)
+		return nil, searchCodeOutput{}, invalidInput(fmt.Errorf("search code: repo %q requires forge and owner", in.Repo))
 	}
 	targets, err := d.targets(in.Forge, in.Owner)
 	if err != nil {

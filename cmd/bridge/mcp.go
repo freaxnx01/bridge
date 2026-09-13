@@ -239,6 +239,33 @@ func isLoopbackHost(host string) bool {
 	return ip != nil && ip.IsLoopback()
 }
 
+// buildMCPDeps resolves the imcp.Deps used by both the MCP transport
+// (bridge mcp serve) and the REST /api/tools/ transport (bridge serve).
+// Sharing the construction is what stops the two surfaces drifting on
+// PathAllowlist, ReadOnly, or the client resolver.
+func buildMCPDeps() (imcp.Deps, error) {
+	roots := reposRoots()
+
+	logPath, err := auditLogPath()
+	if err != nil {
+		return imcp.Deps{}, err
+	}
+	auditLogger, err := audit.Open(logPath)
+	if err != nil {
+		return imcp.Deps{}, fmt.Errorf("open audit log: %w", err)
+	}
+
+	return imcp.Deps{
+		ReadOnly:         mcpReadOnly || os.Getenv("BRIDGE_MCP_READONLY") == "1",
+		AllowDestructive: mcpAllowDestructive || os.Getenv("BRIDGE_MCP_ALLOW_DESTRUCTIVE") == "1",
+		DefaultOwners:    parseOwners(os.Getenv("BRIDGE_MCP_OWNERS")),
+		PathAllowlist:    parsePathAllowlist(firstNonEmpty(os.Getenv("BRIDGE_MCP_PUT_FILE_ALLOWLIST"), mcpPutFileAllowlist)),
+		ClientFor:        newCachingClientResolver(clientForMCP(roots)),
+		BuildOverview:    buildOverviewSnapshot,
+		Audit:            auditLogger,
+	}, nil
+}
+
 func runMCPServe(cmd *cobra.Command, _ []string) error {
 	if mcpNoAuth && mcpAuthMode == "oauth" {
 		return fmt.Errorf("--no-auth is incompatible with --auth=oauth: OAuth mode always requires a bearer token")
@@ -247,25 +274,9 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	roots := reposRoots()
-
-	logPath, err := auditLogPath()
+	deps, err := buildMCPDeps()
 	if err != nil {
 		return err
-	}
-	auditLogger, err := audit.Open(logPath)
-	if err != nil {
-		return fmt.Errorf("open audit log: %w", err)
-	}
-
-	deps := imcp.Deps{
-		ReadOnly:         mcpReadOnly || os.Getenv("BRIDGE_MCP_READONLY") == "1",
-		AllowDestructive: mcpAllowDestructive || os.Getenv("BRIDGE_MCP_ALLOW_DESTRUCTIVE") == "1",
-		DefaultOwners:    parseOwners(os.Getenv("BRIDGE_MCP_OWNERS")),
-		PathAllowlist:    parsePathAllowlist(firstNonEmpty(os.Getenv("BRIDGE_MCP_PUT_FILE_ALLOWLIST"), mcpPutFileAllowlist)),
-		ClientFor:        newCachingClientResolver(clientForMCP(roots)),
-		BuildOverview:    buildOverviewSnapshot,
-		Audit:            auditLogger,
 	}
 
 	srv := imcp.NewServer(deps)
