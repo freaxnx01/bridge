@@ -44,9 +44,9 @@ func TestRESTHandler_MalformedBody(t *testing.T) {
 
 func TestRESTHandler_ReadFile_ReturnsHandlerOutput(t *testing.T) {
 	gh := newFakeFull("github")
-	gh.fakeFiles.file = []byte("hello")
-	gh.fakeFiles.sha = "abc123"
-	gh.fakeFiles.found = true
+	gh.file = []byte("hello")
+	gh.sha = "abc123"
+	gh.found = true
 	deps := depsWith(map[string]*fakeFull{"github": gh}, nil)
 
 	w := restRequest(t, deps, "read_file",
@@ -66,7 +66,7 @@ func TestRESTHandler_ReadFile_ReturnsHandlerOutput(t *testing.T) {
 
 func TestRESTHandler_ListTree_ReturnsHandlerOutput(t *testing.T) {
 	gh := newFakeFull("github")
-	gh.fakeTree.entries = []forge.TreeEntry{{Path: "a.md", Type: "file"}}
+	gh.entries = []forge.TreeEntry{{Path: "a.md", Type: "file"}}
 	deps := depsWith(map[string]*fakeFull{"github": gh}, nil)
 
 	w := restRequest(t, deps, "list_tree",
@@ -130,7 +130,7 @@ func TestRESTHandler_PutFile_RefusedWhenReadOnly(t *testing.T) {
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("want 403, got %d (%s)", w.Code, w.Body.String())
 	}
-	if gh.fakePutFile.putCalled {
+	if gh.putCalled {
 		t.Fatalf("put_file must not have been called on a read-only server")
 	}
 }
@@ -154,7 +154,7 @@ func TestRESTHandler_PutFile_WithoutConfirmReturnsDraft(t *testing.T) {
 	if !out.Draft {
 		t.Fatalf("want draft=true, got %+v", out)
 	}
-	if gh.fakePutFile.putCalled {
+	if gh.putCalled {
 		t.Fatalf("put_file must not have been called without confirm=true")
 	}
 }
@@ -179,7 +179,7 @@ func TestRESTHandler_PutFile_ConfirmedWriteSucceeds(t *testing.T) {
 	if out.Draft {
 		t.Fatalf("want draft=false on a confirmed write, got %+v", out)
 	}
-	if !gh.fakePutFile.putCalled {
+	if !gh.putCalled {
 		t.Fatalf("put_file should have been called on a confirmed write")
 	}
 }
