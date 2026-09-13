@@ -67,6 +67,17 @@ to be added explicitly at the REST edge:
 - **`put_file` is registered only when `!deps.ReadOnly`** (`internal/mcp/server.go:82-93`).
   A read-only server must answer **403** on `/api/tools/put_file`, not expose a write path
   MCP deliberately withholds.
+
+  **Amended after review:** this was necessary but not sufficient. `ReadOnly` resolves from
+  `mcpReadOnly`, a flag registered on `mcp serve` and therefore always false under
+  `bridge serve` — so the guard never fired for the transport it was written for, and the
+  WebUI port gained a writable endpoint by default. Worse, `requireBearer` disables auth
+  entirely when `BRIDGE_API_TOKEN` is unset, so the default could be an *unauthenticated*
+  file-write endpoint.
+
+  `bridge serve` therefore takes an explicit **`--allow-writes`** flag, default false:
+  writes over REST are opt-in, and an explicit read-only setting always wins. A new
+  transport must not silently widen what a command can do.
 - **Bearer auth.** `/api/capture/` is wrapped in `requireBearer(apiToken, …)`
   (`cmd/bridge/serve.go:167`); `/api/tools/` gets the same wrapper. All four tools are
   guarded, reads included — the repo's existing stance is that anything touching repo

@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strings"
 
@@ -65,6 +66,12 @@ func restCall[In any, Out any](
 
 	_, out, err := handle(r.Context(), nil, in)
 	if err != nil {
+		// A caller's bad input is a 400, not a 500 — over MCP the two are
+		// indistinguishable, but a REST client needs to tell them apart.
+		if errors.Is(err, ErrInvalidInput) {
+			restError(w, http.StatusBadRequest, err.Error())
+			return
+		}
 		restError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

@@ -158,3 +158,40 @@ func TestRESTHandler_PutFile_WithoutConfirmReturnsDraft(t *testing.T) {
 		t.Fatalf("put_file must not have been called without confirm=true")
 	}
 }
+
+func TestRESTHandler_PutFile_ConfirmedWriteSucceeds(t *testing.T) {
+	// The happy path: confirm=true on a writable server actually writes and
+	// returns a non-draft result. Previously only the two refusal branches were
+	// covered, so nothing proved a REST caller could write at all.
+	gh := newFakeFull("github")
+	deps := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	w := restRequest(t, deps, "put_file",
+		`{"forge":"github","owner":"o","repo":"r","path":"docs/x.md","content":"hi","message":"m","confirm":true}`)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("want 200, got %d (%s)", w.Code, w.Body.String())
+	}
+	var out putFileOutput
+	if err := json.NewDecoder(w.Body).Decode(&out); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if out.Draft {
+		t.Fatalf("want draft=false on a confirmed write, got %+v", out)
+	}
+	if !gh.fakePutFile.putCalled {
+		t.Fatalf("put_file should have been called on a confirmed write")
+	}
+}
+
+func TestRESTHandler_InvalidInput_Is400NotServerError(t *testing.T) {
+	// A REST caller must be able to tell its own mistake from a server failure.
+	// search_code with no query is a client error, not a 500.
+	deps := depsWith(map[string]*fakeFull{"github": newFakeFull("github")}, nil)
+
+	w := restRequest(t, deps, "search_code", `{"query":""}`)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("want 400, got %d (%s)", w.Code, w.Body.String())
+	}
+}

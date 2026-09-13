@@ -27,6 +27,7 @@ import (
 
 var servePort int
 var serveHost string
+var serveAllowWrites bool
 
 func init() {
 	rootCmd.AddCommand(newServeCmd())
@@ -40,7 +41,24 @@ func newServeCmd() *cobra.Command {
 	}
 	cmd.Flags().IntVar(&servePort, "port", 7777, "port to listen on")
 	cmd.Flags().StringVar(&serveHost, "host", "127.0.0.1", "host to bind to")
+	cmd.Flags().BoolVar(&serveAllowWrites, "allow-writes", false,
+		"expose write tools (put_file) over /api/tools/; off by default")
 	return cmd
+}
+
+// restDeps derives the Deps for the REST tool surface. `bridge serve` had no
+// write surface before /api/tools/ existed, so writes stay off unless the
+// operator opts in with --allow-writes. An explicit read-only setting
+// (--read-only on mcp serve, or BRIDGE_MCP_READONLY=1) always wins.
+//
+// The default matters more than it looks: requireBearer disables auth entirely
+// when BRIDGE_API_TOKEN is unset, so a writable default would mean an
+// unauthenticated file-write endpoint on the WebUI port.
+func restDeps(base imcp.Deps, allowWrites bool) imcp.Deps {
+	if !allowWrites {
+		base.ReadOnly = true
+	}
+	return base
 }
 
 // requireBearer gates a handler behind a static bearer token. When token is
@@ -173,7 +191,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(toolDeps)))
+	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(restDeps(toolDeps, serveAllowWrites))))
 	apiMux.Handle("/api/agents", agentsH)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.

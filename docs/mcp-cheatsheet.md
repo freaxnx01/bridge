@@ -204,3 +204,17 @@ silent empty result, so a caller can fall back to `list_tree` +
 
 Design and rationale:
 [`docs/superpowers/specs/2026-09-09-rest-file-tools-design.md`](superpowers/specs/2026-09-09-rest-file-tools-design.md).
+
+### Write access over REST
+
+`/api/tools/put_file` is **off by default** on `bridge serve`. Enable it explicitly:
+
+```bash
+bridge serve --allow-writes
+```
+
+`BRIDGE_MCP_READONLY=1` always wins, whatever the flag says.
+
+The default is deliberate. `bridge serve` had no write surface before `/api/tools/`
+existed, and `requireBearer` disables auth entirely when `BRIDGE_API_TOKEN` is unset —
+so a writable default could mean an unauthenticated file-write endpoint on the WebUI port.

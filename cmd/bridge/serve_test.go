@@ -85,3 +85,29 @@ func TestAPIMux_ToolsAcceptsValidBearer(t *testing.T) {
 		t.Fatalf("status = 401, want the bearer to have passed through")
 	}
 }
+
+func TestRestDeps_WritesDisabledByDefault(t *testing.T) {
+	// `bridge serve` previously had no write surface at all. Adding /api/tools/
+	// must not quietly turn the WebUI port into a file-writing endpoint —
+	// especially since requireBearer disables auth entirely when
+	// BRIDGE_API_TOKEN is unset.
+	got := restDeps(imcp.Deps{ReadOnly: false}, false)
+	if !got.ReadOnly {
+		t.Fatal("bridge serve must not expose put_file over REST by default")
+	}
+}
+
+func TestRestDeps_AllowWritesEnablesTheWritePath(t *testing.T) {
+	got := restDeps(imcp.Deps{ReadOnly: false}, true)
+	if got.ReadOnly {
+		t.Fatal("--allow-writes should enable the REST write path")
+	}
+}
+
+func TestRestDeps_ExistingReadOnlySettingWins(t *testing.T) {
+	// BRIDGE_MCP_READONLY=1 must not be overridable by --allow-writes.
+	got := restDeps(imcp.Deps{ReadOnly: true}, true)
+	if !got.ReadOnly {
+		t.Fatal("an explicit read-only setting must win over --allow-writes")
+	}
+}
