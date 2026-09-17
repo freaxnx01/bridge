@@ -2,7 +2,7 @@
 
 A scheduled decision engine that selects enriched issues for the agent-workflow pipeline.
 
-**Design doc:** [docs/specs/2026-07-27-bridge-dispatcher-design.md](docs/specs/2026-07-27-bridge-dispatcher-design.md)
+**Design docs:** [docs/specs/2026-07-27-bridge-dispatcher-design.md](docs/specs/2026-07-27-bridge-dispatcher-design.md), [docs/specs/2026-09-07-dispatch-usage-budget-design.md](docs/specs/2026-09-07-dispatch-usage-budget-design.md)
 
 ## What it does
 
@@ -10,7 +10,33 @@ A scheduled decision engine that selects enriched issues for the agent-workflow 
 - **bridge** owns the eligibility rules, dispatch caps, and ordering ladder.
 - **agent-workflow** owns model selection, the run pipeline, and per-model retry ticks.
 
-Each tick, dispatch reads open issues from every GitHub repo, applies eligibility filters, sorts by repo priority/deadline/type/size/age, applies per-repo and global WIP caps, and labels the selected issues with `ai-implement` to let the pipeline pick them up. The dispatcher runs on a systemd timer (22:00 dispatch, hourly retries from 23:00 to 06:00) or manually via `bridge dispatch now`. Runs are **dry-run only** during the first week — the timer is not enabled until the decisions look right.
+Each tick, dispatch reads open issues from every GitHub repo, applies eligibility filters, sorts by repo priority/deadline/type/size/age, applies the usage-budget rung plus per-repo and global WIP caps, and labels the selected issues with `ai-implement` to let the pipeline pick them up. The dispatcher runs on an hourly systemd timer, checks the current time against `schedule.windows`, and no-ops outside every configured window — or runs manually via `bridge dispatch now`, which is not window-gated. Runs are **dry-run only** during the first week — the timer is not enabled until the decisions look right.
+
+## Schedule windows
+
+`schedule.windows` in `dispatch.json` is the single source of truth for when dispatch acts — the systemd timer is a bare hourly heartbeat with no schedule of its own (see "Systemd timer and service" below). Each window is `{"from": "HH:MM", "to": "HH:MM", "budget_rung": bool}`:
+
+- `from` is inclusive, `to` is exclusive.
+- `from > to` wraps past midnight (e.g. `18:00`–`07:00` covers the overnight span).
+- `budget_rung` turns the usage-budget rung on for ticks that fall in that window.
+
+`--auto` (the systemd entry point) returns before any repo fetch when the current time matches no configured window. An explicit `bridge dispatch now` is the operator asking for a tick and is never window-gated, mirroring how `now` already ignores the pause flag.
+
+## Usage-budget rung
+
+Autonomous dispatch and interactive work (spec writing, `/enrich`, issue triage) draw on the same 5-hour rolling Claude subscription quota. The usage-budget rung reserves headroom for the operator during the day so an unattended run can't eat the window needed for the next spec.
+
+It measures combined trailing-window consumption from two local sources:
+- **Interactive** — Claude Code transcripts under `~/.claude/projects/**/*.jsonl`, priced by a per-model rate table (four terms: input, output, cache read, cache write).
+- **Pipeline** — a local ledger of runs `bridge dispatch` itself dispatched, each priced at a calibrated `mean_run_cost_usd`.
+
+The rung runs **ahead of** the nightly/global/per-repo caps in `ApplyCaps` — it protects the operator, not the machine, so once the window is spent nothing else about a candidate matters. It only applies on windows with `budget_rung: true`; a night window with `budget_rung: false` ignores usage entirely. The projected cost of a candidate run accumulates within a single tick, so a tick with headroom for two runs cannot slip a third through.
+
+**Fail closed.** If usage cannot be measured (unreadable transcripts, a corrupt ledger, or nonsensical budget config), every candidate on an active-rung window is refused with `budget-unknown` — unreadable usage is never treated as zero used.
+
+Skip reasons surfaced by `--dry-run` and `--json`:
+- `budget-exhausted <used>/<limit> USD` — the candidate's projected cost would cross the line
+- `budget-unknown` — usage could not be measured while the rung is active
 
 ## Eligibility
 
@@ -39,13 +65,14 @@ The sort is stable: equal-rank issues retain their input order.
 
 ## Caps
 
-Three independent caps limit dispatch, checked in this order:
+Four independent bounds limit dispatch, checked in this order:
 
-1. **Nightly cap** — Bounds unattended spend during non-business hours (22:00–06:00, when the timer runs). Prevents a spike of dispatches with no human oversight. Default: 5 dispatches per night. Resets daily at dispatch time (22:00).
-2. **Global open-PR cap** — Limits the operator's review capacity across all repos. Default: 3 open agent PRs total. Once reached, no further dispatch until some close.
-3. **Per-repo WIP cap** — Prevents conflicting concurrent PRs in one repo by limiting open agent PRs per repo. Default: 1 per repo. Configured per-repo via overrides in `dispatch.json`. Example: `"overrides": {"quotes": 2}` allows 2 concurrent PRs in the `quotes` repo.
+1. **Usage-budget rung** — See "Usage-budget rung" above. Active only on windows with `budget_rung: true`; refuses with `budget-exhausted`/`budget-unknown`.
+2. **Nightly cap** — Bounds unattended spend during the night window. Prevents a spike of dispatches with no human oversight. Default: 5 dispatches per night. Resets daily at the night window's start.
+3. **Global open-PR cap** — Limits the operator's review capacity across all repos. Default: 3 open agent PRs total. Once reached, no further dispatch until some close.
+4. **Per-repo WIP cap** — Prevents conflicting concurrent PRs in one repo by limiting open agent PRs per repo. Default: 1 per repo. Configured per-repo via overrides in `dispatch.json`. Example: `"overrides": {"quotes": 2}` allows 2 concurrent PRs in the `quotes` repo.
 
-All three must pass before an issue is dispatched. Dry-run shows which cap (if any) caused a skip (the first one that was exceeded in the order above).
+All four must pass before an issue is dispatched. Dry-run shows which bound (if any) caused a skip (the first one that was exceeded in the order above).
 
 ## Labels
 
@@ -97,6 +124,24 @@ Example with every key:
 
 ```json
 {
+  "schedule": {
+    "windows": [
+      {"from": "18:00", "to": "07:00", "budget_rung": false},
+      {"from": "07:00", "to": "18:00", "budget_rung": true}
+    ]
+  },
+  "budget": {
+    "window_hours": 5,
+    "window_budget_usd": 12.0,
+    "daytime_cap": 0.80,
+    "mean_run_cost_usd": 2.0,
+    "pricing": {
+      "claude-opus-4-7": {
+        "input": 15.0, "output": 75.0,
+        "cache_read": 1.5, "cache_write": 18.75
+      }
+    }
+  },
   "limits": {
     "global_open_prs": 3,
     "per_repo": 1,
@@ -106,23 +151,43 @@ Example with every key:
       "otherepo": 1
     }
   },
-  "schedule": {
-    "dispatch_at": "22:00",
-    "retry_until": "06:00"
-  },
   "repo_priority": ["agent-workflow", "ai-instructions", "*", "game-*"]
 }
 ```
 
+Rates in `budget.pricing` are USD per million tokens; `pricing` overrides the built-in table per model, and omitted models keep their compiled-in defaults.
+
 | Key | Type | Default | Meaning |
 |---|---|---|---|
+| `schedule.windows` | array of objects | see example above | Spans of the local day dispatch acts in; `from` inclusive, `to` exclusive, `from > to` wraps past midnight; `budget_rung` turns the usage-budget rung on for that window |
+| `budget.window_hours` | float | 5 | Length of the trailing quota window the rung measures |
+| `budget.window_budget_usd` | float | 12.0 | Calibrated USD-equivalent cost of a full 5h subscription window — pin this against `/usage` (see "Calibration" below) |
+| `budget.daytime_cap` | float | 0.80 | Fraction of `window_budget_usd` the rung allows before refusing; the remainder is reserved for the operator |
+| `budget.mean_run_cost_usd` | float | 2.0 | Calibrated per-run cost, used both for the ledger and for projecting a candidate's cost |
+| `budget.pricing` | object | {} | Per-model rate overrides (`input`/`output`/`cache_read`/`cache_write`, USD/Mtok); unnamed models keep their built-in defaults |
 | `limits.global_open_prs` | int | 3 | Max open agent PRs across all repos before dispatch is blocked |
 | `limits.per_repo` | int | 1 | Default max open agent PRs per repo (applies to all repos unless overridden) |
-| `limits.max_dispatches_per_night` | int | 5 | Max dispatches per night window (22:00–06:00) to bound unattended spend |
+| `limits.max_dispatches_per_night` | int | 5 | Max dispatches per night window to bound unattended spend |
 | `limits.overrides` | object | {} | Per-repo overrides (key = bare repo name, value = per-repo WIP cap) |
-| `schedule.dispatch_at` | string | "22:00" | Time of day for the main dispatch tick (HH:MM, 24-hour format) |
-| `schedule.retry_until` | string | "06:00" | Last hour to run retry ticks; no ticks after this time |
 | `repo_priority` | array of strings | [] (rung skipped) | Ordered list of repo-name patterns (`path.Match` glob syntax); a repo's dispatch priority is the index of the first pattern it matches, scanned in order. Unmatched repos rank after every entry. Empty/absent disables this rung entirely |
+
+**Upgrade note.** The retired `schedule.dispatch_at` / `schedule.retry_until` keys are ignored — `encoding/json` skips unknown fields, and `schedule.windows` falls back to the defaults shown above, so a pre-existing config keeps loading. After upgrading, reinstall the timer for the windows to take effect: `systemctl --user daemon-reload && systemctl --user restart bridge-dispatch.timer`.
+
+## Calibration
+
+`window_budget_usd` and `mean_run_cost_usd` are empirical constants — there is no API reporting the subscription window's remaining headroom, so both are proxies that need pinning against real usage:
+
+1. Run for about a week without enabling the timer (or with it enabled and the rung watched closely).
+2. At a few points across a 5h window, compare `bridge dispatch status` against `/usage` in an interactive session, and adjust `window_budget_usd` so the rung's reported utilization tracks `/usage`.
+3. After a handful of real pipeline runs, compare their `**Cost:**` figures in the run-report comments against `mean_run_cost_usd` and adjust.
+
+## Known approximations
+
+These are inherent to a proxy measurement, not bugs:
+
+- **The rolling 5h window is not aligned to the actual subscription reset.** It is a moving lookback approximating a fixed-boundary quota, so it can be conservative near a real reset.
+- **A run's cost is booked at dispatch time**, though the run burns quota over the following minutes. This errs toward blocking, the safe direction.
+- **Hand-labelled `ai-implement` runs and pipeline retries are not counted** in the ledger — only runs `bridge dispatch` itself applied the label to. The operator doing that by hand is present and aware.
 
 ## Running it
 
@@ -137,15 +202,13 @@ Example with every key:
 - `bridge dispatch now` — Run one dispatch tick immediately, apply decisions (not dry-run). Honors the pause flag only if `--auto` is set; explicit `now` always runs.
 - `bridge dispatch pause` — Stop the dispatcher. Sets a local pause flag that `--auto` checks before each tick. Manual `dispatch now` always runs even when paused.
 - `bridge dispatch resume` — Resume the dispatcher. Clears the local pause flag.
-- `bridge dispatch status` — Show configured caps, dispatches this night, and last tick time. Reads no network state (in-flight PR counts require a repo fetch, out of scope for v1).
+- `bridge dispatch status` — Show configured caps, dispatches this night, trailing-window usage/limit/utilization, and last tick time. Makes no network call (in-flight PR counts require a repo fetch, out of scope for v1; usage comes from local transcripts and the local ledger).
 
 ### Systemd timer and service
 
-`docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer runs `bridge dispatch --auto` at:
-- **22:00 (main tick)** — Dispatch new work within caps.
-- **23:00, 00:00, 01:00, 02:00, 03:00, 04:00, 05:00, 06:00** — Hourly ticks.
+`docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer is a bare hourly heartbeat — `bridge dispatch --auto` fires every hour on the hour, checks the current time against `schedule.windows`, and returns before any repo fetch on a tick outside every window. The windows in `dispatch.json`, not the timer, are the schedule.
 
-**Every one of these ticks — 22:00 and hourly — runs the same full dispatch path today, bounded by the same nightly/global/per-repo caps.** There is no separate retry-only mode yet (see "When a run fails" above) — a dedicated `--retry-only` mode is still future work. What keeps the hourly ticks from re-labeling and re-commenting an issue that already failed without producing a PR is the "not already dispatched" eligibility guard (an issue already carrying `ai-implement` is skipped), not a retry-specific code path.
+**Every in-window tick — day or night — runs the same full dispatch path, bounded by the same usage-budget/nightly/global/per-repo bounds** (the budget rung only ever applies on windows with `budget_rung: true`, see "Usage-budget rung" above). There is no separate retry-only mode yet (see "When a run fails" above) — a dedicated `--retry-only` mode is still future work. What keeps repeated ticks from re-labeling and re-commenting an issue that already failed without producing a PR is the "not already dispatched" eligibility guard (an issue already carrying `ai-implement` is skipped), not a retry-specific code path.
 
 The service requires a GitHub token in its environment. Systemd user units do **not** inherit your shell/direnv env, so create `~/.config/bridge/dispatch.env` (referenced by the service's `EnvironmentFile=`) containing at least:
 ```
@@ -175,7 +238,7 @@ journalctl --user -u bridge-dispatch -n 20
 2. Adjust the config (`~/.config/bridge/dispatch.json`) as needed:
    - Raise/lower caps if decisions look too aggressive or too conservative.
    - Add repo overrides if certain repos need higher WIP limits.
-   - Adjust `dispatch_at` / `retry_until` times if they don't fit your schedule.
+   - Adjust `schedule.windows` if the day/night boundaries don't fit your schedule.
 3. Once decisions look right after a few days of dry-runs, enable the timer: `systemctl --user enable --now bridge-dispatch.timer`.
 
 Dry-run changes nothing in the forge, so there is no risk. The first real dispatch run is a deliberate choice after validation.
