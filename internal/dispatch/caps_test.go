@@ -12,7 +12,7 @@ func cand(repo string, n int) Candidate {
 
 func TestApplyCapsPerRepo(t *testing.T) {
 	cfg := DefaultConfig() // per_repo 1, global 3, night 5
-	ds := ApplyCaps([]Candidate{cand("quotes", 1), cand("quotes", 2)}, cfg, map[string]int{}, 0, 0)
+	ds := ApplyCaps([]Candidate{cand("quotes", 1), cand("quotes", 2)}, cfg, Counts{}, BudgetState{})
 
 	if !ds[0].Dispatch {
 		t.Errorf("first should dispatch: %+v", ds[0])
@@ -24,7 +24,7 @@ func TestApplyCapsPerRepo(t *testing.T) {
 
 func TestApplyCapsCountsExistingOpenPRs(t *testing.T) {
 	cfg := DefaultConfig()
-	ds := ApplyCaps([]Candidate{cand("quotes", 1)}, cfg, map[string]int{"quotes": 1}, 1, 0)
+	ds := ApplyCaps([]Candidate{cand("quotes", 1)}, cfg, Counts{OpenPRsByRepo: map[string]int{"quotes": 1}, GlobalOpen: 1}, BudgetState{})
 	if ds[0].Dispatch {
 		t.Errorf("repo already at limit, must skip: %+v", ds[0])
 	}
@@ -33,7 +33,7 @@ func TestApplyCapsCountsExistingOpenPRs(t *testing.T) {
 func TestApplyCapsGlobal(t *testing.T) {
 	cfg := DefaultConfig()
 	cs := []Candidate{cand("a", 1), cand("b", 2), cand("c", 3), cand("d", 4)}
-	ds := ApplyCaps(cs, cfg, map[string]int{}, 0, 0)
+	ds := ApplyCaps(cs, cfg, Counts{}, BudgetState{})
 
 	for i := 0; i < 3; i++ {
 		if !ds[i].Dispatch {
@@ -48,7 +48,7 @@ func TestApplyCapsGlobal(t *testing.T) {
 func TestApplyCapsNightlyCeiling(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Limits.MaxDispatchesPerNight = 1
-	ds := ApplyCaps([]Candidate{cand("a", 1), cand("b", 2)}, cfg, map[string]int{}, 0, 0)
+	ds := ApplyCaps([]Candidate{cand("a", 1), cand("b", 2)}, cfg, Counts{}, BudgetState{})
 	if !ds[0].Dispatch {
 		t.Errorf("first: %+v", ds[0])
 	}
@@ -60,7 +60,7 @@ func TestApplyCapsNightlyCeiling(t *testing.T) {
 func TestApplyCapsRespectsAlreadyDispatchedTonight(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Limits.MaxDispatchesPerNight = 2
-	ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg, map[string]int{}, 0, 2)
+	ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg, Counts{DispatchedTonight: 2}, BudgetState{})
 	if ds[0].Dispatch {
 		t.Errorf("night budget spent, must skip: %+v", ds[0])
 	}
@@ -69,7 +69,7 @@ func TestApplyCapsRespectsAlreadyDispatchedTonight(t *testing.T) {
 func TestApplyCapsUsesPerRepoOverride(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Limits.Overrides = map[string]int{"quotes": 2}
-	ds := ApplyCaps([]Candidate{cand("quotes", 1), cand("quotes", 2)}, cfg, map[string]int{}, 0, 0)
+	ds := ApplyCaps([]Candidate{cand("quotes", 1), cand("quotes", 2)}, cfg, Counts{}, BudgetState{})
 	if !ds[0].Dispatch || !ds[1].Dispatch {
 		t.Errorf("override 2 should allow both: %+v %+v", ds[0], ds[1])
 	}

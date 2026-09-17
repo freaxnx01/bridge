@@ -3,7 +3,11 @@
 // no network, no clock, no filesystem. That is what makes it table-testable.
 package dispatch
 
-import "time"
+import (
+	"time"
+
+	"github.com/freaxnx01/bridge/internal/usage"
+)
 
 type Limits struct {
 	GlobalOpenPRs         int            `json:"global_open_prs"`
@@ -29,9 +33,22 @@ type Schedule struct {
 	Windows []Window `json:"windows"`
 }
 
+// Budget configures the usage-budget rung. Every value is a calibrated proxy:
+// no API reports how much of the 5h subscription window is left, so trailing
+// consumption is summed in USD-equivalent against WindowBudgetUSD, which is
+// pinned empirically against /usage.
+type Budget struct {
+	WindowHours     float64               `json:"window_hours"`
+	WindowBudgetUSD float64               `json:"window_budget_usd"`
+	DaytimeCap      float64               `json:"daytime_cap"`
+	MeanRunCostUSD  float64               `json:"mean_run_cost_usd"`
+	Pricing         map[string]usage.Rate `json:"pricing,omitempty"`
+}
+
 type Config struct {
 	Limits   Limits   `json:"limits"`
 	Schedule Schedule `json:"schedule"`
+	Budget   Budget   `json:"budget"`
 	// RepoPriority is an ordered list of repo-name patterns (path.Match glob
 	// syntax) driving the ordering ladder's first rung. Absent/empty skips
 	// the rung entirely, which is what keeps pre-existing configs unchanged.
