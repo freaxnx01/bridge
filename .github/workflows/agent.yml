@@ -20,19 +20,21 @@ jobs:
       default-model: claude-sonnet-5
       pipeline-ref: v2
       pre-preview: true
-      # The pinned v1 ref has no auto turn-budget heuristic — classify-turns.sh
-      # is on agent-workflow's main but has never been released, because the
-      # moving v1 tag is 134 commits stale (agent-workflow#261). Until v1 moves,
-      # this pin's default max-turns is 30 and every budget here is manual. 120
-      # matches the heuristic's own tier for a 4-task plan (issue #235's 4-task
-      # plan hit error_max_turns at the old 30 cap with nothing committed).
+      # A floor only, at v2: classify-turns.sh sizes the budget from the
+      # issue body's `### Task N` count, and a `turns:<N>` label overrides
+      # both. This value applies only to an issue whose plan has no countable
+      # task headings. Kept at 120 because the tier for a 4-task plan is what
+      # issue #235 needed after failing outright at the old 30-turn cap.
       max-turns: 120
-      # NOTE: `claude-timeout-minutes` is what this stub actually needs and it
-      # CANNOT be set here — the input does not exist at v1 (added later in
-      # agent-workflow 5287459), and naming an unknown input against a pinned
-      # ref fails as a bare startup_failure with no diagnostic
-      # (agent-workflow#262). Without it the action's own 10-minute default
-      # applies: issue #254's run was SIGKILLed at ~10.5 minutes with `exit
-      # 124` mid-implementation, nowhere near its 120-turn budget, and the
-      # truncated result file then surfaced only as "RESULT_FILE not valid
-      # JSON". Set it as soon as this stub can move off v1.
+      # Wall-clock caps. The process cap must stay below the job cap so the
+      # job still gets to report a result instead of dying mid-step.
+      #
+      # These are not defaults-with-a-margin, they are a fix: the action's own
+      # 10-minute default SIGKILLed issue #254's run at exactly 10:00 with
+      # `exit 124`, nowhere near its turn budget. Two MultiEdits had landed,
+      # nothing was ever pushed, and the truncated result file surfaced only
+      # as "RESULT_FILE is not valid JSON" — so the pipeline posted no run
+      # report and the issue looked untouched. A multi-task Go plan running
+      # `go test -race` per task does not fit in ten minutes.
+      timeout-minutes: 50
+      claude-timeout-minutes: 45
