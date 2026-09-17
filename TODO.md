@@ -1,5 +1,52 @@
 # Bridge TODO
 
+## Session 2026-09-17 (#254 dispatch usage-budget rung) — implemented, PR #293 blocked on review
+
+Enrichment done and merged (#277: `docs/specs/2026-09-07-dispatch-usage-budget-design.md`,
+`docs/plans/2026-09-07-dispatch-usage-budget.md`). Pipeline implemented all 8 tasks
+in [PR #293](https://github.com/freaxnx01/bridge/pull/293) (+1303/-55, 20 files);
+pre-preview review returned `request_changes`, so it stays **draft** with
+`ai:review-blocked`.
+
+- [ ] **Decide the night-cap/window interaction, then fix #293** — the review's only
+      `high`, and it is a gap in the spec's decision D4, not a coding slip. The two
+      default windows (18:00-07:00 + 07:00-18:00) tile all 24h, so daytime ticks now
+      increment `state.DispatchedTonight` while `NightBudgetUsed` still buckets on a
+      hardcoded 12:00 pivot (`internal/dispatch/state.go:41`). Result: 5 dispatches
+      overnight make every morning candidate fail `night cap 5/5` with the budget rung
+      wide open, then the bucket flips at noon and afternoon dispatches eat the coming
+      night's budget. Two options the review names: scope the nightly counter to
+      `budget_rung: false` windows, or derive the reset boundary from
+      `schedule.windows` instead of the noon pivot. The spec rejected per-window
+      `max_dispatches` as "a real refactor of persisted state semantics" — that
+      rejection is what needs revisiting.
+- [ ] **Fix the remaining #293 review concerns** (full text in the PR comment):
+      ledger write skipped when a mid-loop forge error aborts `applyDecisions`
+      (fail-open, under-counts spend); `rungOn := inWindow && win.BudgetRung` lets a
+      manual `dispatch now` in a window gap spend unbudgeted, contradicting its own
+      adjacent comment and `docs/dispatch.md`; the ledger write path has no direct
+      assertion; `docs/dispatch.md` "resets daily at the night window's start" does not
+      match the noon pivot; unsynchronised load-modify-write on `usage.json`;
+      `mostExpensive` ranks on `Output` alone so a cache-heavy operator override could
+      price an unknown model below the true worst case.
+- [ ] **Calibrate `window_budget_usd` and `mean_run_cost_usd`** once #293 merges —
+      both are placeholders (12.00 / 2.00). Read `bridge dispatch status` against
+      `/usage` across a window; compare run-report `**Cost:**` values against the mean.
+      Procedure is in the spec's *Known approximations*.
+- [ ] **Audit whether #283 swept other issues closed** — it closed #254 as COMPLETED
+      on 2026-09-09 while only retiring the dead `claude.yml` stub and documenting the
+      timeout gap; the feature was never implemented. Reopened 2026-09-17. Worth
+      checking its other issue references for the same mistake.
+- [x] `claude-timeout-minutes` unsettable at the `v1` pin — **fixed** in
+      [#291](https://github.com/freaxnx01/bridge/pull/291). The stub had already moved
+      to `@v2` (01110fa) where the input exists; now `claude-timeout-minutes: 45` /
+      `timeout-minutes: 50`. This was what killed #254's first run (`exit 124` at
+      exactly 10:00, nothing pushed, no run report). The re-dispatch ran 21 minutes
+      and succeeded, so the fix is verified end-to-end.
+- [ ] **Delete the merged remote branches** `docs/dispatch-usage-budget-254` and
+      `chore/agent-claude-timeout`, and drop the `.worktrees/limit-ai-impl` worktree
+      once #293 is finished.
+
 ## Bridge MCP endpoint (#195, merged 2026-07-12)
 
 - [ ] Cheat sheet for starting/operating `bridge mcp serve` and integrating
@@ -98,6 +145,8 @@ Full docs: [`docs/dispatch.md`](docs/dispatch.md). Spec: [`docs/specs/2026-07-27
       `systemctl --user start bridge-dispatch.service` to trigger manually)
       dispatches as expected — watch for the new `slog.Warn` if the token
       env file is missing/misconfigured
+      — **note:** PR #293 replaces this timer with a bare hourly heartbeat and
+      moves the hours into `schedule.windows`; re-read the unit before installing
 
 ## Agent / Bot Integration (ideas captured 2026-06-24)
 
