@@ -18,6 +18,12 @@ func DefaultConfig() Config {
 			{From: "18:00", To: "07:00", BudgetRung: false},
 			{From: "07:00", To: "18:00", BudgetRung: true},
 		}},
+		Budget: Budget{
+			WindowHours:     5,
+			WindowBudgetUSD: 12.0,
+			DaytimeCap:      0.80,
+			MeanRunCostUSD:  2.0,
+		},
 	}
 }
 
