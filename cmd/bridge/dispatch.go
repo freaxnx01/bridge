@@ -376,9 +376,10 @@ func setPaused(cmd *cobra.Command, paused bool) error {
 }
 
 // runDispatchStatus reports the configured caps and local dispatch state.
-// It reads no network state: in-flight PR counts would require a repo fetch,
-// which is out of scope for a v1 status command — this stays as cheap and
-// side-effect-free as pause/resume.
+// It makes no network call: in-flight PR counts would require a repo fetch,
+// which is out of scope for a v1 status command. The trailing-window usage it
+// reports comes from local sources only (transcripts + the run ledger), which
+// keeps that property intact.
 func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 	cfg, err := dispatch.LoadConfig(dispatchConfigPath())
 	if err != nil {
@@ -389,28 +390,66 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	now := time.Now()
+	win, inWindow := cfg.Schedule.InWindow(now)
+	usedUSD, usedKnown := measureWindowUSD(context.Background(), cfg, now)
+	budget := dispatch.NewBudgetState(cfg.Budget, inWindow && win.BudgetRung, usedUSD, usedKnown)
+
 	if dispatchJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
 			Limits            dispatch.Limits `json:"limits"`
 			Paused            bool            `json:"paused"`
 			DispatchedTonight int             `json:"dispatched_tonight"`
 			LastTick          time.Time       `json:"last_tick,omitempty"`
+			BudgetWindowHours float64         `json:"budget_window_hours"`
+			BudgetUsedUSD     float64         `json:"budget_used_usd"`
+			BudgetLimitUSD    float64         `json:"budget_limit_usd"`
+			BudgetKnown       bool            `json:"budget_known"`
+			BudgetRungActive  bool            `json:"budget_rung_active"`
 		}{
 			Limits:            cfg.Limits,
 			Paused:            state.Paused,
-			DispatchedTonight: state.NightBudgetUsed(time.Now()),
+			DispatchedTonight: state.NightBudgetUsed(now),
 			LastTick:          state.LastTick,
+			BudgetWindowHours: cfg.Budget.WindowHours,
+			BudgetUsedUSD:     budget.UsedUSD,
+			BudgetLimitUSD:    budget.LimitUSD,
+			BudgetKnown:       !budget.Unknown,
+			BudgetRungActive:  budget.Enabled,
 		})
 	}
 
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "paused: %t\n", state.Paused)
-	fmt.Fprintf(w, "dispatched tonight: %d/%d\n", state.NightBudgetUsed(time.Now()), cfg.Limits.MaxDispatchesPerNight)
+	fmt.Fprintf(w, "dispatched tonight: %d/%d\n", state.NightBudgetUsed(now), cfg.Limits.MaxDispatchesPerNight)
 	fmt.Fprintf(w, "per-repo cap: %d, global cap: %d\n", cfg.Limits.PerRepo, cfg.Limits.GlobalOpenPRs)
+	if budget.Unknown {
+		fmt.Fprintf(w, "budget window: %gh — usage unreadable, daytime dispatch blocked\n", cfg.Budget.WindowHours)
+	} else {
+		pct := 0.0
+		if budget.LimitUSD > 0 {
+			pct = budget.UsedUSD / budget.LimitUSD * 100
+		}
+		fmt.Fprintf(w, "budget window: %gh — used $%.2f of $%.2f (%.0f%%)\n",
+			cfg.Budget.WindowHours, budget.UsedUSD, budget.LimitUSD, pct)
+	}
+	fmt.Fprintf(w, "budget rung: %s\n", rungLabel(budget.Enabled, win, inWindow))
 	if state.LastTick.IsZero() {
 		fmt.Fprintln(w, "last tick: never")
 	} else {
 		fmt.Fprintf(w, "last tick: %s\n", state.LastTick.Format(time.RFC3339))
 	}
 	return nil
+}
+
+// rungLabel describes whether the budget rung is policing this moment, and
+// which window that decision came from.
+func rungLabel(enabled bool, win dispatch.Window, inWindow bool) string {
+	if !inWindow {
+		return "inactive (outside every configured window)"
+	}
+	if !enabled {
+		return fmt.Sprintf("inactive (window %s-%s)", win.From, win.To)
+	}
+	return fmt.Sprintf("active (window %s-%s)", win.From, win.To)
 }
