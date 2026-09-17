@@ -93,7 +93,7 @@ func scanFile(path string, since time.Time) ([]Turn, error) {
 		}
 		return nil, err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }() // best-effort close of a read-only file
 
 	var out []Turn
 	sc := bufio.NewScanner(f)

@@ -14,7 +14,10 @@ func DefaultConfig() Config {
 			PerRepo:               1,
 			MaxDispatchesPerNight: 5,
 		},
-		Schedule: Schedule{DispatchAt: "22:00", RetryUntil: "06:00"},
+		Schedule: Schedule{Windows: []Window{
+			{From: "18:00", To: "07:00", BudgetRung: false},
+			{From: "07:00", To: "18:00", BudgetRung: true},
+		}},
 	}
 }
 
