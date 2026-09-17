@@ -12,9 +12,21 @@ type Limits struct {
 	Overrides             map[string]int `json:"overrides,omitempty"`
 }
 
+// Window is a span of the local day during which dispatch ticks act. From is
+// inclusive, To exclusive; From > To wraps past midnight. BudgetRung turns the
+// usage-budget rung on for the window.
+type Window struct {
+	From       string `json:"from"`
+	To         string `json:"to"`
+	BudgetRung bool   `json:"budget_rung"`
+}
+
+// Schedule is the single source of truth for when dispatch acts. The systemd
+// timer is a bare hourly heartbeat, so these windows are the only place the
+// hours are written down — the previous dispatch_at/retry_until fields were
+// read by nothing and duplicated the timer.
 type Schedule struct {
-	DispatchAt string `json:"dispatch_at"`
-	RetryUntil string `json:"retry_until"`
+	Windows []Window `json:"windows"`
 }
 
 type Config struct {
