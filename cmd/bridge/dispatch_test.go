@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -9,9 +10,11 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -102,6 +105,7 @@ func TestSetPausedTogglesState(t *testing.T) {
 func TestRunDispatchStatusJSON(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 
 	if err := dispatch.WriteState(dispatchStatePath(), dispatch.State{Paused: true, DispatchedTonight: 2}); err != nil {
 		t.Fatalf("WriteState: %v", err)
@@ -141,8 +145,9 @@ func setDispatchFlags(t *testing.T, jsonOut, dryRun bool) {
 func TestRunDispatch_JSONLiveTick_CallsApplyDecisions(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("BRIDGE_BASE", t.TempDir()) // exists but has no repos: fetchRepoInputs finds nothing
-	setDispatchFlags(t, true, false)     // --json, no --dry-run
+	t.Setenv("BRIDGE_BASE", t.TempDir())                                     // exists but has no repos: fetchRepoInputs finds nothing
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent")) // never touch the real ~/.claude in a test
+	setDispatchFlags(t, true, false)                                         // --json, no --dry-run
 
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
@@ -177,6 +182,7 @@ func TestRunDispatch_JSONLiveTick_CallsApplyDecisions(t *testing.T) {
 func TestDispatchSubcommands_InheritPersistentFlags(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	t.Cleanup(func() { dispatchJSON, dispatchDryRun, dispatchAuto = false, false, false })
 
 	var out bytes.Buffer
@@ -254,6 +260,7 @@ func TestRunDispatch_FullPipeline_AppliesOnlyEligibleLabel(t *testing.T) {
 	t.Setenv("GH_TOKEN", "tok")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	setDispatchFlags(t, false, false)
 
 	cmd := &cobra.Command{}
@@ -283,6 +290,7 @@ func TestRunDispatch_DryRunJSON_SkipsApplyDecisions(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("BRIDGE_BASE", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	setDispatchFlags(t, true, true) // --json --dry-run: dry-run always wins
 
 	cmd := &cobra.Command{}
@@ -299,5 +307,110 @@ func TestRunDispatch_DryRunJSON_SkipsApplyDecisions(t *testing.T) {
 	}
 	if !state.LastTick.IsZero() {
 		t.Errorf("want LastTick unset (--dry-run must skip applyDecisions), got %v", state.LastTick)
+	}
+}
+
+func TestMeasureWindowUSDCountsBothSources(t *testing.T) {
+	projects := t.TempDir()
+	cache := t.TempDir()
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", projects)
+	t.Setenv("XDG_CACHE_HOME", cache)
+
+	now := time.Now().UTC()
+
+	// One interactive turn: 1M output tokens of opus at 75 USD/Mtok.
+	line := `{"type":"assistant","timestamp":"` + now.Add(-time.Hour).Format(time.RFC3339) +
+		`","message":{"model":"claude-opus-4-7","usage":{"input_tokens":0,"output_tokens":1000000,` +
+		`"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`
+	dir := filepath.Join(projects, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// One dispatched run in the ledger.
+	var l usage.Ledger
+	l.Append(usage.Run{At: now.Add(-time.Minute), Repo: "bridge", Issue: 254, EstUSD: 2})
+	if err := usage.WriteLedger(dispatchLedgerPath(), l); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), now)
+	if !ok {
+		t.Fatal("measurement should be known")
+	}
+	if diff := got - 77.0; diff > 0.01 || diff < -0.01 {
+		t.Errorf("want 75 interactive + 2 pipeline = 77, got %v", got)
+	}
+}
+
+func TestMeasureWindowUSDMissingSourcesAreZeroNotUnknown(t *testing.T) {
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now())
+	if !ok || got != 0 {
+		t.Errorf("a fresh install has measured zero usage, not unknown: got=%v ok=%v", got, ok)
+	}
+}
+
+func TestMeasureWindowUSDUnreadableLedgerIsUnknown(t *testing.T) {
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+
+	// Corrupt ledger: readable file, invalid JSON.
+	path := dispatchLedgerPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now()); ok {
+		t.Error("a corrupt ledger must report unknown so the rung fails closed")
+	}
+}
+
+func TestTranscriptRootHonoursTheEnvOverride(t *testing.T) {
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", "/tmp/somewhere")
+	if got := transcriptRoot(); got != "/tmp/somewhere" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestRunDispatchAutoOutsideWindowSkipsBeforeFetching(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	// A window that cannot contain "now": one minute wide, an hour ago.
+	past := time.Now().Add(-time.Hour)
+	body := `{"schedule":{"windows":[{"from":"` + past.Format("15:04") + `","to":"` +
+		past.Add(time.Minute).Format("15:04") + `","budget_rung":false}]}}`
+	if err := os.MkdirAll(filepath.Join(cfgDir, "bridge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bridge", "dispatch.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatchAuto = true
+	t.Cleanup(func() { dispatchAuto = false })
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	// No forge client is configured here: reaching the fetch would fail, so a
+	// clean return is itself the assertion that the gate ran first.
+	if err := runDispatch(cmd, nil); err != nil {
+		t.Fatalf("out-of-window tick must return cleanly: %v", err)
+	}
+	if !strings.Contains(buf.String(), "outside dispatch window") {
+		t.Errorf("got %q", buf.String())
 	}
 }

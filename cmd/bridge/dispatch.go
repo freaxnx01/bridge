@@ -13,6 +13,7 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/usage"
 )
 
 func renderDecisions(w io.Writer, ds []dispatch.Decision) {
@@ -128,6 +129,39 @@ func dispatchConfigPath() string {
 
 func dispatchStatePath() string { return filepath.Join(cacheRoot(), "dispatch.json") }
 
+func dispatchLedgerPath() string { return filepath.Join(cacheRoot(), "usage.json") }
+
+// transcriptRoot is where Claude Code writes its session transcripts. The env
+// override exists so tests never read the operator's real history.
+func transcriptRoot() string {
+	if v := os.Getenv("BRIDGE_CLAUDE_PROJECTS"); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
+
+// measureWindowUSD sums interactive and pipeline consumption over the trailing
+// quota window. The bool reports whether the number can be trusted: false means
+// fail closed, and is never the same as a measured zero.
+func measureWindowUSD(ctx context.Context, cfg dispatch.Config, now time.Time) (float64, bool) {
+	since := now.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
+
+	turns, err := usage.ScanTranscripts(ctx, transcriptRoot(), since)
+	if err != nil {
+		slog.Warn("dispatch: cannot read Claude transcripts — daytime dispatch will be blocked", "error", err)
+		return 0, false
+	}
+	ledger, err := usage.LoadLedger(dispatchLedgerPath())
+	if err != nil {
+		slog.Warn("dispatch: cannot read the usage ledger — daytime dispatch will be blocked", "error", err)
+		return 0, false
+	}
+
+	pricing := usage.DefaultPricing().Merge(cfg.Budget.Pricing)
+	return usage.SumWindow(turns, pricing, since, now) + ledger.SumSince(since), true
+}
+
 func runDispatch(cmd *cobra.Command, _ []string) error {
 	cfg, err := dispatch.LoadConfig(dispatchConfigPath())
 	if err != nil {
@@ -144,16 +178,40 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	repos, err := fetchRepoInputs(context.Background())
+	now := time.Now()
+	win, inWindow := cfg.Schedule.InWindow(now)
+	// The window gate is --auto only: an explicit `dispatch now` is the
+	// operator asking for a tick, the same exemption the pause flag has.
+	if dispatchAuto && !inWindow {
+		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — nothing to do")
+		return nil
+	}
+
+	ctx := context.Background()
+	repos, err := fetchRepoInputs(ctx)
 	if err != nil {
 		return err
 	}
 
+	// The rung applies whether or not this is --auto: a manual daytime
+	// dispatch burns the same quota.
+	rungOn := inWindow && win.BudgetRung
+	usedUSD, usedKnown := 0.0, true
+	if rungOn {
+		usedUSD, usedKnown = measureWindowUSD(ctx, cfg, now)
+	}
+	budget := dispatch.NewBudgetState(cfg.Budget, rungOn, usedUSD, usedKnown)
+
 	openByRepo, globalOpen := countOpenAgentPRs(repos)
-	now := time.Now()
 	decisions := dispatch.ApplyCaps(
 		dispatch.Order(collectCandidates(repos), cfg.RepoPriority),
-		cfg, openByRepo, globalOpen, state.NightBudgetUsed(now),
+		cfg,
+		dispatch.Counts{
+			OpenPRsByRepo:     openByRepo,
+			GlobalOpen:        globalOpen,
+			DispatchedTonight: state.NightBudgetUsed(now),
+		},
+		budget,
 	)
 
 	if dispatchJSON {
@@ -166,7 +224,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	if dispatchDryRun {
 		return nil
 	}
-	return applyDecisions(context.Background(), decisions, state, now)
+	return applyDecisions(ctx, decisions, state, now, cfg)
 }
 
 // fetchRepoInputs reads every discovered repo's issues, milestones and open
@@ -246,7 +304,7 @@ func countOpenAgentPRs(repos []repoInput) (map[string]int, int) {
 // applyDecisions writes the one label the dispatcher owns, then persists the
 // nightly counter. It never writes agent:* or model:* — model choice belongs
 // to agent-workflow's classify-task.sh.
-func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, now time.Time) error {
+func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, now time.Time, cfg dispatch.Config) error {
 	dispatched := 0
 	for _, d := range ds {
 		if !d.Dispatch {
@@ -265,6 +323,29 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 			return fmt.Errorf("comment %s#%d: %w", repo, num, err)
 		}
 		dispatched++
+	}
+	if dispatched > 0 {
+		ledger, err := usage.LoadLedger(dispatchLedgerPath())
+		if err != nil {
+			return fmt.Errorf("read usage ledger: %w", err)
+		}
+		for _, d := range ds {
+			if !d.Dispatch {
+				continue
+			}
+			ledger.Append(usage.Run{
+				At:     now,
+				Repo:   d.Candidate.Repo,
+				Issue:  d.Candidate.Issue.Number,
+				EstUSD: cfg.Budget.MeanRunCostUSD,
+			})
+		}
+		// Only the trailing window is ever summed; a week of history is
+		// plenty for calibration and keeps the file bounded.
+		ledger.Prune(now.AddDate(0, 0, -7))
+		if err := usage.WriteLedger(dispatchLedgerPath(), ledger); err != nil {
+			return fmt.Errorf("write usage ledger: %w", err)
+		}
 	}
 	state.DispatchedTonight = state.NightBudgetUsed(now) + dispatched
 	if state.NightBudgetUsed(now) == 0 {
