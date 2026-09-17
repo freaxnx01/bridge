@@ -302,7 +302,7 @@ func (m Model) viewPicker() string {
 			rb.WriteString(stMuted.Render(fmt.Sprintf("  ↑ %d more", start)) + "\n")
 		}
 		for i := start; i < end; i++ {
-			tag := repoIssueTag(rows[i])
+			tag := repoIssueTag(rows[i]) + m.repoArchivedTag(rows[i])
 			if m.pickerFocus == focusList && i == sel {
 				rb.WriteString(stSel.Render(stAccent.Render("▸ ")+rows[i].label+tag) + "\n")
 			} else {
@@ -318,6 +318,9 @@ func (m Model) viewPicker() string {
 	hint := "↑↓ move · g/G first/last · ⏎ open/attach · / filter · r/^r refresh · ctrl+n new · tab panes · ? legend"
 	if m.forgeSubfilterVisible() {
 		hint += " · ctrl+f forge"
+	}
+	if len(m.archived) > 0 {
+		hint += " · ctrl+a archived"
 	}
 	hint += " · q quit"
 	sections = append(sections, m.hintLine(hint))
@@ -799,6 +802,15 @@ func repoIssueTag(r repoRow) string {
 		return ""
 	}
 	return "  " + stWarn.Render(fmt.Sprintf("●%d", r.issueCount))
+}
+
+// repoArchivedTag marks a row the archived filter would normally hide, so a
+// revealed row never looks like an ordinary one. Empty unless revealed.
+func (m Model) repoArchivedTag(r repoRow) string {
+	if !m.showArchived || !m.archived[repoRowKey(r)] {
+		return ""
+	}
+	return "  " + stMuted.Render("archived")
 }
 
 // hintLine renders the bottom line of a screen: the status notice when there is

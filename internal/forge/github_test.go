@@ -49,6 +49,34 @@ func TestGithubListRepos(t *testing.T) {
 	}
 }
 
+func TestGithubListRepos_ArchivedReturnedWithFlag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+          {"name":"bridge","visibility":"public","owner":{"login":"freaxnx01"}},
+          {"name":"FlowHub-CAS-AISE","archived":true,"visibility":"public","owner":{"login":"freaxnx01"}}
+        ]`))
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("token", srv.URL)
+	repos, err := c.ListRepos(context.Background(), "freaxnx01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Archived repos are no longer dropped here — callers decide. nav needs
+	// them to recognise an archived local clone (#292).
+	if len(repos) != 2 {
+		t.Fatalf("want 2 repos (archived included), got %d: %+v", len(repos), repos)
+	}
+	if repos[0].Archived {
+		t.Errorf("active repo must not be flagged archived: %+v", repos[0])
+	}
+	if !repos[1].Archived {
+		t.Errorf("archived repo must carry Archived=true: %+v", repos[1])
+	}
+}
+
 func TestGithubListIssues(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path != "/repos/freaxnx01/bridge/issues" {

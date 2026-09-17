@@ -679,3 +679,31 @@ func TestPicker_RemoteUnavailable_KeepsHintsAndSaysItOnce(t *testing.T) {
 		t.Errorf("rendered %d times, want 1 — the Repos panel title is the one place for it", n)
 	}
 }
+
+func TestViewPicker_ArchivedRowCarriesMarker(t *testing.T) {
+	m := archivedModel()
+	m.showArchived = true
+	m.width, m.height = 120, 40
+	out := m.View()
+	if !strings.Contains(out, "FlowHub-CAS-AISE") {
+		t.Fatalf("revealed archived row missing from view:\n%s", out)
+	}
+	if !strings.Contains(out, "archived") {
+		t.Errorf("revealed archived row must carry an 'archived' marker:\n%s", out)
+	}
+}
+
+func TestViewPicker_ArchivedHintShownOnlyWhenArchivedPresent(t *testing.T) {
+	m := archivedModel()
+	m.width, m.height = 120, 40
+	if !strings.Contains(m.View(), "ctrl+a archived") {
+		t.Errorf("hint must advertise ctrl+a when archived repos exist:\n%s", m.View())
+	}
+
+	none := archivedModel()
+	none.archived = nil
+	none.width, none.height = 120, 40
+	if strings.Contains(none.View(), "ctrl+a archived") {
+		t.Errorf("hint must stay clean when nothing is archived:\n%s", none.View())
+	}
+}

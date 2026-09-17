@@ -35,6 +35,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case remoteMsg:
 		m.remoteRepos = msg.rows
+		m.archived = msg.archived
 		m.remoteState = loadOK
 		m = m.normalizeForgeFilter()
 		return m, m.issueCountCmds(msg.rows)
@@ -43,6 +44,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Partial success: at least one forge loaded. Show the fresh rows
 			// rather than discarding them; the cache would only be staler.
 			m.remoteRepos = msg.rows
+			m.archived = msg.archived
 			m.remoteState = loadPartial
 			m = m.normalizeForgeFilter()
 			return m, m.issueCountCmds(msg.rows)
@@ -284,6 +286,16 @@ func (m Model) visibleRepos() []repoRow {
 	all := append([]repoRow{}, m.localRepos...)
 	all = append(all, dedupRemoteRows(m.localRepos, m.remoteRepos)...)
 	all = disambiguateOwners(all)
+	if !m.showArchived && len(m.archived) > 0 {
+		kept := make([]repoRow, 0, len(all))
+		for _, r := range all {
+			if m.archived[repoRowKey(r)] {
+				continue
+			}
+			kept = append(kept, r)
+		}
+		all = kept
+	}
 	if m.forgeFilter != "" {
 		scoped := make([]repoRow, 0, len(all))
 		for _, r := range all {
@@ -418,6 +430,15 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.cyclePickerFocusBack(), nil
 	case "ctrl+f":
 		m = m.cycleForge(1)
+		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
+		return m, nil
+	case "ctrl+a":
+		// Picker-global like ctrl+f: the picker opens with the filter focused,
+		// where a bare letter key would be typed instead of bound.
+		if len(m.archived) == 0 {
+			return m, nil
+		}
+		m.showArchived = !m.showArchived
 		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
 		return m, nil
 	case "ctrl+r":

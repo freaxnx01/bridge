@@ -323,7 +323,9 @@ func (c *GithubClient) CommentIssue(ctx context.Context, owner, repo string, num
 }
 
 // ListRepos returns the repos owned by the authenticated user (the token's
-// own account), including private ones. It uses the authenticated-user
+// own account), including private ones. Archived repos are returned with
+// Archived set rather than filtered out, so callers can decide — nav needs
+// them to recognise an archived local clone. It uses the authenticated-user
 // endpoint /user/repos rather than /users/{owner}/repos because the latter
 // only ever returns public repos, even with a valid token — so private repos
 // like obsidian-it would be invisible. Each forge owner is fetched with its
@@ -336,9 +338,6 @@ func (c *GithubClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
-		if r.Archived {
-			continue
-		}
 		o := r.Owner.Login
 		if o == "" {
 			o = owner
@@ -354,6 +353,7 @@ func (c *GithubClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 			HTMLURL:       r.HTMLURL,
 			SSHURL:        r.SSHURL,
 			UpdatedAt:     r.UpdatedAt,
+			Archived:      r.Archived,
 		})
 	}
 	return out, nil

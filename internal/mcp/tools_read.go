@@ -171,8 +171,17 @@ func (d Deps) handleListRepos(ctx context.Context, _ *mcp.CallToolRequest, in li
 				mu.Unlock()
 				return nil
 			}
+			// The forge clients return archived repos flagged rather than
+			// filtered (#292); this tool's contract is active repos only.
+			active := make([]forge.RepoRef, 0, len(repos))
+			for _, r := range repos {
+				if r.Archived {
+					continue
+				}
+				active = append(active, r)
+			}
 			mu.Lock()
-			all = append(all, repos...)
+			all = append(all, active...)
 			mu.Unlock()
 			return nil
 		})

@@ -256,14 +256,18 @@ type Config struct {
 type reposMsg struct{ rows []repoRow }
 type recentMsg struct{ paths []string }
 type sessionsMsg struct{ rows []sessionRow }
-type remoteMsg struct{ rows []repoRow }
+type remoteMsg struct {
+	rows     []repoRow
+	archived map[string]bool // refKey set of archived repos
+}
 
 // remoteErrMsg reports a failed remote refresh. rows carries any partial fresh
 // rows that loaded before the failure (e.g. one forge 401'd while others
 // succeeded); empty rows means a total failure that keeps the cached rows.
 type remoteErrMsg struct {
-	err  error
-	rows []repoRow
+	err      error
+	rows     []repoRow
+	archived map[string]bool // refKey set from the partial refs, if any
 }
 type issueCountMsg struct {
 	key   string // forge/owner/name

@@ -28,6 +28,24 @@ func TestGitlabListRepos(t *testing.T) {
 	}
 }
 
+func TestGitlabListRepos_ArchivedReturnedWithFlag(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Write([]byte(`[{"name":"glrepo","visibility":"public"},{"name":"glold","archived":true,"visibility":"public"}]`))
+	}))
+	defer srv.Close()
+	c := NewGitlabClient("tok", srv.URL)
+	repos, err := c.ListRepos(context.Background(), "freaxnx01")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(repos) != 2 {
+		t.Fatalf("want 2 repos (archived included), got %d: %+v", len(repos), repos)
+	}
+	if !repos[1].Archived {
+		t.Errorf("archived repo must carry Archived=true: %+v", repos[1])
+	}
+}
+
 func TestGitlabListIssues(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.RawPath != "/api/v4/projects/freaxnx01%2Fglrepo/issues" {
