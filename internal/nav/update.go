@@ -35,6 +35,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case remoteMsg:
 		m.remoteRepos = msg.rows
+		m.archived = msg.archived
 		m.remoteState = loadOK
 		m = m.normalizeForgeFilter()
 		return m, m.issueCountCmds(msg.rows)
@@ -43,6 +44,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Partial success: at least one forge loaded. Show the fresh rows
 			// rather than discarding them; the cache would only be staler.
 			m.remoteRepos = msg.rows
+			m.archived = msg.archived
 			m.remoteState = loadPartial
 			m = m.normalizeForgeFilter()
 			return m, m.issueCountCmds(msg.rows)

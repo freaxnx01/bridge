@@ -91,7 +91,7 @@ func loadRemoteCmd(cachePath string) tea.Cmd {
 		if err != nil {
 			return remoteErrMsg{err: err}
 		}
-		return remoteMsg{rows: remoteRows(c.Repos)}
+		return remoteMsg{rows: remoteRows(c.Repos), archived: archivedKeys(c.Repos)}
 	}
 }
 
@@ -100,10 +100,32 @@ func remoteRows(refs []forge.RepoRef) []repoRow {
 	rows := make([]repoRow, 0, len(refs))
 	for i := range refs {
 		ref := refs[i]
+		if ref.Archived {
+			// Never offer an archived repo as clone-on-select; it only feeds
+			// archivedKeys.
+			continue
+		}
 		rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
 	}
 	sortRepoRows(rows)
 	return rows
+}
+
+// archivedKeys returns the refKey identity of every archived ref, which the
+// picker subtracts from its rows. Nil when nothing is archived, so an
+// environment without archived repos carries no state at all.
+func archivedKeys(refs []forge.RepoRef) map[string]bool {
+	var out map[string]bool
+	for _, r := range refs {
+		if !r.Archived {
+			continue
+		}
+		if out == nil {
+			out = map[string]bool{}
+		}
+		out[refKey(r)] = true
+	}
+	return out
 }
 
 // registerSlotCmd records a launched session in the slot registry so the
@@ -353,9 +375,9 @@ func (m Model) refreshRemoteCmd() tea.Cmd {
 		if err != nil {
 			// Refresh returns partial refs alongside the first error when one
 			// forge fails but others succeed; keep those fresh rows.
-			return remoteErrMsg{err: err, rows: remoteRows(refs)}
+			return remoteErrMsg{err: err, rows: remoteRows(refs), archived: archivedKeys(refs)}
 		}
-		return remoteMsg{rows: remoteRows(refs)}
+		return remoteMsg{rows: remoteRows(refs), archived: archivedKeys(refs)}
 	}
 }
 
