@@ -382,6 +382,55 @@ func TestTranscriptRootHonoursTheEnvOverride(t *testing.T) {
 	}
 }
 
+func TestRunDispatchStatusReportsBudget(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := runDispatchStatus(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "budget window:") {
+		t.Errorf("status must report the budget window:\n%s", out)
+	}
+	if !strings.Contains(out, "9.60") {
+		t.Errorf("status must show the limit (12.00 * 0.80):\n%s", out)
+	}
+}
+
+func TestRunDispatchStatusJSONCarriesBudgetFields(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+
+	dispatchJSON = true
+	t.Cleanup(func() { dispatchJSON = false })
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	if err := runDispatchStatus(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var got struct {
+		BudgetUsedUSD  float64 `json:"budget_used_usd"`
+		BudgetLimitUSD float64 `json:"budget_limit_usd"`
+		BudgetKnown    bool    `json:"budget_known"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if diff := got.BudgetLimitUSD - 9.6; diff > 0.0001 || diff < -0.0001 || !got.BudgetKnown {
+		t.Errorf("%+v", got)
+	}
+}
+
 func TestRunDispatchAutoOutsideWindowSkipsBeforeFetching(t *testing.T) {
 	cfgDir := t.TempDir()
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
