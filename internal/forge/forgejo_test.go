@@ -28,13 +28,16 @@ func TestForgejoListRepos(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(repos) != 1 || repos[0].Forge != "forgejo" || repos[0].Visibility != "public" {
-		t.Errorf("%+v", repos)
+	// The fixture holds one active and one archived repo. Both come back; the
+	// archived one is flagged rather than dropped (#292).
+	if len(repos) != 2 {
+		t.Fatalf("want 2 repos (archived included), got %d: %+v", len(repos), repos)
 	}
-	for _, r := range repos {
-		if r.Name == "archived-repo" {
-			t.Errorf("archived repo should be filtered out: %+v", repos)
-		}
+	if repos[0].Forge != "forgejo" || repos[0].Name != "fj" || repos[0].Visibility != "public" || repos[0].Archived {
+		t.Errorf("repo[0]: %+v", repos[0])
+	}
+	if repos[1].Name != "archived-repo" || !repos[1].Archived {
+		t.Errorf("archived repo must carry Archived=true: %+v", repos[1])
 	}
 }
 

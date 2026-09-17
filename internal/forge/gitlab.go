@@ -63,14 +63,11 @@ func (c *GitlabClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
-		if r.Archived {
-			continue
-		}
 		out = append(out, RepoRef{
 			Forge: "gitlab", Owner: owner, Name: r.Name,
 			DefaultBranch: r.DefaultBranch, Description: r.Description,
 			Visibility: r.Visibility, HTMLURL: r.WebURL, SSHURL: r.SSHURLToRepo,
-			UpdatedAt: r.LastActivityAt,
+			UpdatedAt: r.LastActivityAt, Archived: r.Archived,
 		})
 	}
 	return out, nil

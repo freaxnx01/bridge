@@ -317,9 +317,6 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
-		if r.Archived {
-			continue
-		}
 		vis := "public"
 		if r.Private {
 			vis = "private"
@@ -328,7 +325,7 @@ func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef,
 			Forge: "forgejo", Owner: owner, Name: r.Name,
 			DefaultBranch: r.DefaultBranch, Description: r.Description,
 			Visibility: vis, HTMLURL: r.HTMLURL, SSHURL: r.SSHURL,
-			UpdatedAt: r.UpdatedAt,
+			UpdatedAt: r.UpdatedAt, Archived: r.Archived,
 		})
 	}
 	return out, nil
