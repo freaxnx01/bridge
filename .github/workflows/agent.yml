@@ -38,3 +38,17 @@ jobs:
       # `go test -race` per task does not fit in ten minutes.
       timeout-minutes: 50
       claude-timeout-minutes: 45
+      # Opt into the review self-fix loop (agent-workflow#193, shipped in v2).
+      # On a first review verdict of request_changes, the original
+      # implementer's agent fixes its own findings and re-reviews instead of
+      # stopping at ai:review-blocked and waiting for a human to relay them.
+      # Default is false, which is why #254's seven review concerns sat blocked
+      # until they were fixed by hand.
+      self-fix: true
+      # 1, not the default 2. The review job's `timeout-minutes: 10` is
+      # hardcoded upstream (not an input) and the self-fix step has no timeout
+      # of its own, so it inherits that cap. #254's first review took 2.8 min,
+      # leaving ~7 for one fix (~3) plus one re-review (~3); a second cycle
+      # would overrun and kill the job before "Mark issue blocked" runs, which
+      # leaves the PR draft with no label and no signal at all.
+      self-fix-max-iterations: 1
