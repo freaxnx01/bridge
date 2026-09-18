@@ -240,3 +240,49 @@ func TestInWindowAndStartOfAgreeAcrossDST(t *testing.T) {
 		}
 	}
 }
+
+// On a fall-back day the wall clock repeats an hour, so a local time inside it
+// names two instants. time.Date resolves to the *later* pass, which made a
+// boundary look like it was still in the future during the first pass — and
+// StartOf then rolled it back a full day, handing DispatchesSince the previous
+// night's counter. That is the inherited-counter bug again, for one hour a year.
+func TestStartOfResolvesTheAmbiguousHourToTheCoveringPass(t *testing.T) {
+	zurich, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Skip("no tzdata available:", err)
+	}
+	// 2027-10-31: 02:00-03:00 occurs twice, first at +02:00 then at +01:00.
+	later := time.Date(2027, 10, 31, 2, 30, 0, 0, zurich) // the +01:00 pass
+	earlier := later.Add(-time.Hour)                      // the +02:00 pass
+	if earlier.Hour() != 2 || earlier.Minute() != 30 {
+		t.Fatalf("fixture assumption broken: %v", earlier)
+	}
+	w := Window{From: "02:30", To: "07:00"}
+
+	t.Run("during the first pass", func(t *testing.T) {
+		now := earlier.Add(15 * time.Minute) // 02:45 +02:00
+		got := w.StartOf(now)
+		if !got.Equal(earlier) {
+			t.Errorf("StartOf = %v (%s), want the covering pass %v", got, now.Sub(got), earlier)
+		}
+		if d := now.Sub(got); d < 0 || d > time.Hour {
+			t.Errorf("span %s is not a plausible in-window elapsed time", d)
+		}
+	})
+
+	t.Run("during the second pass", func(t *testing.T) {
+		now := later.Add(15 * time.Minute) // 02:45 +01:00
+		got := w.StartOf(now)
+		if !got.Equal(later) {
+			t.Errorf("StartOf = %v, want the later pass %v", got, later)
+		}
+	})
+
+	t.Run("never returns a future boundary", func(t *testing.T) {
+		for _, now := range []time.Time{earlier, earlier.Add(30 * time.Minute), later, later.Add(time.Minute)} {
+			if got := w.StartOf(now); got.After(now) {
+				t.Errorf("now=%v: StartOf returned the future %v", now, got)
+			}
+		}
+	})
+}

@@ -248,7 +248,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		dispatch.Counts{
 			OpenPRsByRepo:     openByRepo,
 			GlobalOpen:        globalOpen,
-			DispatchedTonight: state.DispatchesSince(timing.NightStart),
+			DispatchedTonight: state.DispatchesSince(nightStartForReport(cfg, timing, now)),
 			NightCapApplies:   timing.NightCapApplies,
 		},
 		budget,
@@ -501,14 +501,16 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "paused: %t\n", state.Paused)
+	// Report the count against the most recent unattended window either way:
+	// "how many did it dispatch overnight?" is a fair question at 09:00, and
+	// answering n/a made the number unrecoverable from the CLI. Only the label
+	// changes with whether the cap is currently in force.
+	nightCount := state.DispatchesSince(nightStartForReport(cfg, timing, now))
 	if timing.NightCapApplies {
-		fmt.Fprintf(w, "dispatched tonight: %d/%d\n",
-			state.DispatchesSince(timing.NightStart), cfg.Limits.MaxDispatchesPerNight)
+		fmt.Fprintf(w, "dispatched tonight: %d/%d\n", nightCount, cfg.Limits.MaxDispatchesPerNight)
 	} else {
-		// The nightly cap bounds unattended spend only, so in a rung window or
-		// a schedule gap there is no occurrence to count against — printing
-		// last night's number here would just mislabel it.
-		fmt.Fprintln(w, "dispatched tonight: n/a — the nightly cap does not apply to this window")
+		fmt.Fprintf(w, "dispatched last night: %d/%d (cap not in force for this window)\n",
+			nightCount, cfg.Limits.MaxDispatchesPerNight)
 	}
 	fmt.Fprintf(w, "per-repo cap: %d, global cap: %d\n", cfg.Limits.PerRepo, cfg.Limits.GlobalOpenPRs)
 	if budget.Unknown {
@@ -528,6 +530,26 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(w, "last tick: %s\n", state.LastTick.Format(time.RFC3339))
 	}
 	return nil
+}
+
+// nightStartForReport resolves the occurrence the nightly counter belongs to
+// for display. Inside an unattended window that is the tick's own boundary;
+// elsewhere it is the latest unattended window's start, so `status` can still
+// report what the last night spent instead of dropping the number.
+func nightStartForReport(cfg dispatch.Config, timing tickTiming, now time.Time) time.Time {
+	if !timing.NightStart.IsZero() {
+		return timing.NightStart
+	}
+	var latest time.Time
+	for _, w := range cfg.Schedule.Windows {
+		if w.BudgetRung {
+			continue
+		}
+		if s := w.StartOf(now); !s.IsZero() && (latest.IsZero() || s.After(latest)) {
+			latest = s
+		}
+	}
+	return latest
 }
 
 // rungLabel describes whether the budget rung is policing this moment, and
