@@ -25,10 +25,11 @@ type remoteTarget struct {
 }
 
 // Refresh discovers every forge target reachable from roots, fetches each
-// owner's repos, writes the merged result to cachePath, and returns it. The
-// first per-target error is returned alongside whatever repos did succeed, so a
-// single failing forge does not lose the others.
-func Refresh(ctx context.Context, roots []string, cachePath string) ([]forge.RepoRef, error) {
+// owner's repos, writes the merged result to cachePath and the per-clone
+// metadata to metaPath, and returns the refs. The first per-target error is
+// returned alongside whatever repos did succeed, so a single failing forge does
+// not lose the others.
+func Refresh(ctx context.Context, roots []string, cachePath, metaPath string) ([]forge.RepoRef, error) {
 	var targets []remoteTarget
 	seen := map[string]bool{}
 	for _, root := range roots {
@@ -53,9 +54,11 @@ func Refresh(ctx context.Context, roots []string, cachePath string) ([]forge.Rep
 		}
 		all = append(all, repos...)
 	}
-	// Best-effort cache write: callers already have the fresh repos in `all`;
+	// Best-effort cache writes: callers already have the fresh repos in `all`;
 	// a write failure must not fail the refresh.
 	_ = forge.WriteRepoCache(cachePath, forge.RepoCache{UpdatedAt: time.Now(), Repos: all})
+	existing, _ := core.LoadRepoMeta(metaPath)
+	_ = core.SaveRepoMeta(metaPath, buildRepoMeta(roots, all, existing, time.Now()))
 	return all, firstErr
 }
 

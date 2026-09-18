@@ -60,8 +60,9 @@ func TestRefresh_NoToken_WritesCacheNoNetwork(t *testing.T) {
 	t.Setenv("GH_TOKEN", "")
 	t.Setenv("GITHUB_TOKEN", "")
 	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	metaPath := filepath.Join(t.TempDir(), "repo-meta.json")
 
-	repos, err := Refresh(context.Background(), []string{root}, cachePath)
+	repos, err := Refresh(context.Background(), []string{root}, cachePath, metaPath)
 	if err != nil {
 		t.Fatalf("Refresh: %v", err)
 	}
@@ -70,6 +71,46 @@ func TestRefresh_NoToken_WritesCacheNoNetwork(t *testing.T) {
 	}
 	if _, err := forge.ReadRepoCache(cachePath); err != nil {
 		t.Errorf("cache not written: %v", err)
+	}
+}
+
+func TestRefresh_WritesRepoMetaBesideRemoteList(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "acme"))
+	mustMkRepo(t, root, "github/acme/public/bridge")
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	metaPath := filepath.Join(t.TempDir(), "repo-meta.json")
+
+	if _, err := Refresh(context.Background(), []string{root}, cachePath, metaPath); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	// No token, so no refs — but the file must still be written, with an entry
+	// absent rather than the file missing.
+	if _, err := os.Stat(metaPath); err != nil {
+		t.Fatalf("repo-meta.json not written: %v", err)
+	}
+	if _, err := core.LoadRepoMeta(metaPath); err != nil {
+		t.Errorf("written repo-meta.json is not loadable: %v", err)
+	}
+}
+
+func TestRefresh_MetaWriteFailure_DoesNotFailTheRefresh(t *testing.T) {
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "acme"))
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	// A directory where the file should go: every write to it fails.
+	metaDir := t.TempDir()
+	metaPath := filepath.Join(metaDir, "repo-meta.json")
+	if err := os.MkdirAll(metaPath, 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Refresh(context.Background(), []string{root}, cachePath, metaPath); err != nil {
+		t.Errorf("a failed meta write must not fail Refresh, got %v", err)
 	}
 }
 
