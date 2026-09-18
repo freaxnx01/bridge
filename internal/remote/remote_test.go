@@ -259,11 +259,14 @@ func TestBuildRepoMeta_MatchesRefsToClonesCaseInsensitively(t *testing.T) {
 	mustMkRepo(t, root, "github/acme/public/bridge")
 	now := time.Unix(1789000000, 0)
 
-	got := buildRepoMeta([]string{root}, []forge.RepoRef{{
+	got, err := buildRepoMeta([]string{root}, []forge.RepoRef{{
 		Forge: "github", Owner: "ACME", Name: "Bridge",
 		Description: "repo navigator", Topics: []string{"go"},
 		DefaultBranch: "main", SSHURL: "git@github.com:acme/bridge.git",
 	}}, nil, now)
+	if err != nil {
+		t.Fatalf("buildRepoMeta: %v", err)
+	}
 
 	entry, ok := got["github/acme/public/bridge"]
 	if !ok {
@@ -287,7 +290,10 @@ func TestBuildRepoMeta_UnmatchedCloneKeepsExistingEntry(t *testing.T) {
 		"github/acme/public/bridge": {Description: "from a healthier day", FetchedAt: 1},
 	}
 	// No refs at all — e.g. the token 401'd this round.
-	got := buildRepoMeta([]string{root}, nil, existing, time.Unix(1789000000, 0))
+	got, err := buildRepoMeta([]string{root}, nil, existing, time.Unix(1789000000, 0))
+	if err != nil {
+		t.Fatalf("buildRepoMeta: %v", err)
+	}
 
 	entry, ok := got["github/acme/public/bridge"]
 	if !ok {
@@ -305,7 +311,10 @@ func TestBuildRepoMeta_DropsEntriesForReposNoLongerOnDisk(t *testing.T) {
 		"github/acme/public/bridge":  {Description: "still here"},
 		"github/acme/public/deleted": {Description: "clone is gone"},
 	}
-	got := buildRepoMeta([]string{root}, nil, existing, time.Unix(1789000000, 0))
+	got, err := buildRepoMeta([]string{root}, nil, existing, time.Unix(1789000000, 0))
+	if err != nil {
+		t.Fatalf("buildRepoMeta: %v", err)
+	}
 
 	if _, ok := got["github/acme/public/deleted"]; ok {
 		t.Errorf("entry for a vanished clone must be dropped: %+v", got)
@@ -313,6 +322,162 @@ func TestBuildRepoMeta_DropsEntriesForReposNoLongerOnDisk(t *testing.T) {
 	if _, ok := got["github/acme/public/bridge"]; !ok {
 		t.Errorf("entry for a present clone must survive: %+v", got)
 	}
+}
+
+// TestBuildRepoMeta_RefWithoutTopicsKeepsCachedOnes guards the forges that do
+// not report every field: ADO carries neither description nor topics, GitLab
+// and Forgejo carry no topics. Overwriting the entry wholesale would blank the
+// cached data those clones depend on for keyword lookups.
+func TestBuildRepoMeta_RefWithoutTopicsKeepsCachedOnes(t *testing.T) {
+	root := t.TempDir()
+	mustMkRepo(t, root, "ado/platform/deploy-tools")
+	existing := map[string]core.RepoMeta{
+		"ado/platform/deploy-tools": {
+			Description: "deployment helpers",
+			Topics:      []string{"infra", "nextgen"},
+			RemoteURL:   "git@ssh.dev.azure.com:v3/acme/platform/deploy-tools",
+		},
+	}
+	// An ADO-shaped ref: name/branch only, no description, no topics.
+	refs := []forge.RepoRef{{
+		Forge: "ado", Owner: "platform", Name: "deploy-tools", DefaultBranch: "main",
+	}}
+
+	got, err := buildRepoMeta([]string{root}, refs, existing, time.Unix(1789000000, 0))
+	if err != nil {
+		t.Fatalf("buildRepoMeta: %v", err)
+	}
+
+	entry, ok := got["ado/platform/deploy-tools"]
+	if !ok {
+		t.Fatalf("no entry for the clone, got keys %+v", got)
+	}
+	if entry.Description != "deployment helpers" {
+		t.Errorf("Description = %q, want the cached one kept (ref carries none)", entry.Description)
+	}
+	if len(entry.Topics) != 2 || entry.Topics[0] != "infra" {
+		t.Errorf("Topics = %+v, want the cached ones kept (ref carries none)", entry.Topics)
+	}
+	if entry.RemoteURL != "git@ssh.dev.azure.com:v3/acme/platform/deploy-tools" {
+		t.Errorf("RemoteURL = %q, want the cached one kept (ref carries none)", entry.RemoteURL)
+	}
+	if entry.DefaultBranch != "main" {
+		t.Errorf("DefaultBranch = %q, want the ref's value", entry.DefaultBranch)
+	}
+	if entry.FetchedAt != 1789000000 {
+		t.Errorf("FetchedAt = %d, want the refresh timestamp", entry.FetchedAt)
+	}
+}
+
+func TestBuildRepoMeta_UnreadableRoot_ReturnsError(t *testing.T) {
+	root := mustUnreadableForgeRoot(t)
+
+	if _, err := buildRepoMeta([]string{root}, nil, nil, time.Unix(1789000000, 0)); err == nil {
+		t.Fatal("an unreadable root must surface as an error, not as an empty map")
+	}
+}
+
+// TestRefresh_UnreadableRoot_LeavesExistingMetaIntact is the consequence of the
+// error above: a transient read failure must not truncate the cache to {} and
+// strip `bridge open <keyword>` of its meta data until the next good refresh.
+func TestRefresh_UnreadableRoot_LeavesExistingMetaIntact(t *testing.T) {
+	root := mustUnreadableForgeRoot(t)
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	metaPath := filepath.Join(t.TempDir(), "repo-meta.json")
+	before := map[string]core.RepoMeta{
+		"github/acme/public/bridge": {Description: "written by a healthy refresh", Topics: []string{"go"}},
+	}
+	if err := core.SaveRepoMeta(metaPath, before); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Refresh(context.Background(), []string{root}, cachePath, metaPath); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	after, err := core.LoadRepoMeta(metaPath)
+	if err != nil {
+		t.Fatalf("LoadRepoMeta: %v", err)
+	}
+	entry, ok := after["github/acme/public/bridge"]
+	if !ok {
+		t.Fatalf("a root that failed to enumerate must not wipe the cache, got %+v", after)
+	}
+	if entry.Description != "written by a healthy refresh" || len(entry.Topics) != 1 {
+		t.Errorf("entry must survive verbatim, got %+v", entry)
+	}
+}
+
+// TestRefresh_WithRef_WritesRefDataIntoRepoMeta drives the whole
+// Refresh → buildRepoMeta → SaveRepoMeta seam against a stand-in GitHub API,
+// proving a fetched ref actually lands in repo-meta.json on disk.
+func TestRefresh_WithRef_WritesRefDataIntoRepoMeta(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/user/repos" {
+			t.Errorf("request path = %q, want /user/repos", r.URL.Path)
+		}
+		_, _ = w.Write([]byte(`[{
+			"name":"bridge","default_branch":"main","description":"repo navigator",
+			"topics":["go","nextgen"],"ssh_url":"git@github.com:acme/bridge.git",
+			"owner":{"login":"acme"}
+		}]`))
+	}))
+	defer srv.Close()
+
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "acme"))
+	mustMkRepo(t, root, "github/acme/public/bridge")
+	t.Setenv("GH_TOKEN", "tok-abc")
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	metaPath := filepath.Join(t.TempDir(), "repo-meta.json")
+
+	if _, err := Refresh(context.Background(), []string{root}, cachePath, metaPath); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	meta, err := core.LoadRepoMeta(metaPath)
+	if err != nil {
+		t.Fatalf("LoadRepoMeta: %v", err)
+	}
+	entry, ok := meta["github/acme/public/bridge"]
+	if !ok {
+		t.Fatalf("the fetched ref did not reach repo-meta.json, got %+v", meta)
+	}
+	if entry.Description != "repo navigator" || entry.DefaultBranch != "main" {
+		t.Errorf("entry not populated from the ref: %+v", entry)
+	}
+	if len(entry.Topics) != 2 || entry.Topics[1] != "nextgen" {
+		t.Errorf("Topics = %+v, want [go nextgen]", entry.Topics)
+	}
+	if entry.RemoteURL != "git@github.com:acme/bridge.git" {
+		t.Errorf("RemoteURL = %q, want the ref's SSH URL", entry.RemoteURL)
+	}
+	if entry.FetchedAt == 0 {
+		t.Error("FetchedAt must be stamped on a fresh entry")
+	}
+}
+
+// mustUnreadableForgeRoot returns a repos root whose github/ dir cannot be
+// read, the shape DiscoverRepos reports as an error (a permission problem, an
+// unmounted or NFS-stalled root).
+func mustUnreadableForgeRoot(t *testing.T) string {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions")
+	}
+	root := t.TempDir()
+	forgeDir := filepath.Join(root, "github")
+	if err := os.MkdirAll(forgeDir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(forgeDir, 0o000); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = os.Chmod(forgeDir, 0o755) }) // let TempDir cleanup remove it
+	return root
 }
 
 func mustMkdirEnvrc(t *testing.T, dir string) {

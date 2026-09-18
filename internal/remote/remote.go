@@ -4,6 +4,7 @@ package remote
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"os"
 	"os/exec"
@@ -61,7 +62,12 @@ func Refresh(ctx context.Context, roots []string, cachePath, metaPath string) ([
 	// fallbacks for repos this round could not reach, so a nil map degrades to
 	// "no fallbacks available" rather than losing the refresh.
 	existing, _ := core.LoadRepoMeta(metaPath)
-	_ = core.SaveRepoMeta(metaPath, buildRepoMeta(roots, all, existing, time.Now()))
+	// A root that could not be enumerated looks identical to "no clones under
+	// it", which would prune every live entry keyed under that root. Leave the
+	// previous file untouched instead and let the next refresh rewrite it.
+	if meta, err := buildRepoMeta(roots, all, existing, time.Now()); err == nil {
+		_ = core.SaveRepoMeta(metaPath, meta)
+	}
 	return all, firstErr
 }
 
@@ -76,8 +82,10 @@ func refIdentity(forgeName, owner, name string) string {
 //
 // A clone with no matching ref keeps its entry from existing, so a forge that
 // failed this round loses nothing; an entry whose clone is gone from disk is
-// dropped, so the file cannot grow without bound.
-func buildRepoMeta(roots []string, refs []forge.RepoRef, existing map[string]core.RepoMeta, now time.Time) map[string]core.RepoMeta {
+// dropped, so the file cannot grow without bound. A root that cannot be
+// enumerated yields an error rather than a truncated map, because the caller
+// cannot tell "root is empty" from "root is unreadable" once it has one.
+func buildRepoMeta(roots []string, refs []forge.RepoRef, existing map[string]core.RepoMeta, now time.Time) (map[string]core.RepoMeta, error) {
 	byIdentity := make(map[string]forge.RepoRef, len(refs))
 	for _, r := range refs {
 		byIdentity[refIdentity(r.Forge, r.Owner, r.Name)] = r
@@ -86,30 +94,52 @@ func buildRepoMeta(roots []string, refs []forge.RepoRef, existing map[string]cor
 	for _, root := range roots {
 		repos, err := core.DiscoverRepos(root)
 		if err != nil {
-			continue
+			return nil, fmt.Errorf("discover repos under %s: %w", root, err)
 		}
 		for _, repo := range repos {
 			key := core.RepoMetaKey(roots, repo.Path)
 			if _, done := out[key]; done {
 				continue
 			}
+			prev, hadPrev := existing[key]
 			ref, ok := byIdentity[refIdentity(repo.Forge, repo.Owner, repo.Name)]
 			if !ok {
-				if prev, had := existing[key]; had {
+				if hadPrev {
 					out[key] = prev
 				}
 				continue
 			}
-			out[key] = core.RepoMeta{
-				Description:   ref.Description,
-				Topics:        ref.Topics,
-				DefaultBranch: ref.DefaultBranch,
-				RemoteURL:     ref.SSHURL,
-				FetchedAt:     now.Unix(),
-			}
+			out[key] = mergeRefIntoMeta(prev, ref, now)
 		}
 	}
-	return out
+	return out, nil
+}
+
+// mergeRefIntoMeta overlays the ref's fields onto the previously cached entry.
+// A field the ref does not carry keeps its cached value: only GitHub populates
+// every field, so a plain overwrite would blank a GitLab/Forgejo clone's topics
+// or an ADO clone's description on the first refresh.
+func mergeRefIntoMeta(prev core.RepoMeta, ref forge.RepoRef, now time.Time) core.RepoMeta {
+	merged := core.RepoMeta{
+		Description:   ref.Description,
+		Topics:        ref.Topics,
+		DefaultBranch: ref.DefaultBranch,
+		RemoteURL:     ref.SSHURL,
+		FetchedAt:     now.Unix(),
+	}
+	if merged.Description == "" {
+		merged.Description = prev.Description
+	}
+	if len(merged.Topics) == 0 {
+		merged.Topics = prev.Topics
+	}
+	if merged.DefaultBranch == "" {
+		merged.DefaultBranch = prev.DefaultBranch
+	}
+	if merged.RemoteURL == "" {
+		merged.RemoteURL = prev.RemoteURL
+	}
+	return merged
 }
 
 // discoverRemoteTargets walks the well-known repos-root layout patterns and
