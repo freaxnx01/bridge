@@ -35,26 +35,20 @@ func WriteState(path string, s State) error {
 	return store.AtomicWrite(path, b)
 }
 
-// NightBudgetUsed returns how much of the nightly ceiling this night has
-// already spent. A "night" runs from one evening into the following morning,
-// so a 02:00 retry tick belongs to the previous calendar day's night — hence
-// the 12:00 pivot rather than a date comparison.
-func (s State) NightBudgetUsed(now time.Time) int {
-	if s.NightStartedAt.IsZero() {
+// DispatchesSince returns how many dispatches the current counting period has
+// already spent, where since is the start of the window occurrence being
+// bounded. A counter recorded before that boundary belongs to an earlier
+// occurrence and does not carry over.
+//
+// The boundary is passed in rather than derived from the clock on purpose: an
+// earlier version bucketed on a hardcoded 12:00 pivot, which was correct only
+// while dispatch ran at night. Once the configured windows tile the whole day,
+// a morning tick resolved to the previous night and inherited its spent
+// counter, refusing every daytime candidate with "night cap N/N" while the
+// budget rung had full headroom.
+func (s State) DispatchesSince(since time.Time) int {
+	if s.NightStartedAt.IsZero() || s.NightStartedAt.Before(since) {
 		return 0
 	}
-	if nightOf(now).Equal(nightOf(s.NightStartedAt)) {
-		return s.DispatchedTonight
-	}
-	return 0
-}
-
-// nightOf maps an instant to the date its night began. Anything before noon
-// belongs to the previous day's night.
-func nightOf(t time.Time) time.Time {
-	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	if t.Hour() < 12 {
-		d = d.AddDate(0, 0, -1)
-	}
-	return d
+	return s.DispatchedTonight
 }

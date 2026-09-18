@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -144,22 +145,59 @@ func transcriptRoot() string {
 // measureWindowUSD sums interactive and pipeline consumption over the trailing
 // quota window. The bool reports whether the number can be trusted: false means
 // fail closed, and is never the same as a measured zero.
-func measureWindowUSD(ctx context.Context, cfg dispatch.Config, now time.Time) (float64, bool) {
-	since := now.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
-
-	turns, err := usage.ScanTranscripts(ctx, transcriptRoot(), since)
+func measureWindowUSD(ctx context.Context, cfg dispatch.Config, from, to time.Time) (float64, bool) {
+	turns, err := usage.ScanTranscripts(ctx, transcriptRoot(), from)
 	if err != nil {
-		slog.Warn("dispatch: cannot read Claude transcripts — daytime dispatch will be blocked", "error", err)
+		slog.Warn("dispatch: cannot read Claude transcripts — guarded dispatch will be blocked", "error", err)
 		return 0, false
 	}
 	ledger, err := usage.LoadLedger(dispatchLedgerPath())
 	if err != nil {
-		slog.Warn("dispatch: cannot read the usage ledger — daytime dispatch will be blocked", "error", err)
+		slog.Warn("dispatch: cannot read the usage ledger — guarded dispatch will be blocked", "error", err)
 		return 0, false
 	}
 
 	pricing := usage.DefaultPricing().Merge(cfg.Budget.Pricing)
-	return usage.SumWindow(turns, pricing, since, now) + ledger.SumSince(since), true
+	return usage.SumWindow(turns, pricing, from, to) + ledger.SumSince(from), true
+}
+
+// tickTiming resolves one instant against the configured schedule: which
+// window covers it, what the budget rung is guarding, the span to measure
+// usage over, and which window occurrence the nightly counter belongs to.
+type tickTiming struct {
+	Now             time.Time
+	Window          dispatch.Window
+	InWindow        bool
+	RungOn          bool
+	Guard           time.Time // the instant the rung protects
+	MeasureFrom     time.Time
+	NightCapApplies bool
+	NightStart      time.Time
+}
+
+// resolveTiming is the single place the schedule is interpreted, so a tick and
+// a `status` read can never disagree about which bounds are in force.
+func resolveTiming(cfg dispatch.Config, now time.Time) tickTiming {
+	t := tickTiming{Now: now}
+	t.Window, t.InWindow = cfg.Schedule.InWindow(now)
+
+	guard, on := cfg.Schedule.RungGuard(now, cfg.Budget.WindowHours)
+	t.RungOn = on
+	t.Guard = guard
+	if on {
+		// Measure the quota window that ends at the guarded instant. Inside a
+		// rung window that is now; in the pre-dawn shoulder it is the coming
+		// handover, so only spend still inside the window at that point counts.
+		t.MeasureFrom = guard.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
+	}
+
+	// The nightly ceiling bounds unattended spend, so it belongs to a window
+	// whose rung is off — and its counter resets at that window's own start.
+	if t.InWindow && !t.Window.BudgetRung {
+		t.NightCapApplies = true
+		t.NightStart = t.Window.StartOf(now)
+	}
+	return t
 }
 
 func runDispatch(cmd *cobra.Command, _ []string) error {
@@ -179,10 +217,10 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	}
 
 	now := time.Now()
-	win, inWindow := cfg.Schedule.InWindow(now)
+	timing := resolveTiming(cfg, now)
 	// The window gate is --auto only: an explicit `dispatch now` is the
 	// operator asking for a tick, the same exemption the pause flag has.
-	if dispatchAuto && !inWindow {
+	if dispatchAuto && !timing.InWindow {
 		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — nothing to do")
 		return nil
 	}
@@ -193,14 +231,15 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
-	// The rung applies whether or not this is --auto: a manual daytime
-	// dispatch burns the same quota.
-	rungOn := inWindow && win.BudgetRung
+	// The rung is keyed on what it guards, not on --auto: a manual tick burns
+	// the same quota, and a pre-dawn tick burns the window the operator will
+	// inherit at the handover. It is off only when now is genuinely outside
+	// every rung window and its shoulder.
 	usedUSD, usedKnown := 0.0, true
-	if rungOn {
-		usedUSD, usedKnown = measureWindowUSD(ctx, cfg, now)
+	if timing.RungOn {
+		usedUSD, usedKnown = measureWindowUSD(ctx, cfg, timing.MeasureFrom, now)
 	}
-	budget := dispatch.NewBudgetState(cfg.Budget, rungOn, usedUSD, usedKnown)
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
 
 	openByRepo, globalOpen := countOpenAgentPRs(repos)
 	decisions := dispatch.ApplyCaps(
@@ -209,7 +248,8 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		dispatch.Counts{
 			OpenPRsByRepo:     openByRepo,
 			GlobalOpen:        globalOpen,
-			DispatchedTonight: state.NightBudgetUsed(now),
+			DispatchedTonight: state.DispatchesSince(timing.NightStart),
+			NightCapApplies:   timing.NightCapApplies,
 		},
 		budget,
 	)
@@ -224,7 +264,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	if dispatchDryRun {
 		return nil
 	}
-	return applyDecisions(ctx, decisions, state, now, cfg)
+	return applyDecisions(ctx, decisions, state, timing, cfg)
 }
 
 // fetchRepoInputs reads every discovered repo's issues, milestones and open
@@ -302,10 +342,12 @@ func countOpenAgentPRs(repos []repoInput) (map[string]int, int) {
 }
 
 // applyDecisions writes the one label the dispatcher owns, then persists the
-// nightly counter. It never writes agent:* or model:* — model choice belongs
-// to agent-workflow's classify-task.sh.
-func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, now time.Time, cfg dispatch.Config) error {
-	dispatched := 0
+// ledger and the nightly counter. It never writes agent:* or model:* — model
+// choice belongs to agent-workflow's classify-task.sh.
+func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing tickTiming, cfg dispatch.Config) error {
+	var runs []usage.Run
+	var dispatchErr error
+
 	for _, d := range ds {
 		if !d.Dispatch {
 			continue
@@ -316,43 +358,70 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 		}
 		owner, repo, num := d.Candidate.Owner, d.Candidate.Repo, d.Candidate.Issue.Number
 		if _, err := gh.AddLabels(ctx, owner, repo, num, []string{dispatch.LabelAIImplement}); err != nil {
-			return fmt.Errorf("label %s#%d: %w", repo, num, err)
+			dispatchErr = fmt.Errorf("label %s#%d: %w", repo, num, err)
+			break
 		}
+		// The label is the pipeline's trigger, so from here the run is real and
+		// has to be booked even if the follow-up comment fails. Booking only on
+		// the all-succeeded path under-counted spend whenever a forge call
+		// failed mid-loop — the fail-open direction the rung exists to prevent.
+		runs = append(runs, usage.Run{
+			At: timing.Now, Repo: repo, Issue: num, EstUSD: cfg.Budget.MeanRunCostUSD,
+		})
 		if _, err := gh.CommentIssue(ctx, owner, repo, num,
 			"Dispatched by `bridge dispatch`."); err != nil {
-			return fmt.Errorf("comment %s#%d: %w", repo, num, err)
-		}
-		dispatched++
-	}
-	if dispatched > 0 {
-		ledger, err := usage.LoadLedger(dispatchLedgerPath())
-		if err != nil {
-			return fmt.Errorf("read usage ledger: %w", err)
-		}
-		for _, d := range ds {
-			if !d.Dispatch {
-				continue
-			}
-			ledger.Append(usage.Run{
-				At:     now,
-				Repo:   d.Candidate.Repo,
-				Issue:  d.Candidate.Issue.Number,
-				EstUSD: cfg.Budget.MeanRunCostUSD,
-			})
-		}
-		// Only the trailing window is ever summed; a week of history is
-		// plenty for calibration and keeps the file bounded.
-		ledger.Prune(now.AddDate(0, 0, -7))
-		if err := usage.WriteLedger(dispatchLedgerPath(), ledger); err != nil {
-			return fmt.Errorf("write usage ledger: %w", err)
+			dispatchErr = fmt.Errorf("comment %s#%d: %w", repo, num, err)
+			break
 		}
 	}
-	state.DispatchedTonight = state.NightBudgetUsed(now) + dispatched
-	if state.NightBudgetUsed(now) == 0 {
-		state.NightStartedAt = now
+
+	// Persist what actually happened before surfacing any dispatch error: the
+	// labels are already on the forge, so dropping their accounting would let
+	// the next tick spend the same headroom twice.
+	if err := recordRuns(dispatchLedgerPath(), runs, timing.Now); err != nil {
+		return errors.Join(dispatchErr, err)
 	}
-	state.LastTick = now
-	return dispatch.WriteState(dispatchStatePath(), state)
+	if timing.NightCapApplies {
+		base := state.DispatchesSince(timing.NightStart)
+		if base == 0 {
+			state.NightStartedAt = timing.Now
+		}
+		state.DispatchedTonight = base + len(runs)
+	}
+	state.LastTick = timing.Now
+	if err := dispatch.WriteState(dispatchStatePath(), state); err != nil {
+		return errors.Join(dispatchErr, err)
+	}
+	return dispatchErr
+}
+
+// recordRuns appends runs to the ledger and trims history outside the window
+// anyone reads.
+//
+// The reload sits immediately before the write to keep the read-modify-write
+// window as small as possible. It does not close it: an overlapping writer's
+// runs can still be lost. A file lock would, but needs per-platform syscalls
+// and bridge ships a Windows build — disproportionate for an hourly timer
+// racing a hand-run command, and the failure is a slight under-count rather
+// than a corrupt file.
+func recordRuns(path string, runs []usage.Run, now time.Time) error {
+	if len(runs) == 0 {
+		return nil
+	}
+	ledger, err := usage.LoadLedger(path)
+	if err != nil {
+		return fmt.Errorf("read usage ledger: %w", err)
+	}
+	for _, r := range runs {
+		ledger.Append(r)
+	}
+	// Only the trailing window is ever summed; a week of history is plenty for
+	// calibration and keeps the file bounded.
+	ledger.Prune(now.AddDate(0, 0, -7))
+	if err := usage.WriteLedger(path, ledger); err != nil {
+		return fmt.Errorf("write usage ledger: %w", err)
+	}
+	return nil
 }
 
 // setPaused flips the dispatcher's paused flag in local state and reports the
@@ -391,9 +460,15 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 	}
 
 	now := time.Now()
-	win, inWindow := cfg.Schedule.InWindow(now)
-	usedUSD, usedKnown := measureWindowUSD(context.Background(), cfg, now)
-	budget := dispatch.NewBudgetState(cfg.Budget, inWindow && win.BudgetRung, usedUSD, usedKnown)
+	timing := resolveTiming(cfg, now)
+	measureFrom := timing.MeasureFrom
+	if measureFrom.IsZero() {
+		// Unguarded right now, but the operator still wants a reading, so show
+		// the plain trailing window.
+		measureFrom = now.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
+	}
+	usedUSD, usedKnown := measureWindowUSD(context.Background(), cfg, measureFrom, now)
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
 
 	if dispatchJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
@@ -409,7 +484,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 		}{
 			Limits:            cfg.Limits,
 			Paused:            state.Paused,
-			DispatchedTonight: state.NightBudgetUsed(now),
+			DispatchedTonight: state.DispatchesSince(timing.NightStart),
 			LastTick:          state.LastTick,
 			BudgetWindowHours: cfg.Budget.WindowHours,
 			BudgetUsedUSD:     budget.UsedUSD,
@@ -421,7 +496,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "paused: %t\n", state.Paused)
-	fmt.Fprintf(w, "dispatched tonight: %d/%d\n", state.NightBudgetUsed(now), cfg.Limits.MaxDispatchesPerNight)
+	fmt.Fprintf(w, "dispatched tonight: %d/%d\n", state.DispatchesSince(timing.NightStart), cfg.Limits.MaxDispatchesPerNight)
 	fmt.Fprintf(w, "per-repo cap: %d, global cap: %d\n", cfg.Limits.PerRepo, cfg.Limits.GlobalOpenPRs)
 	if budget.Unknown {
 		fmt.Fprintf(w, "budget window: %gh — usage unreadable, daytime dispatch blocked\n", cfg.Budget.WindowHours)
@@ -433,7 +508,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(w, "budget window: %gh — used $%.2f of $%.2f (%.0f%%)\n",
 			cfg.Budget.WindowHours, budget.UsedUSD, budget.LimitUSD, pct)
 	}
-	fmt.Fprintf(w, "budget rung: %s\n", rungLabel(budget.Enabled, win, inWindow))
+	fmt.Fprintf(w, "budget rung: %s\n", rungLabel(timing))
 	if state.LastTick.IsZero() {
 		fmt.Fprintln(w, "last tick: never")
 	} else {
@@ -444,12 +519,18 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 
 // rungLabel describes whether the budget rung is policing this moment, and
 // which window that decision came from.
-func rungLabel(enabled bool, win dispatch.Window, inWindow bool) string {
-	if !inWindow {
+func rungLabel(t tickTiming) string {
+	switch {
+	case t.RungOn && t.InWindow && t.Window.BudgetRung:
+		return fmt.Sprintf("active (window %s-%s)", t.Window.From, t.Window.To)
+	case t.RungOn:
+		// The shoulder: still in an unguarded window, but close enough to the
+		// handover that this spend survives into the operator's quota window.
+		return fmt.Sprintf("active (reserving headroom for the %s handover)",
+			t.Guard.Format("15:04"))
+	case !t.InWindow:
 		return "inactive (outside every configured window)"
+	default:
+		return fmt.Sprintf("inactive (window %s-%s)", t.Window.From, t.Window.To)
 	}
-	if !enabled {
-		return fmt.Sprintf("inactive (window %s-%s)", win.From, win.To)
-	}
-	return fmt.Sprintf("active (window %s-%s)", win.From, win.To)
 }

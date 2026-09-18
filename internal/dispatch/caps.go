@@ -16,6 +16,11 @@ type Counts struct {
 	OpenPRsByRepo     map[string]int
 	GlobalOpen        int
 	DispatchedTonight int
+	// NightCapApplies arms the nightly ceiling. It bounds *unattended* spend,
+	// so it belongs only to a window whose budget rung is off — during a rung
+	// window the budget itself is the bound, and applying both would refuse
+	// daytime work using the night's spent counter.
+	NightCapApplies bool
 }
 
 // ApplyCaps walks an ordered candidate list and marks each one dispatch or
@@ -47,7 +52,7 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 		case budget.Enabled && spent+budget.PerRunUSD > budget.LimitUSD:
 			out = append(out, Decision{c, false,
 				fmt.Sprintf("budget-exhausted %.2f/%.2f USD", spent, budget.LimitUSD)})
-		case night >= cfg.Limits.MaxDispatchesPerNight:
+		case counts.NightCapApplies && night >= cfg.Limits.MaxDispatchesPerNight:
 			out = append(out, Decision{c, false,
 				fmt.Sprintf("night cap %d/%d", night, cfg.Limits.MaxDispatchesPerNight)})
 		case global >= cfg.Limits.GlobalOpenPRs:
