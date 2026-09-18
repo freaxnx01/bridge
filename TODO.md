@@ -1,51 +1,44 @@
 # Bridge TODO
 
-## Session 2026-09-17 (#254 dispatch usage-budget rung) — implemented, PR #293 blocked on review
+## Session 2026-09-17/18 (#254 dispatch usage-budget rung) — merged
 
-Enrichment done and merged (#277: `docs/specs/2026-09-07-dispatch-usage-budget-design.md`,
-`docs/plans/2026-09-07-dispatch-usage-budget.md`). Pipeline implemented all 8 tasks
-in [PR #293](https://github.com/freaxnx01/bridge/pull/293) (+1303/-55, 20 files);
-pre-preview review returned `request_changes`, so it stays **draft** with
-`ai:review-blocked`.
+Enriched (#277), implemented by the pipeline (#293, +1899/-115 over 12 commits),
+three review rounds, merged 2026-09-18. Issue closed as completed. Spec:
+`docs/specs/2026-09-07-dispatch-usage-budget-design.md` (D4a + D6 record the
+two post-review design amendments).
 
-- [ ] **Decide the night-cap/window interaction, then fix #293** — the review's only
-      `high`, and it is a gap in the spec's decision D4, not a coding slip. The two
-      default windows (18:00-07:00 + 07:00-18:00) tile all 24h, so daytime ticks now
-      increment `state.DispatchedTonight` while `NightBudgetUsed` still buckets on a
-      hardcoded 12:00 pivot (`internal/dispatch/state.go:41`). Result: 5 dispatches
-      overnight make every morning candidate fail `night cap 5/5` with the budget rung
-      wide open, then the bucket flips at noon and afternoon dispatches eat the coming
-      night's budget. Two options the review names: scope the nightly counter to
-      `budget_rung: false` windows, or derive the reset boundary from
-      `schedule.windows` instead of the noon pivot. The spec rejected per-window
-      `max_dispatches` as "a real refactor of persisted state semantics" — that
-      rejection is what needs revisiting.
-- [ ] **Fix the remaining #293 review concerns** (full text in the PR comment):
-      ledger write skipped when a mid-loop forge error aborts `applyDecisions`
-      (fail-open, under-counts spend); `rungOn := inWindow && win.BudgetRung` lets a
-      manual `dispatch now` in a window gap spend unbudgeted, contradicting its own
-      adjacent comment and `docs/dispatch.md`; the ledger write path has no direct
-      assertion; `docs/dispatch.md` "resets daily at the night window's start" does not
-      match the noon pivot; unsynchronised load-modify-write on `usage.json`;
-      `mostExpensive` ranks on `Output` alone so a cache-heavy operator override could
-      price an unknown model below the true worst case.
-- [ ] **Calibrate `window_budget_usd` and `mean_run_cost_usd`** once #293 merges —
-      both are placeholders (12.00 / 2.00). Read `bridge dispatch status` against
-      `/usage` across a window; compare run-report `**Cost:**` values against the mean.
-      Procedure is in the spec's *Known approximations*.
-- [ ] **Audit whether #283 swept other issues closed** — it closed #254 as COMPLETED
-      on 2026-09-09 while only retiring the dead `claude.yml` stub and documenting the
-      timeout gap; the feature was never implemented. Reopened 2026-09-17. Worth
-      checking its other issue references for the same mistake.
-- [x] `claude-timeout-minutes` unsettable at the `v1` pin — **fixed** in
-      [#291](https://github.com/freaxnx01/bridge/pull/291). The stub had already moved
-      to `@v2` (01110fa) where the input exists; now `claude-timeout-minutes: 45` /
-      `timeout-minutes: 50`. This was what killed #254's first run (`exit 124` at
-      exactly 10:00, nothing pushed, no run report). The re-dispatch ran 21 minutes
-      and succeeded, so the fix is verified end-to-end.
-- [ ] **Delete the merged remote branches** `docs/dispatch-usage-budget-254` and
-      `chore/agent-claude-timeout`, and drop the `.worktrees/limit-ai-impl` worktree
-      once #293 is finished.
+- [x] Night-cap/window interaction — the nightly cap is armed by
+      `Counts.NightCapApplies` (only for a `budget_rung: false` window) and its
+      counter resets at that window's own start. `NightBudgetUsed`, `nightOf`
+      and the 12:00 pivot are gone.
+- [x] Handover guard (D6) — the rung is also armed in the `window_hours`
+      shoulder before a rung window, measuring
+      `[window_start - window_hours, now]`, so night work cannot hand over an
+      already-spent quota window at 07:00. AC #9 amended and ratified on the
+      issue.
+- [x] All 7 pre-preview concerns, plus 3 bugs the later rounds found: the
+      DST duration-arithmetic boundary, its ambiguous-hour regression, and a
+      clock-dependent test that only failed in CI.
+- [x] `claude-timeout-minutes` (#291) and the self-fix opt-in (#298).
+- [x] Merged branches and the `self-fix` worktree cleaned up.
+- [ ] **Calibrate `window_budget_usd` and `mean_run_cost_usd`** — still the
+      placeholders 12.00 and 2.00. Read `bridge dispatch status` against
+      `/usage` across a window, and compare run-report `**Cost:**` values
+      against the mean. Nothing else in the feature is empirical; this is.
+- [ ] **Reinstall the dispatch timer** — `docs/systemd/bridge-dispatch.timer`
+      is now a bare hourly heartbeat and the hours live in
+      `schedule.windows`. Until `systemctl --user daemon-reload &&
+      systemctl --user restart bridge-dispatch.timer` runs, the old night-only
+      timer is still what fires, so the daytime windows never happen.
+- [ ] **Audit whether #283 swept other issues closed** — it closed #254 as
+      COMPLETED on 2026-09-09 while only retiring the dead `claude.yml` stub
+      and documenting the timeout gap; the feature was never implemented.
+      Reopened 2026-09-17 and now genuinely done, but worth checking its other
+      issue references for the same mistake.
+- [ ] **Consider per-window `max_dispatches`** — the spec rejected it (D4) and
+      the scoping fix made D4 true without it, but splitting the night into two
+      `budget_rung: false` windows still doubles the nightly cap. Documented as
+      a footgun in `docs/dispatch.md` rather than fixed.
 
 ## Bridge MCP endpoint (#195, merged 2026-07-12)
 
