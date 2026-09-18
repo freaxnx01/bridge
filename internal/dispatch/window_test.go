@@ -156,3 +156,87 @@ func TestRungGuardNoRungWindowIsNeverGuarded(t *testing.T) {
 		t.Errorf("with no budget_rung window there is nothing to guard: guard=%v on=%v", guard, on)
 	}
 }
+
+// Window boundaries are wall-clock times, so resolving one must use calendar
+// arithmetic. Adding a duration to midnight is off by an hour on a DST day —
+// in opposite directions in spring and autumn — and because InWindow compares
+// wall-clock minutes, the two would disagree about the same window twice a
+// year. That reintroduced the inherited-night-counter bug the nightly cap fix
+// was about: a boundary resolving to the previous day makes DispatchesSince
+// return the previous night's count.
+func TestWindowBoundariesSurviveDSTTransitions(t *testing.T) {
+	zurich, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Skip("no tzdata available:", err)
+	}
+	night := Window{From: "18:00", To: "07:00"}
+	rung := Schedule{Windows: []Window{night, {From: "07:00", To: "18:00", BudgetRung: true}}}
+
+	tests := []struct {
+		name          string
+		now           time.Time
+		wantStart     time.Time
+		wantRungGuard time.Time
+	}{
+		{
+			// 2027-03-28 is 23h long in Zurich: midnight+18h lands at 19:00,
+			// which reads as "after now" and rolls the start back a full day.
+			name:          "spring forward evening",
+			now:           time.Date(2027, 3, 28, 18, 30, 0, 0, zurich),
+			wantStart:     time.Date(2027, 3, 28, 18, 0, 0, 0, zurich),
+			wantRungGuard: time.Date(2027, 3, 29, 7, 0, 0, 0, zurich),
+		},
+		{
+			name:          "spring forward pre-dawn",
+			now:           time.Date(2027, 3, 28, 4, 0, 0, 0, zurich),
+			wantStart:     time.Date(2027, 3, 27, 18, 0, 0, 0, zurich),
+			wantRungGuard: time.Date(2027, 3, 28, 7, 0, 0, 0, zurich),
+		},
+		{
+			// 2027-10-31 is 25h long: midnight+18h lands at 17:00, so the
+			// rung would disarm an hour before the real handover.
+			name:          "fall back evening",
+			now:           time.Date(2027, 10, 31, 18, 30, 0, 0, zurich),
+			wantStart:     time.Date(2027, 10, 31, 18, 0, 0, 0, zurich),
+			wantRungGuard: time.Date(2027, 11, 1, 7, 0, 0, 0, zurich),
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := night.StartOf(tc.now); !got.Equal(tc.wantStart) {
+				t.Errorf("StartOf = %v, want %v", got, tc.wantStart)
+			}
+			guard, _ := rung.RungGuard(tc.now, 5)
+			if !guard.Equal(tc.wantRungGuard) {
+				t.Errorf("RungGuard = %v, want %v", guard, tc.wantRungGuard)
+			}
+		})
+	}
+}
+
+// The two helpers must agree about a window on a DST day: InWindow decides
+// whether the nightly cap applies, StartOf decides which occurrence its
+// counter belongs to, and a disagreement is what silently blocks dispatch.
+func TestInWindowAndStartOfAgreeAcrossDST(t *testing.T) {
+	zurich, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Skip("no tzdata available:", err)
+	}
+	s := DefaultConfig().Schedule
+
+	for _, now := range []time.Time{
+		time.Date(2027, 3, 28, 18, 30, 0, 0, zurich),
+		time.Date(2027, 3, 28, 4, 0, 0, 0, zurich),
+		time.Date(2027, 10, 31, 18, 30, 0, 0, zurich),
+		time.Date(2027, 10, 31, 2, 30, 0, 0, zurich),
+	} {
+		w, ok := s.InWindow(now)
+		if !ok {
+			t.Fatalf("%v: default windows tile the day, so something must cover it", now)
+		}
+		start := w.StartOf(now)
+		if start.After(now) {
+			t.Errorf("%v: StartOf returned a future boundary %v — InWindow says this window covers now", now, start)
+		}
+	}
+}

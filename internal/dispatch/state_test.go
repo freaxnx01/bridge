@@ -68,3 +68,10 @@ func TestDispatchesSinceZeroStateIsZero(t *testing.T) {
 		t.Errorf("got %d", got)
 	}
 }
+
+func TestDispatchesSinceZeroBoundaryReportsNothing(t *testing.T) {
+	s := State{DispatchedTonight: 5, NightStartedAt: time.Date(2026, 7, 27, 22, 0, 0, 0, time.UTC)}
+	if got := s.DispatchesSince(time.Time{}); got != 0 {
+		t.Errorf("no window occurrence to attribute to, want 0, got %d", got)
+	}
+}

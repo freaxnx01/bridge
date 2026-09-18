@@ -436,10 +436,13 @@ func TestRunDispatchAutoOutsideWindowSkipsBeforeFetching(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", cfgDir)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	// A window that cannot contain "now": one minute wide, an hour ago.
-	past := time.Now().Add(-time.Hour)
-	body := `{"schedule":{"windows":[{"from":"` + past.Format("15:04") + `","to":"` +
-		past.Add(time.Minute).Format("15:04") + `","budget_rung":false}]}}`
+	// A window that cannot contain "now": one minute wide, three hours ahead.
+	// Deliberately not now-1h — on a fall-back DST day the repeated hour gives
+	// now-1h the same wall-clock HH:MM as now, the window then covers now, and
+	// the test falls through into a real fetch once a year.
+	future := time.Now().Add(3 * time.Hour)
+	body := `{"schedule":{"windows":[{"from":"` + future.Format("15:04") + `","to":"` +
+		future.Add(time.Minute).Format("15:04") + `","budget_rung":false}]}}`
 	if err := os.MkdirAll(filepath.Join(cfgDir, "bridge"), 0o755); err != nil {
 		t.Fatal(err)
 	}
@@ -618,5 +621,84 @@ func TestShoulderAllowsWhenTheHandoverWindowHasHeadroom(t *testing.T) {
 	)
 	if !ds[0].Dispatch {
 		t.Errorf("$1 spent leaves room for a $2 run under $9.60: %+v", ds[0])
+	}
+}
+
+// A dispatched run is real the moment its label lands, so a failing follow-up
+// comment must not un-book it. Booking only on the all-succeeded path lost
+// real spend whenever a forge call failed mid-loop — the fail-open direction
+// the budget rung exists to prevent.
+func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
+	var labelCalls, commentCalls int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[
+				{"number":41,"title":"eligible issue","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+			]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
+			w.Write([]byte(`[]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+			w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/labels":
+			labelCalls++
+			w.Write([]byte(`[{"name":"ai-implement"}]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/comments":
+			// The label already landed; the comment is what fails.
+			commentCalls++
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"boom"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	root := writeFakeGithubRepo(t, "freaxnx01", "bridge")
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	t.Setenv("GH_TOKEN", "tok")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	setDispatchFlags(t, false, false)
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := runDispatch(cmd, nil)
+	if err == nil {
+		t.Fatal("the failing comment must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "comment") {
+		t.Errorf("error should name the failing call: %v", err)
+	}
+	if labelCalls != 1 || commentCalls != 1 {
+		t.Fatalf("labelCalls=%d commentCalls=%d", labelCalls, commentCalls)
+	}
+
+	// The run is booked despite the error, because #41 carries the label and
+	// the pipeline will act on it.
+	ledger, lerr := usage.LoadLedger(dispatchLedgerPath())
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if len(ledger.Runs) != 1 {
+		t.Fatalf("want the labelled run booked, got %d runs: %+v", len(ledger.Runs), ledger.Runs)
+	}
+	if ledger.Runs[0].Issue != 41 || ledger.Runs[0].Repo != "bridge" {
+		t.Errorf("booked the wrong run: %+v", ledger.Runs[0])
+	}
+
+	// And the local state was still written, so LastTick advanced.
+	state, serr := dispatch.ReadState(dispatchStatePath())
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if state.LastTick.IsZero() {
+		t.Error("state must be persisted even when the tick errored")
 	}
 }

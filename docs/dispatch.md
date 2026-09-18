@@ -45,6 +45,15 @@ With the default 5h window and a 07:00 day start: a 01:00 run is unguarded (it a
 
 Outside both — genuinely deep in the night, or in a schedule gap — the rung is off and usage is not measured. A configuration with no `budget_rung: true` window anywhere therefore disables the rung entirely; that is a deliberate opt-out, not a failure.
 
+### Window configuration footguns
+
+The defaults tile the whole day, so none of these arise unless you hand-write `schedule.windows`. All four are consequences of the rules above rather than bugs, but they are easy to trip:
+
+- **A gap outside any shoulder has *neither* bound.** The rung is off (nothing to guard within reach) and the nightly cap is off (no covering window), so a tick there is limited only by the global and per-repo WIP caps. If you write a gapped schedule, make sure the gap is somewhere you don't mind unbounded count.
+- **`from == to` covers the whole day**, not zero minutes. `{"from":"07:00","to":"07:00"}` is an always-on window — the opposite of what the `[from, to)` rule suggests at a glance.
+- **Splitting the night into two `budget_rung: false` windows doubles the nightly cap.** The counter resets at each window occurrence's own start, so `18:00`–`22:00` plus `22:00`–`07:00` gives `max_dispatches_per_night` twice per night, once per window.
+- **Window order matters when windows overlap.** `InWindow` takes the *first* match, so listing a non-rung window ahead of an overlapping rung window makes the rung window unreachable — and `RungGuard` then rolls forward to the next day's start, leaving the rung off for hours.
+
 **Fail closed.** If usage cannot be measured (unreadable transcripts, a corrupt ledger, or nonsensical budget config), every candidate on an active-rung window is refused with `budget-unknown` — unreadable usage is never treated as zero used.
 
 Skip reasons surfaced by `--dry-run` and `--json`:

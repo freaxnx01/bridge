@@ -119,7 +119,18 @@ func (s Schedule) nextRungStart(now time.Time) (time.Time, bool) {
 	return best, !best.IsZero()
 }
 
+// atMinuteOfDay resolves a wall-clock minute-of-day on now's calendar day.
+//
+// It must be calendar arithmetic, not midnight plus a duration: a DST day is
+// 23 or 25 hours long, so adding 18h to midnight yields 19:00 in spring and
+// 17:00 in autumn. Since InWindow compares wall-clock minutes, a duration-based
+// boundary makes the two disagree about the same window twice a year — and a
+// boundary that resolves to the previous day makes DispatchesSince return the
+// previous night's counter, refusing a whole evening with "night cap N/N".
+//
+// time.Date normalises a nonexistent local time (02:30 on a spring-forward
+// day) forward out of the gap, which is the wanted behaviour here.
 func atMinuteOfDay(now time.Time, minuteOfDay int) time.Time {
-	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
-	return midnight.Add(time.Duration(minuteOfDay) * time.Minute)
+	return time.Date(now.Year(), now.Month(), now.Day(),
+		minuteOfDay/60, minuteOfDay%60, 0, 0, now.Location())
 }
