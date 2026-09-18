@@ -624,6 +624,26 @@ func TestShoulderAllowsWhenTheHandoverWindowHasHeadroom(t *testing.T) {
 	}
 }
 
+// pinUnattendedSchedule writes a dispatch.json whose single window covers the
+// whole day with the budget rung off (from == to is an always-on window).
+//
+// Without it, a command-layer dispatch test depends on the wall-clock hour:
+// under the default windows a run between 07:00 and 18:00 local arms the rung,
+// which measures usage — so a test that deliberately breaks the ledger also
+// breaks the measurement, fail-closed refuses every candidate, and nothing is
+// dispatched. That passed locally in the evening and failed in CI at 17:54 UTC.
+func pinUnattendedSchedule(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bridge")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"schedule":{"windows":[{"from":"00:00","to":"00:00","budget_rung":false}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "dispatch.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
 // A dispatched run is real the moment its label lands, so a failing follow-up
 // comment must not un-book it. Booking only on the all-succeeded path lost
 // real spend whenever a forge call failed mid-loop — the fail-open direction
@@ -664,6 +684,7 @@ func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	setDispatchFlags(t, false, false)
+	pinUnattendedSchedule(t)
 
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
@@ -739,6 +760,7 @@ func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	setDispatchFlags(t, false, false)
+	pinUnattendedSchedule(t)
 
 	// A directory where the ledger file belongs: reading it fails with EISDIR.
 	if err := os.MkdirAll(dispatchLedgerPath(), 0o755); err != nil {
