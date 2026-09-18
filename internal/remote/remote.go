@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -56,6 +57,53 @@ func Refresh(ctx context.Context, roots []string, cachePath string) ([]forge.Rep
 	// a write failure must not fail the refresh.
 	_ = forge.WriteRepoCache(cachePath, forge.RepoCache{UpdatedAt: time.Now(), Repos: all})
 	return all, firstErr
+}
+
+// refIdentity is the case-insensitive forge+owner+name identity used to pair a
+// fetched ref with a local clone. The separator cannot occur in any part.
+func refIdentity(forgeName, owner, name string) string {
+	return strings.ToLower(forgeName + "\x00" + owner + "\x00" + name)
+}
+
+// buildRepoMeta pairs the fetched refs with the clones under roots and returns
+// the repo-meta.json map, keyed by each clone's root-relative path.
+//
+// A clone with no matching ref keeps its entry from existing, so a forge that
+// failed this round loses nothing; an entry whose clone is gone from disk is
+// dropped, so the file cannot grow without bound.
+func buildRepoMeta(roots []string, refs []forge.RepoRef, existing map[string]core.RepoMeta, now time.Time) map[string]core.RepoMeta {
+	byIdentity := make(map[string]forge.RepoRef, len(refs))
+	for _, r := range refs {
+		byIdentity[refIdentity(r.Forge, r.Owner, r.Name)] = r
+	}
+	out := map[string]core.RepoMeta{}
+	for _, root := range roots {
+		repos, err := core.DiscoverRepos(root)
+		if err != nil {
+			continue
+		}
+		for _, repo := range repos {
+			key := core.RepoMetaKey(roots, repo.Path)
+			if _, done := out[key]; done {
+				continue
+			}
+			ref, ok := byIdentity[refIdentity(repo.Forge, repo.Owner, repo.Name)]
+			if !ok {
+				if prev, had := existing[key]; had {
+					out[key] = prev
+				}
+				continue
+			}
+			out[key] = core.RepoMeta{
+				Description:   ref.Description,
+				Topics:        ref.Topics,
+				DefaultBranch: ref.DefaultBranch,
+				RemoteURL:     ref.SSHURL,
+				FetchedAt:     now.Unix(),
+			}
+		}
+	}
+	return out
 }
 
 // discoverRemoteTargets walks the well-known repos-root layout patterns and

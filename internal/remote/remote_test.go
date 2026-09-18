@@ -8,7 +8,9 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
+	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -198,6 +200,77 @@ func TestFetchTargetRepos_Forgejo_ResolvesAPIBaseFromEnvrc(t *testing.T) {
 	}
 	if len(repos) != 1 || repos[0].Name != "obsidian-me" {
 		t.Fatalf("repos = %+v, want one obsidian-me", repos)
+	}
+}
+
+// mustMkRepo creates a git-looking repo dir under root so DiscoverRepos finds it.
+func mustMkRepo(t *testing.T, root, rel string) string {
+	t.Helper()
+	p := filepath.Join(root, rel)
+	if err := os.MkdirAll(filepath.Join(p, ".git"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	return p
+}
+
+func TestBuildRepoMeta_MatchesRefsToClonesCaseInsensitively(t *testing.T) {
+	root := t.TempDir()
+	mustMkRepo(t, root, "github/acme/public/bridge")
+	now := time.Unix(1789000000, 0)
+
+	got := buildRepoMeta([]string{root}, []forge.RepoRef{{
+		Forge: "github", Owner: "ACME", Name: "Bridge",
+		Description: "repo navigator", Topics: []string{"go"},
+		DefaultBranch: "main", SSHURL: "git@github.com:acme/bridge.git",
+	}}, nil, now)
+
+	entry, ok := got["github/acme/public/bridge"]
+	if !ok {
+		t.Fatalf("no entry for the clone, got keys %+v", got)
+	}
+	if entry.Description != "repo navigator" || entry.DefaultBranch != "main" {
+		t.Errorf("entry not populated from the ref: %+v", entry)
+	}
+	if entry.RemoteURL != "git@github.com:acme/bridge.git" {
+		t.Errorf("remote_url should come from the ref SSH URL: %+v", entry)
+	}
+	if entry.FetchedAt != now.Unix() {
+		t.Errorf("FetchedAt = %d, want %d", entry.FetchedAt, now.Unix())
+	}
+}
+
+func TestBuildRepoMeta_UnmatchedCloneKeepsExistingEntry(t *testing.T) {
+	root := t.TempDir()
+	mustMkRepo(t, root, "github/acme/public/bridge")
+	existing := map[string]core.RepoMeta{
+		"github/acme/public/bridge": {Description: "from a healthier day", FetchedAt: 1},
+	}
+	// No refs at all — e.g. the token 401'd this round.
+	got := buildRepoMeta([]string{root}, nil, existing, time.Unix(1789000000, 0))
+
+	entry, ok := got["github/acme/public/bridge"]
+	if !ok {
+		t.Fatalf("a failed forge must not drop the entry, got %+v", got)
+	}
+	if entry.Description != "from a healthier day" || entry.FetchedAt != 1 {
+		t.Errorf("stale entry must be preserved verbatim: %+v", entry)
+	}
+}
+
+func TestBuildRepoMeta_DropsEntriesForReposNoLongerOnDisk(t *testing.T) {
+	root := t.TempDir()
+	mustMkRepo(t, root, "github/acme/public/bridge")
+	existing := map[string]core.RepoMeta{
+		"github/acme/public/bridge":  {Description: "still here"},
+		"github/acme/public/deleted": {Description: "clone is gone"},
+	}
+	got := buildRepoMeta([]string{root}, nil, existing, time.Unix(1789000000, 0))
+
+	if _, ok := got["github/acme/public/deleted"]; ok {
+		t.Errorf("entry for a vanished clone must be dropped: %+v", got)
+	}
+	if _, ok := got["github/acme/public/bridge"]; !ok {
+		t.Errorf("entry for a present clone must survive: %+v", got)
 	}
 }
 
