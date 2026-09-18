@@ -57,6 +57,9 @@ func Refresh(ctx context.Context, roots []string, cachePath, metaPath string) ([
 	// Best-effort cache writes: callers already have the fresh repos in `all`;
 	// a write failure must not fail the refresh.
 	_ = forge.WriteRepoCache(cachePath, forge.RepoCache{UpdatedAt: time.Now(), Repos: all})
+	// An unreadable meta cache is not an error here: existing only supplies
+	// fallbacks for repos this round could not reach, so a nil map degrades to
+	// "no fallbacks available" rather than losing the refresh.
 	existing, _ := core.LoadRepoMeta(metaPath)
 	_ = core.SaveRepoMeta(metaPath, buildRepoMeta(roots, all, existing, time.Now()))
 	return all, firstErr
