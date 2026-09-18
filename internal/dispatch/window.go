@@ -65,11 +65,57 @@ func (w Window) StartOf(now time.Time) time.Time {
 	if !ok {
 		return time.Time{}
 	}
-	t := atMinuteOfDay(now, from)
-	if t.After(now) {
-		t = t.AddDate(0, 0, -1)
+	// Pick the latest boundary instant that is not in the future. A simple
+	// "today, else yesterday" test is not enough: on a fall-back day the wall
+	// clock repeats, so From names two instants and time.Date resolves to the
+	// later one. During the first pass that looks like a future boundary and
+	// rolling back a day hands DispatchesSince the previous occurrence's
+	// counter — the inherited-counter bug, for one hour a year.
+	var best time.Time
+	for _, dayOffset := range []int{0, -1} {
+		for _, c := range boundaryInstants(now.AddDate(0, 0, dayOffset), from) {
+			if c.After(now) {
+				continue
+			}
+			if best.IsZero() || c.After(best) {
+				best = c
+			}
+		}
 	}
-	return t
+	if best.IsZero() {
+		// Unreachable in practice — yesterday's boundary always precedes now.
+		return atMinuteOfDay(now.AddDate(0, 0, -1), from)
+	}
+	return best
+}
+
+// boundaryInstants returns every instant on day's calendar date whose local
+// wall clock reads minuteOfDay: one normally, two on a fall-back day.
+func boundaryInstants(day time.Time, minuteOfDay int) []time.Time {
+	t := atMinuteOfDay(day, minuteOfDay)
+	out := []time.Time{t}
+	if e, ok := earlierPass(t); ok {
+		out = append(out, e)
+	}
+	return out
+}
+
+// earlierPass returns the earlier of the two instants sharing t's wall clock
+// when t falls in a repeated hour. The shift is read from the zone offsets
+// rather than assumed to be an hour, because some zones move by 30 minutes
+// (Australia/Lord_Howe).
+func earlierPass(t time.Time) (time.Time, bool) {
+	_, off := t.Zone()
+	_, offBefore := t.Add(-24 * time.Hour).Zone()
+	shift := time.Duration(offBefore-off) * time.Second
+	if shift <= 0 {
+		return time.Time{}, false
+	}
+	e := t.Add(-shift)
+	if e.Hour() != t.Hour() || e.Minute() != t.Minute() {
+		return time.Time{}, false
+	}
+	return e, true
 }
 
 // RungGuard returns the instant the budget rung is protecting and whether the

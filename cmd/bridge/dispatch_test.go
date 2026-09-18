@@ -702,3 +702,67 @@ func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
 		t.Error("state must be persisted even when the tick errored")
 	}
 }
+
+// The ledger and the local state are independent stores. A failing ledger
+// write must not also discard the nightly counter and LastTick — losing both
+// would let the next tick spend the same headroom again, fail-open in two
+// dimensions at once. The ledger path is poisoned with a directory so its
+// write fails while the state write (a sibling file) still succeeds.
+func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[
+				{"number":41,"title":"eligible issue","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+			]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
+			w.Write([]byte(`[]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+			w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/labels":
+			w.Write([]byte(`[{"name":"ai-implement"}]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/comments":
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":1,"body":"x","created_at":"2026-07-01T00:00:00Z"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	root := writeFakeGithubRepo(t, "freaxnx01", "bridge")
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	t.Setenv("GH_TOKEN", "tok")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	setDispatchFlags(t, false, false)
+
+	// A directory where the ledger file belongs: reading it fails with EISDIR.
+	if err := os.MkdirAll(dispatchLedgerPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := runDispatch(cmd, nil)
+	if err == nil {
+		t.Fatal("a failing ledger write must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "ledger") {
+		t.Errorf("error should name the ledger: %v", err)
+	}
+
+	// The state write must still have happened.
+	state, serr := dispatch.ReadState(dispatchStatePath())
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if state.LastTick.IsZero() {
+		t.Error("LastTick must advance even though the ledger write failed")
+	}
+}

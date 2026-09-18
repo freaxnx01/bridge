@@ -49,7 +49,7 @@ Outside both — genuinely deep in the night, or in a schedule gap — the rung 
 
 The defaults tile the whole day, so none of these arise unless you hand-write `schedule.windows`. All four are consequences of the rules above rather than bugs, but they are easy to trip:
 
-- **A gap outside any shoulder has *neither* bound.** The rung is off (nothing to guard within reach) and the nightly cap is off (no covering window), so a tick there is limited only by the global and per-repo WIP caps. If you write a gapped schedule, make sure the gap is somewhere you don't mind unbounded count.
+- **A gap outside any shoulder has *neither* bound** — but only for a manual tick. The rung is off (nothing to guard within reach) and the nightly cap is off (no covering window), so a `bridge dispatch now` there is limited only by the global and per-repo WIP caps. An `--auto` tick never gets that far: it returns with "outside dispatch window" before any cap is consulted. So the exposure is a hand-run command in a gap, not the timer.
 - **`from == to` covers the whole day**, not zero minutes. `{"from":"07:00","to":"07:00"}` is an always-on window — the opposite of what the `[from, to)` rule suggests at a glance.
 - **Splitting the night into two `budget_rung: false` windows doubles the nightly cap.** The counter resets at each window occurrence's own start, so `18:00`–`22:00` plus `22:00`–`07:00` gives `max_dispatches_per_night` twice per night, once per window.
 - **Window order matters when windows overlap.** `InWindow` takes the *first* match, so listing a non-rung window ahead of an overlapping rung window makes the rung window unreachable — and `RungGuard` then rolls forward to the next day's start, leaving the rung off for hours.
