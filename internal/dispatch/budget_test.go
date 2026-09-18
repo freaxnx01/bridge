@@ -93,7 +93,7 @@ func TestApplyCapsBudgetRungRunsBeforeTheOtherCaps(t *testing.T) {
 	cfg.Limits.MaxDispatchesPerNight = 1
 	exhausted := NewBudgetState(Budget{WindowBudgetUSD: 1, DaytimeCap: 1, MeanRunCostUSD: 2}, true, 1, true)
 
-	ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg, Counts{DispatchedTonight: 5}, exhausted)
+	ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg, Counts{DispatchedTonight: 5, NightCapApplies: true}, exhausted)
 	if !strings.HasPrefix(ds[0].Reason, "budget-exhausted") {
 		t.Errorf("the budget reason must win over the night cap: %q", ds[0].Reason)
 	}

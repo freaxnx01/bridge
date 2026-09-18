@@ -55,3 +55,71 @@ func parseHHMM(s string) (int, bool) {
 	}
 	return hh*60 + mm, true
 }
+
+// StartOf returns the absolute instant at which w's occurrence covering now
+// began. For a window that wraps past midnight this is the previous day's
+// boundary when now is on the morning side of it. A malformed From yields the
+// zero time, which callers treat as "no usable boundary".
+func (w Window) StartOf(now time.Time) time.Time {
+	from, ok := parseHHMM(w.From)
+	if !ok {
+		return time.Time{}
+	}
+	t := atMinuteOfDay(now, from)
+	if t.After(now) {
+		t = t.AddDate(0, 0, -1)
+	}
+	return t
+}
+
+// RungGuard returns the instant the budget rung is protecting and whether the
+// rung applies at now.
+//
+// Inside a budget_rung window the guarded instant is now itself, so the rung
+// measures the plain trailing quota window. Outside one it is the next
+// budget_rung window's start, and the rung *still* applies once now is within
+// windowHours of it: the subscription window is rolling, so spend in the last
+// windowHours of the night is still inside the window when the operator starts
+// work. Without this, an unattended run at 05:00 could hand over a window that
+// is already spent — the exact headroom the rung exists to reserve.
+//
+// Deeper into the night the rung is off: that spend has aged out of the window
+// before the handover, so burning it costs the operator nothing.
+func (s Schedule) RungGuard(now time.Time, windowHours float64) (time.Time, bool) {
+	if w, ok := s.InWindow(now); ok && w.BudgetRung {
+		return now, true
+	}
+	guard, ok := s.nextRungStart(now)
+	if !ok {
+		return time.Time{}, false
+	}
+	shoulder := guard.Add(-time.Duration(windowHours * float64(time.Hour)))
+	return guard, !now.Before(shoulder)
+}
+
+// nextRungStart returns the earliest upcoming start of a budget_rung window.
+func (s Schedule) nextRungStart(now time.Time) (time.Time, bool) {
+	var best time.Time
+	for _, w := range s.Windows {
+		if !w.BudgetRung {
+			continue
+		}
+		from, ok := parseHHMM(w.From)
+		if !ok {
+			continue
+		}
+		t := atMinuteOfDay(now, from)
+		if !t.After(now) {
+			t = t.AddDate(0, 0, 1)
+		}
+		if best.IsZero() || t.Before(best) {
+			best = t
+		}
+	}
+	return best, !best.IsZero()
+}
+
+func atMinuteOfDay(now time.Time, minuteOfDay int) time.Time {
+	midnight := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location())
+	return midnight.Add(time.Duration(minuteOfDay) * time.Minute)
+}

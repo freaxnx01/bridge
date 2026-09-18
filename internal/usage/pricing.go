@@ -98,10 +98,17 @@ func sortedKeys(p Pricing) []string {
 
 func mostExpensive(p Pricing) Rate {
 	var best Rate
+	bestTotal := -1.0
 	for _, k := range sortedKeys(p) {
 		r := p[k]
-		if r.Output > best.Output {
-			best = r
+		// Rank on the sum of all four terms, not Output alone: budget.pricing
+		// is operator-configurable, so a cache-heavy override with a modest
+		// output rate would otherwise win the comparison and price an unknown
+		// model below the true worst case — weakening the deliberate
+		// over-estimate documented on RateFor.
+		total := r.Input + r.Output + r.CacheRead + r.CacheWrite
+		if total > bestTotal {
+			best, bestTotal = r, total
 		}
 	}
 	return best

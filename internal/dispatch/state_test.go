@@ -31,18 +31,40 @@ func TestWriteThenReadState(t *testing.T) {
 	}
 }
 
-func TestNightBudgetResetsOnANewNight(t *testing.T) {
+func TestDispatchesSinceScopesTheCountToOneWindowOccurrence(t *testing.T) {
+	// Counter set during the night window that began 2026-07-27 18:00.
+	nightStart := time.Date(2026, 7, 27, 18, 0, 0, 0, time.UTC)
 	s := State{DispatchedTonight: 4, NightStartedAt: time.Date(2026, 7, 27, 22, 0, 0, 0, time.UTC)}
 
-	// A 02:00 retry tick is the SAME night as the 22:00 dispatch before it.
-	sameNight := time.Date(2026, 7, 28, 2, 0, 0, 0, time.UTC)
-	if got := s.NightBudgetUsed(sameNight); got != 4 {
-		t.Errorf("same night should keep the count, got %d", got)
+	// A 02:00 retry tick is still that same occurrence.
+	if got := s.DispatchesSince(nightStart); got != 4 {
+		t.Errorf("same occurrence should keep the count, got %d", got)
 	}
 
-	// The next evening is a new night.
-	nextNight := time.Date(2026, 7, 28, 22, 0, 0, 0, time.UTC)
-	if got := s.NightBudgetUsed(nextNight); got != 0 {
-		t.Errorf("new night should reset, got %d", got)
+	// The next evening's occurrence is a fresh budget.
+	nextNight := time.Date(2026, 7, 28, 18, 0, 0, 0, time.UTC)
+	if got := s.DispatchesSince(nextNight); got != 0 {
+		t.Errorf("a new occurrence should reset, got %d", got)
+	}
+}
+
+// The old accounting bucketed on a hardcoded 12:00 pivot, so a morning tick
+// resolved to the previous night and inherited its spent counter — blocking
+// the whole daytime path while the budget rung had full headroom. The boundary
+// is now the window's own start, which has no such pivot.
+func TestDispatchesSinceHasNoNoonPivot(t *testing.T) {
+	s := State{DispatchedTonight: 5, NightStartedAt: time.Date(2026, 7, 27, 22, 0, 0, 0, time.UTC)}
+
+	// 08:00 the next morning is inside the *day* window, whose occurrence
+	// began at 07:00 — after the recorded count, so nothing is inherited.
+	dayStart := time.Date(2026, 7, 28, 7, 0, 0, 0, time.UTC)
+	if got := s.DispatchesSince(dayStart); got != 0 {
+		t.Errorf("the day window must not inherit the night's counter, got %d", got)
+	}
+}
+
+func TestDispatchesSinceZeroStateIsZero(t *testing.T) {
+	if got := (State{}).DispatchesSince(time.Date(2026, 7, 27, 18, 0, 0, 0, time.UTC)); got != 0 {
+		t.Errorf("got %d", got)
 	}
 }

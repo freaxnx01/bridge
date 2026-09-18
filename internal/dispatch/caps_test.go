@@ -48,7 +48,7 @@ func TestApplyCapsGlobal(t *testing.T) {
 func TestApplyCapsNightlyCeiling(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Limits.MaxDispatchesPerNight = 1
-	ds := ApplyCaps([]Candidate{cand("a", 1), cand("b", 2)}, cfg, Counts{}, BudgetState{})
+	ds := ApplyCaps([]Candidate{cand("a", 1), cand("b", 2)}, cfg, Counts{NightCapApplies: true}, BudgetState{})
 	if !ds[0].Dispatch {
 		t.Errorf("first: %+v", ds[0])
 	}
@@ -60,7 +60,7 @@ func TestApplyCapsNightlyCeiling(t *testing.T) {
 func TestApplyCapsRespectsAlreadyDispatchedTonight(t *testing.T) {
 	cfg := DefaultConfig()
 	cfg.Limits.MaxDispatchesPerNight = 2
-	ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg, Counts{DispatchedTonight: 2}, BudgetState{})
+	ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg, Counts{DispatchedTonight: 2, NightCapApplies: true}, BudgetState{})
 	if ds[0].Dispatch {
 		t.Errorf("night budget spent, must skip: %+v", ds[0])
 	}
@@ -73,4 +73,28 @@ func TestApplyCapsUsesPerRepoOverride(t *testing.T) {
 	if !ds[0].Dispatch || !ds[1].Dispatch {
 		t.Errorf("override 2 should allow both: %+v %+v", ds[0], ds[1])
 	}
+}
+
+// The nightly cap bounds *unattended* spend, so it may only apply in a window
+// whose budget rung is off. Once windows tile the whole day, applying it
+// unconditionally blocks the daytime path using the night's spent counter.
+func TestApplyCapsNightCapOnlyAppliesToUnattendedWindows(t *testing.T) {
+	cfg := DefaultConfig()
+	cfg.Limits.MaxDispatchesPerNight = 1
+
+	t.Run("unattended window enforces it", func(t *testing.T) {
+		ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg,
+			Counts{DispatchedTonight: 1, NightCapApplies: true}, BudgetState{})
+		if ds[0].Dispatch || ds[0].Reason != "night cap 1/1" {
+			t.Errorf("%+v", ds[0])
+		}
+	})
+
+	t.Run("rung window ignores it", func(t *testing.T) {
+		ds := ApplyCaps([]Candidate{cand("a", 1)}, cfg,
+			Counts{DispatchedTonight: 99, NightCapApplies: false}, BudgetState{})
+		if !ds[0].Dispatch {
+			t.Errorf("the budget rung bounds this window, not the night counter: %+v", ds[0])
+		}
+	})
 }

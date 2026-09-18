@@ -50,3 +50,16 @@ func TestMergeDoesNotMutateReceiver(t *testing.T) {
 		t.Error("Merge must not mutate the receiver")
 	}
 }
+
+// budget.pricing is operator-configurable, so the unknown-model fallback must
+// not be fooled by an override whose cost sits in the cache terms.
+func TestRateForUnknownModelRanksOnAllFourTerms(t *testing.T) {
+	p := Pricing{
+		"cheap-output": {Input: 200, Output: 1, CacheRead: 200, CacheWrite: 200},
+		"rich-output":  {Input: 1, Output: 80, CacheRead: 1, CacheWrite: 1},
+	}
+	got := p.RateFor("some-future-model")
+	if got != p["cheap-output"] {
+		t.Errorf("want the genuinely most expensive rate (601 total), got %+v", got)
+	}
+}

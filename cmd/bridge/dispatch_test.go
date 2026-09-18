@@ -337,7 +337,7 @@ func TestMeasureWindowUSDCountsBothSources(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), now)
+	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), now.Add(-5*time.Hour), now)
 	if !ok {
 		t.Fatal("measurement should be known")
 	}
@@ -350,7 +350,7 @@ func TestMeasureWindowUSDMissingSourcesAreZeroNotUnknown(t *testing.T) {
 	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 
-	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now())
+	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now().Add(-5*time.Hour), time.Now())
 	if !ok || got != 0 {
 		t.Errorf("a fresh install has measured zero usage, not unknown: got=%v ok=%v", got, ok)
 	}
@@ -370,7 +370,7 @@ func TestMeasureWindowUSDUnreadableLedgerIsUnknown(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now()); ok {
+	if _, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now().Add(-5*time.Hour), time.Now()); ok {
 		t.Error("a corrupt ledger must report unknown so the rung fails closed")
 	}
 }
@@ -461,5 +461,162 @@ func TestRunDispatchAutoOutsideWindowSkipsBeforeFetching(t *testing.T) {
 	}
 	if !strings.Contains(buf.String(), "outside dispatch window") {
 		t.Errorf("got %q", buf.String())
+	}
+}
+
+// recordRuns is what the budget rung trusts to know what the pipeline spent,
+// so it needs a direct assertion rather than incidental execution.
+func TestRecordRunsBooksEveryRunAndPrunesOldHistory(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	now := time.Now().UTC()
+	path := dispatchLedgerPath()
+
+	// Pre-existing history: one entry inside the retention window, one outside.
+	seed := usage.Ledger{Runs: []usage.Run{
+		{At: now.Add(-2 * time.Hour), Repo: "old-but-kept", Issue: 1, EstUSD: 9},
+		{At: now.AddDate(0, 0, -30), Repo: "expired", Issue: 2, EstUSD: 9},
+	}}
+	if err := usage.WriteLedger(path, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	runs := []usage.Run{
+		{At: now, Repo: "bridge", Issue: 254, EstUSD: 2},
+		{At: now, Repo: "quotes", Issue: 41, EstUSD: 2},
+	}
+	if err := recordRuns(path, runs, now); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := usage.LoadLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Runs) != 3 {
+		t.Fatalf("want 2 new + 1 retained = 3 runs, got %d: %+v", len(got.Runs), got.Runs)
+	}
+	byIssue := map[int]usage.Run{}
+	for _, r := range got.Runs {
+		byIssue[r.Issue] = r
+	}
+	for _, n := range []int{254, 41} {
+		if r, ok := byIssue[n]; !ok || r.EstUSD != 2 {
+			t.Errorf("issue %d not booked at the mean: %+v (ok=%v)", n, r, ok)
+		}
+	}
+	if byIssue[254].Repo != "bridge" || byIssue[41].Repo != "quotes" {
+		t.Errorf("repos mismatched: %+v", got.Runs)
+	}
+	if _, expired := byIssue[2]; expired {
+		t.Error("a 30-day-old run must be pruned")
+	}
+	if _, kept := byIssue[1]; !kept {
+		t.Error("a 2-hour-old run must be retained")
+	}
+	if sum := got.SumSince(now.Add(-5 * time.Hour)); sum != 13 {
+		t.Errorf("trailing-window sum = %v, want 9 + 2 + 2 = 13", sum)
+	}
+}
+
+func TestRecordRunsNoRunsLeavesTheLedgerAlone(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if err := recordRuns(dispatchLedgerPath(), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dispatchLedgerPath()); !os.IsNotExist(err) {
+		t.Errorf("an empty tick must not create the ledger file: %v", err)
+	}
+}
+
+// The quota window is rolling, so spend late in the night is still inside it
+// when the operator starts work. resolveTiming must therefore arm the rung in
+// the shoulder before a rung window and measure only the span that survives to
+// the handover.
+func TestResolveTimingGuardsTheMorningHandover(t *testing.T) {
+	cfg := dispatch.DefaultConfig() // 18:00-07:00 no rung, 07:00-18:00 rung; 5h window
+	day := func(h, m int) time.Time { return time.Date(2026, 9, 18, h, m, 0, 0, time.Local) }
+
+	tests := []struct {
+		name            string
+		now             time.Time
+		wantRung        bool
+		wantMeasureFrom time.Time
+		wantNightCap    bool
+	}{
+		{
+			name: "deep night burns freely", now: day(23, 0),
+			wantRung: false, wantNightCap: true,
+		},
+		{
+			// 01:00 + 5h = 06:00, aged out before the handover.
+			name: "01:00 is still outside the shoulder", now: day(1, 0),
+			wantRung: false, wantNightCap: true,
+		},
+		{
+			// 05:00 + 5h = 10:00: this spend is in the operator's window at
+			// 07:00, so it is measured against the 02:00-07:00 span.
+			name: "05:00 is guarded for the 07:00 handover", now: day(5, 0),
+			wantRung: true, wantMeasureFrom: day(2, 0), wantNightCap: true,
+		},
+		{
+			name: "midday measures the plain trailing window", now: day(12, 0),
+			wantRung: true, wantMeasureFrom: day(7, 0), wantNightCap: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveTiming(cfg, tc.now)
+			if got.RungOn != tc.wantRung {
+				t.Fatalf("RungOn=%v want %v", got.RungOn, tc.wantRung)
+			}
+			if tc.wantRung && !got.MeasureFrom.Equal(tc.wantMeasureFrom) {
+				t.Errorf("MeasureFrom=%v want %v", got.MeasureFrom, tc.wantMeasureFrom)
+			}
+			if got.NightCapApplies != tc.wantNightCap {
+				t.Errorf("NightCapApplies=%v want %v", got.NightCapApplies, tc.wantNightCap)
+			}
+		})
+	}
+}
+
+// The concrete failure the shoulder exists to stop: the night has already
+// spent the operator's window, and a 05:00 tick must refuse rather than hand
+// over a window with no headroom left.
+func TestShoulderRefusesWhenTheHandoverWindowIsAlreadySpent(t *testing.T) {
+	cfg := dispatch.DefaultConfig()
+	timing := resolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
+	if !timing.RungOn {
+		t.Fatal("05:00 must be guarded")
+	}
+
+	// $9.00 already spent inside the 02:00-07:00 span; the limit is 12.00*0.80.
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, 9.0, true)
+	ds := dispatch.ApplyCaps(
+		[]dispatch.Candidate{{Repo: "bridge", Issue: forge.Issue{Number: 254}}},
+		cfg,
+		dispatch.Counts{NightCapApplies: timing.NightCapApplies},
+		budget,
+	)
+	if ds[0].Dispatch {
+		t.Errorf("a run projected at $2 on top of $9 would cross $9.60: %+v", ds[0])
+	}
+	if !strings.HasPrefix(ds[0].Reason, "budget-exhausted") {
+		t.Errorf("reason = %q", ds[0].Reason)
+	}
+}
+
+// And the converse: an unspent handover window still lets the night work.
+func TestShoulderAllowsWhenTheHandoverWindowHasHeadroom(t *testing.T) {
+	cfg := dispatch.DefaultConfig()
+	timing := resolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, 1.0, true)
+	ds := dispatch.ApplyCaps(
+		[]dispatch.Candidate{{Repo: "bridge", Issue: forge.Issue{Number: 254}}},
+		cfg,
+		dispatch.Counts{NightCapApplies: timing.NightCapApplies},
+		budget,
+	)
+	if !ds[0].Dispatch {
+		t.Errorf("$1 spent leaves room for a $2 run under $9.60: %+v", ds[0])
 	}
 }

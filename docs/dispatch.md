@@ -30,7 +30,20 @@ It measures combined trailing-window consumption from two local sources:
 - **Interactive** — Claude Code transcripts under `~/.claude/projects/**/*.jsonl`, priced by a per-model rate table (four terms: input, output, cache read, cache write).
 - **Pipeline** — a local ledger of runs `bridge dispatch` itself dispatched, each priced at a calibrated `mean_run_cost_usd`.
 
-The rung runs **ahead of** the nightly/global/per-repo caps in `ApplyCaps` — it protects the operator, not the machine, so once the window is spent nothing else about a candidate matters. It only applies on windows with `budget_rung: true`; a night window with `budget_rung: false` ignores usage entirely. The projected cost of a candidate run accumulates within a single tick, so a tick with headroom for two runs cannot slip a third through.
+The rung runs **ahead of** the nightly/global/per-repo caps in `ApplyCaps` — it protects the operator, not the machine, so once the window is spent nothing else about a candidate matters. The projected cost of a candidate run accumulates within a single tick, so a tick with headroom for two runs cannot slip a third through.
+
+### When the rung applies — windows *and* their shoulder
+
+The rung is armed in two situations, both derived from `schedule.windows`:
+
+- **Inside a `budget_rung: true` window.** The measured span is the plain trailing quota window, `[now - window_hours, now]`.
+- **Inside the `window_hours` immediately before such a window starts** — its *shoulder*. The measured span ends at the coming handover instead: `[window_start - window_hours, now]`.
+
+The shoulder exists because the subscription quota window is **rolling**, not reset at a fixed hour. Spend at 05:00 is still inside the window at 07:00, so an unattended run late in the night hands the operator a window that is already spent — exactly the headroom the rung is meant to reserve. Measuring against the handover means only the spend that *survives* to 07:00 counts, so the early night stays unbounded while the last `window_hours` are budgeted against the operator's morning.
+
+With the default 5h window and a 07:00 day start: a 01:00 run is unguarded (it ages out by 06:00), a 05:00 run is guarded (it is still counted at 07:00).
+
+Outside both — genuinely deep in the night, or in a schedule gap — the rung is off and usage is not measured. A configuration with no `budget_rung: true` window anywhere therefore disables the rung entirely; that is a deliberate opt-out, not a failure.
 
 **Fail closed.** If usage cannot be measured (unreadable transcripts, a corrupt ledger, or nonsensical budget config), every candidate on an active-rung window is refused with `budget-unknown` — unreadable usage is never treated as zero used.
 
@@ -67,8 +80,8 @@ The sort is stable: equal-rank issues retain their input order.
 
 Four independent bounds limit dispatch, checked in this order:
 
-1. **Usage-budget rung** — See "Usage-budget rung" above. Active only on windows with `budget_rung: true`; refuses with `budget-exhausted`/`budget-unknown`.
-2. **Nightly cap** — Bounds unattended spend during the night window. Prevents a spike of dispatches with no human oversight. Default: 5 dispatches per night. Resets daily at the night window's start.
+1. **Usage-budget rung** — See "Usage-budget rung" above. Active inside a `budget_rung: true` window and in the `window_hours` shoulder before it; refuses with `budget-exhausted`/`budget-unknown`.
+2. **Nightly cap** — Bounds unattended spend. Prevents a spike of dispatches with no human oversight. Default: 5 dispatches. It applies **only while the covering window has `budget_rung: false`** — during a rung window the budget itself is the bound, and applying both would refuse daytime work using the night's spent counter. The counter resets at the start of the covering window's own occurrence (for `18:00`–`07:00`, the 18:00 boundary), so a 02:00 retry still belongs to the evening that preceded it.
 3. **Global open-PR cap** — Limits the operator's review capacity across all repos. Default: 3 open agent PRs total. Once reached, no further dispatch until some close.
 4. **Per-repo WIP cap** — Prevents conflicting concurrent PRs in one repo by limiting open agent PRs per repo. Default: 1 per repo. Configured per-repo via overrides in `dispatch.json`. Example: `"overrides": {"quotes": 2}` allows 2 concurrent PRs in the `quotes` repo.
 

@@ -12,6 +12,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge dispatch`: usage-budget rung reserving subscription headroom for
   interactive work during the day, measured from Claude Code transcripts and a
   local ledger of dispatched runs (#254)
+- `bridge dispatch`: the rung also guards the **handover** — because the quota
+  window is rolling, it is armed in the `window_hours` shoulder before a
+  `budget_rung` window and measures only spend that survives to that window's
+  start, so a late-night run cannot hand over an already-spent window (#254)
 - `bridge dispatch status`: trailing-window usage, limit, and utilization
 - `bridge dispatch`: **`repo_priority`** in `dispatch.json` — an ordered list of repo-name patterns (`path.Match` glob syntax) that becomes the ordering ladder's new first rung, ahead of milestone due date. A repo's rank is the index of the first pattern it matches; unmatched repos sort after every configured entry. This lets software-factory repos dispatch before `game-*` prototypes regardless of what each repo has queued. Absent or empty (the default) skips the rung, so existing configs order exactly as before. (#222)
 - `internal/herdr`: `(*Client).Attach` and `(*Client).Launch`, completing `launcher.Backend` for Herdr mode. `Launch` opens a tab, starts the agent, and focuses it — idempotent via an attach-first check re-evaluated at plan-execution time (not build time), with concurrent same-slot launches collapsed via `singleflight`. `agent start` retries only on a busy pane (`agent_pane_busy` → `ErrPaneBusy`, mapped from Herdr's real CLI error code) with capped exponential backoff (~4s worst case); `agent_not_ready` focuses the tab and reports success since the agent is up and waiting on a prompt. The `code` agent runs via `pane run` instead, without stealing focus. (#264)
@@ -22,6 +26,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bridge dispatch`: the nightly cap now applies only while the covering window
+  has `budget_rung: false`, and its counter resets at that window's own start
+  instead of a hardcoded 12:00 pivot. Previously a spent night blocked the whole
+  following morning with `night cap N/N` while the budget rung had full
+  headroom (#254)
 - `bridge dispatch`: dispatch hours moved from the systemd timer into
   `schedule.windows` in `dispatch.json`; the timer is now an hourly heartbeat.
   The retired `dispatch_at`/`retry_until` keys are ignored (#254)
