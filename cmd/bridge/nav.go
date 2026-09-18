@@ -65,7 +65,9 @@ var navCmd = &cobra.Command{
 				return c.ListOpenIssues(ctx, owner, repo)
 			},
 			FetchRemote: func(ctx context.Context) ([]forge.RepoRef, error) {
-				return remote.Refresh(ctx, reposRoots(), filepath.Join(cacheRoot(), "remote.list"))
+				return remote.Refresh(ctx, reposRoots(),
+					filepath.Join(cacheRoot(), "remote.list"),
+					filepath.Join(cacheRoot(), "repo-meta.json"))
 			},
 			IssueCacheDir: filepath.Join(cacheRoot(), "issues"),
 			Environment:   os.Getenv("BRIDGE_ENV"),

@@ -95,7 +95,7 @@ func loadOrFetchRemote(ctx context.Context, local []core.Repo, refresh bool) ([]
 			return c.Repos, nil
 		}
 	}
-	return remote.Refresh(ctx, reposRoots(), cachePath)
+	return remote.Refresh(ctx, reposRoots(), cachePath, filepath.Join(cacheRoot(), "repo-meta.json"))
 }
 
 func dirExists(p string) bool {

@@ -72,7 +72,7 @@ All under `~/.cache/bridge/` (override with `XDG_CACHE_HOME`):
 | `slots.json` | `open`, `slots prune` | slot registry (`{slots: [...]}`) — id, repo, worktree, agent, created |
 | `presence.json` | `presence` writes | `{mode: away|back|auto}` |
 | `sync.json` | `sync now`, `sync --auto` | last sync run + unpushed list + queue |
-| `repo-meta.json` | `list -r [--refresh]` | per-repo topics/description/default-branch/remote URL |
+| `repo-meta.json` | `list -r [--refresh]`, `bridge --refresh`, `nav` (`r`/`^r`) | per-repo topics/description/default-branch/remote URL, plus `fetched_at` |
 | `remote.list` | `list -r [--refresh]` | cached union of all forge listings |
 | `issues.json` | `issues` | open-issue cache (TTL) |
 | `bridge.log` | long-running daemons | structured JSON lines (slog), rotated by `lumberjack` |
