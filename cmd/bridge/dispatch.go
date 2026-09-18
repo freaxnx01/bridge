@@ -378,9 +378,13 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 	// Persist what actually happened before surfacing any dispatch error: the
 	// labels are already on the forge, so dropping their accounting would let
 	// the next tick spend the same headroom twice.
-	if err := recordRuns(dispatchLedgerPath(), runs, timing.Now); err != nil {
-		return errors.Join(dispatchErr, err)
-	}
+	//
+	// The two stores are independent on purpose — a failing ledger write must
+	// not also discard the nightly counter, or three issues labelled at 23:00
+	// with a full cache disk would lose both records and let the 00:00 tick
+	// dispatch three more past the cap. Fail-open in two dimensions at once.
+	ledgerErr := recordRuns(dispatchLedgerPath(), runs, timing.Now)
+
 	if timing.NightCapApplies {
 		base := state.DispatchesSince(timing.NightStart)
 		if base == 0 {
@@ -389,10 +393,9 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 		state.DispatchedTonight = base + len(runs)
 	}
 	state.LastTick = timing.Now
-	if err := dispatch.WriteState(dispatchStatePath(), state); err != nil {
-		return errors.Join(dispatchErr, err)
-	}
-	return dispatchErr
+	stateErr := dispatch.WriteState(dispatchStatePath(), state)
+
+	return errors.Join(dispatchErr, ledgerErr, stateErr)
 }
 
 // recordRuns appends runs to the ledger and trims history outside the window
@@ -481,6 +484,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 			BudgetLimitUSD    float64         `json:"budget_limit_usd"`
 			BudgetKnown       bool            `json:"budget_known"`
 			BudgetRungActive  bool            `json:"budget_rung_active"`
+			NightCapApplies   bool            `json:"night_cap_applies"`
 		}{
 			Limits:            cfg.Limits,
 			Paused:            state.Paused,
@@ -491,12 +495,21 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 			BudgetLimitUSD:    budget.LimitUSD,
 			BudgetKnown:       !budget.Unknown,
 			BudgetRungActive:  budget.Enabled,
+			NightCapApplies:   timing.NightCapApplies,
 		})
 	}
 
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "paused: %t\n", state.Paused)
-	fmt.Fprintf(w, "dispatched tonight: %d/%d\n", state.DispatchesSince(timing.NightStart), cfg.Limits.MaxDispatchesPerNight)
+	if timing.NightCapApplies {
+		fmt.Fprintf(w, "dispatched tonight: %d/%d\n",
+			state.DispatchesSince(timing.NightStart), cfg.Limits.MaxDispatchesPerNight)
+	} else {
+		// The nightly cap bounds unattended spend only, so in a rung window or
+		// a schedule gap there is no occurrence to count against — printing
+		// last night's number here would just mislabel it.
+		fmt.Fprintln(w, "dispatched tonight: n/a — the nightly cap does not apply to this window")
+	}
 	fmt.Fprintf(w, "per-repo cap: %d, global cap: %d\n", cfg.Limits.PerRepo, cfg.Limits.GlobalOpenPRs)
 	if budget.Unknown {
 		fmt.Fprintf(w, "budget window: %gh — usage unreadable, daytime dispatch blocked\n", cfg.Budget.WindowHours)

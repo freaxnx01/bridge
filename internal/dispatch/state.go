@@ -47,7 +47,11 @@ func WriteState(path string, s State) error {
 // counter, refusing every daytime candidate with "night cap N/N" while the
 // budget rung had full headroom.
 func (s State) DispatchesSince(since time.Time) int {
-	if s.NightStartedAt.IsZero() || s.NightStartedAt.Before(since) {
+	// A zero boundary means the caller has no window occurrence to attribute
+	// the counter to — during a budget-rung window, or in a schedule gap.
+	// Returning the raw counter there would report last night's spend as this
+	// window's.
+	if since.IsZero() || s.NightStartedAt.IsZero() || s.NightStartedAt.Before(since) {
 		return 0
 	}
 	return s.DispatchedTonight
