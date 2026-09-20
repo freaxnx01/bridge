@@ -22,19 +22,40 @@ two post-review design amendments).
 - [x] `claude-timeout-minutes` (#291) and the self-fix opt-in (#298).
 - [x] Merged branches and the `self-fix` worktree cleaned up.
 - [ ] **Calibrate `window_budget_usd` and `mean_run_cost_usd`** — still the
-      placeholders 12.00 and 2.00. Read `bridge dispatch status` against
-      `/usage` across a window, and compare run-report `**Cost:**` values
-      against the mean. Nothing else in the feature is empirical; this is.
-- [ ] **Reinstall the dispatch timer** — `docs/systemd/bridge-dispatch.timer`
-      is now a bare hourly heartbeat and the hours live in
-      `schedule.windows`. Until `systemctl --user daemon-reload &&
-      systemctl --user restart bridge-dispatch.timer` runs, the old night-only
-      timer is still what fires, so the daytime windows never happen.
-- [ ] **Audit whether #283 swept other issues closed** — it closed #254 as
-      COMPLETED on 2026-09-09 while only retiring the dead `claude.yml` stub
-      and documenting the timeout gap; the feature was never implemented.
-      Reopened 2026-09-17 and now genuinely done, but worth checking its other
-      issue references for the same mistake.
+      placeholders 12.00 and 2.00. **First reading taken 2026-09-20 14:08
+      CEST:** `$9.15` then `$13.06` of a `$9.60` limit minutes apart, from one
+      long interactive session, and `dispatch --dry-run` correctly refused all
+      89 candidates with `budget-exhausted 13.06/9.60 USD`. So the machinery is
+      verified end-to-end on real data; only the constants are unpinned.
+      Outstanding half needs a human: read `/usage` in an interactive session
+      at the same moment and compare against `bridge dispatch status`, since
+      `/usage` is TUI-only and cannot be scripted. If one HITL session alone
+      exceeds the 80% line, `window_budget_usd` is set too low.
+- [ ] **Decide whether the rung is too tight for a working day** — a single
+      long session hit 136% of the limit, which would block daytime dispatch
+      outright. That may be correct (the operator *is* using the window) or may
+      mean the reserve should be a share of a larger budget. Needs the `/usage`
+      comparison above before changing a number.
+- [ ] **Install the dispatch timer — it has never been installed.** Checked
+      2026-09-20: only `bridge-mcp.service` and `bridge-serve.service` exist as
+      user units, and `systemctl --user list-timers bridge*` is empty. So this
+      is not a reinstall; it switches on autonomous dispatch for the first
+      time, and the pre-existing checklist below says dry-run only for the
+      first week. Steps: copy `docs/systemd/bridge-dispatch.{service,timer}` to
+      `~/.config/systemd/user/`, create `~/.config/bridge/dispatch.env` with
+      `GH_TOKEN=...`, then `systemctl --user daemon-reload && systemctl --user
+      enable --now bridge-dispatch.timer`. Deliberately left undone — needs an
+      explicit decision, not a default.
+- [x] Rebuild and install the binary carrying the rung — done 2026-09-20,
+      `bridge v2.9.0-104-g0946f00`. The previously installed build predated
+      the feature entirely.
+- [x] **Audit whether #283 swept other issues closed** — done 2026-09-20,
+      **clean**. Repo issue-events show exactly one close alongside its merge:
+      #283 itself at 18:51:18 and #254 at 18:51:19. No other issue was
+      affected, and #283 carries no closing keyword at all. (Query worth
+      reusing: `gh api repos/OWNER/REPO/issues/events --paginate | jq` filtered
+      on `.event=="closed"` — a state-based query misses it, because #254's
+      `closedAt` now reflects its *re*-close.)
 - [ ] **Consider per-window `max_dispatches`** — the spec rejected it (D4) and
       the scoping fix made D4 true without it, but splitting the night into two
       `budget_rung: false` windows still doubles the nightly cap. Documented as
