@@ -53,3 +53,76 @@ func TestLaneWindowStartOutsideEveryWindowIsZero(t *testing.T) {
 		t.Errorf("no occurrence covers now, so there is no boundary: %s", got)
 	}
 }
+
+func laneFixture() []Lane {
+	return []Lane{
+		{Name: "auto", Repos: []string{"game-*"}, Autonomous: true},
+		{Name: "hitl", Repos: []string{"*"}},
+	}
+}
+
+func TestResolveLane(t *testing.T) {
+	gate := GateState{"game-tschau-sepp": true}
+
+	tests := []struct {
+		name       string
+		repo       string
+		wantLane   string
+		wantReason string
+	}{
+		{"first matching lane wins", "game-tschau-sepp", "auto", ""},
+		{"a repo outside the glob falls to the catch-all", "bridge", "hitl", ""},
+		{"gate not met downgrades to the next non-autonomous lane", "game-huusli-jagd", "hitl",
+			"auto→hitl: agent.yml lacks ai-review-ai-merge: true"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			lane, reason := ResolveLane(laneFixture(), tc.repo, gate)
+			if lane.Name != tc.wantLane {
+				t.Errorf("lane = %q want %q", lane.Name, tc.wantLane)
+			}
+			if reason != tc.wantReason {
+				t.Errorf("reason = %q want %q", reason, tc.wantReason)
+			}
+		})
+	}
+}
+
+func TestResolveLaneNoLanesConfiguredUsesTheDefaultLane(t *testing.T) {
+	lane, reason := ResolveLane(nil, "bridge", nil)
+	if lane.Name != DefaultLane().Name || reason != "" {
+		t.Errorf("lane=%+v reason=%q", lane, reason)
+	}
+}
+
+func TestResolveLaneDowngradeReachesTheDefaultLaneWhenNothingElseMatches(t *testing.T) {
+	// An autonomous lane with no non-autonomous lane behind it must still fall
+	// back — to the implicit default — rather than dispatch autonomously.
+	lanes := []Lane{{Name: "auto", Repos: []string{"game-*"}, Autonomous: true}}
+	lane, reason := ResolveLane(lanes, "game-huusli-jagd", GateState{})
+	if lane.Name != DefaultLane().Name {
+		t.Errorf("lane = %q want %q", lane.Name, DefaultLane().Name)
+	}
+	if reason != "auto→default: agent.yml lacks ai-review-ai-merge: true" {
+		t.Errorf("reason = %q", reason)
+	}
+}
+
+func TestResolveLaneMalformedGlobDoesNotMatch(t *testing.T) {
+	// Ordering already treats a bad pattern as a non-match; lane resolution must
+	// not fail the whole tick on a config typo either.
+	lanes := []Lane{{Name: "broken", Repos: []string{"[unclosed"}}, {Name: "hitl", Repos: []string{"*"}}}
+	if lane, _ := ResolveLane(lanes, "bridge", nil); lane.Name != "hitl" {
+		t.Errorf("lane = %q", lane.Name)
+	}
+}
+
+func TestAnyAutonomousLaneMatches(t *testing.T) {
+	lanes := laneFixture()
+	if !AnyAutonomousLaneMatches(lanes, "game-huusli-jagd") {
+		t.Error("a repo an autonomous lane claims must be gate-checked even before the gate is known")
+	}
+	if AnyAutonomousLaneMatches(lanes, "bridge") {
+		t.Error("no autonomous lane claims it, so no agent.yml fetch is warranted")
+	}
+}
