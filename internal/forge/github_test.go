@@ -1170,3 +1170,73 @@ func TestGithubGetIssue_ZeroCommentsReturnsEmptySliceNotNil(t *testing.T) {
 		t.Fatalf("want 0 comments, got %d", len(comments))
 	}
 }
+
+func TestGithubCreateIssue_ExistingLabelPastTheFirstPageIsNotRecreated(t *testing.T) {
+	labelCreates := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			// Page 1 is full and does NOT carry the label; page 2 does.
+			if r.URL.Query().Get("page") == "1" {
+				var page []string
+				for i := 0; i < githubLabelsPageSize; i++ {
+					page = append(page, fmt.Sprintf(`{"name":"filler-%d"}`, i))
+				}
+				_, _ = w.Write([]byte("[" + strings.Join(page, ",") + "]"))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"name":"needs-enrichment"}]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			labelCreates++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"name":"needs-enrichment"}`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":1,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}); err != nil {
+		t.Fatal(err)
+	}
+	// A label sitting past page 1 must be found, not duplicated.
+	if labelCreates != 0 {
+		t.Errorf("label create calls = %d, want 0 — the label exists on page 2", labelCreates)
+	}
+}
+
+func TestGithubCreateIssue_LabelAlreadyExistsDoesNotFailTheCapture(t *testing.T) {
+	issueCreated := false
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			_, _ = w.Write([]byte(`[]`)) // racing caller created it after this read
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			// GitHub's answer for a label that already exists. The shared post
+			// helper maps every 422 to ErrRepoExists, which must not surface as
+			// a failed capture reading "repo already exists".
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write([]byte(`{"message":"Validation Failed","errors":[{"code":"already_exists","field":"name"}]}`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			issueCreated = true
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":8,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"})
+	if err != nil {
+		t.Fatalf("a duplicate label must not fail the capture, got %v", err)
+	}
+	if !issueCreated || is.Number != 8 {
+		t.Errorf("issue was not created: created=%v issue=%+v", issueCreated, is)
+	}
+}

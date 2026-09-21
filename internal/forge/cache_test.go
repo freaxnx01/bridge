@@ -69,3 +69,37 @@ func contains(s, sub string) bool {
 	}
 	return false
 }
+
+func TestWriteIssueCache_StripsBodyAndLeavesCallerSliceIntact(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "issues.json")
+	issues := []Issue{
+		{Number: 1, Title: "open bug", Body: "a long private issue body"},
+		{Number: 2, Title: "another", Body: "more prose"},
+	}
+
+	if err := WriteIssueCache(path, IssueCache{UpdatedAt: time.Now(), Issues: issues}); err != nil {
+		t.Fatal(err)
+	}
+
+	// The cache is an on-disk outward boundary: it is read back only for titles,
+	// labels and counts, so persisting bodies would write the full text of every
+	// open issue — private repos included — to an unencrypted file.
+	got, err := ReadIssueCache(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, i := range got.Issues {
+		if i.Body != "" {
+			t.Errorf("issue #%d: cached Body = %q, want empty", i.Number, i.Body)
+		}
+	}
+	if len(got.Issues) != 2 || got.Issues[0].Title != "open bug" {
+		t.Errorf("stripping must not disturb the rest: %+v", got.Issues)
+	}
+
+	// Stripping must not reach back into the caller's slice — dispatch reads
+	// Body off the same shape and would see every issue as empty.
+	if issues[0].Body != "a long private issue body" {
+		t.Errorf("caller's slice was mutated: Body = %q", issues[0].Body)
+	}
+}

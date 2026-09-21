@@ -118,6 +118,12 @@ type TreeEntry struct {
 // backstop against unbounded API calls.
 const maxCommentPages = 20
 
+// maxLabelPages bounds the repo-label pagination loop in each client's
+// ensure-label helper, the same safety backstop maxCommentPages is. A repo
+// with more labels than this pages can hold is pathological; the loop stops
+// rather than calling the API forever.
+const maxLabelPages = 10
+
 // Comment is a single issue comment.
 type Comment struct {
 	ID      int       `json:"id"`

@@ -203,6 +203,14 @@ func (c *ForgejoClient) SetTopics(ctx context.Context, owner, repo string, topic
 	return topics, nil
 }
 
+// forgejoLabelsPageSize is the page size requested per call to the repo labels
+// endpoint. Forgejo's server-default page size (commonly 30) is smaller than
+// this, so an explicit limit= is required on every call — the same house rule
+// forgejoCommentsPageSize documents. Without it an existing label past the
+// default page is missed, and since Forgejo does not enforce label-name
+// uniqueness the miss silently creates a duplicate on every capture.
+const forgejoLabelsPageSize = 50
+
 // ensureLabelIDs resolves each name to its label ID on owner/repo, creating any
 // label that does not exist. Forgejo/Gitea's CreateIssueOption.labels is a list
 // of label *ids*, so this lookup is mandatory here, not merely defensive.
@@ -210,18 +218,28 @@ func (c *ForgejoClient) ensureLabelIDs(ctx context.Context, owner, repo string, 
 	if len(names) == 0 {
 		return nil, nil
 	}
-	var existing []struct {
-		ID   int64  `json:"id"`
-		Name string `json:"name"`
+	basePath := "/api/v1/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+
+	byName := make(map[string]int64)
+	for page := 1; page <= maxLabelPages; page++ {
+		var existing []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		path := fmt.Sprintf("%s?limit=%d&page=%d", basePath, forgejoLabelsPageSize, page)
+		if err := c.get(ctx, path, &existing); err != nil {
+			return nil, fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
+		}
+		for _, l := range existing {
+			if _, seen := byName[l.Name]; !seen {
+				byName[l.Name] = l.ID
+			}
+		}
+		if len(existing) < forgejoLabelsPageSize {
+			break
+		}
 	}
-	path := "/api/v1/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
-	if err := c.get(ctx, path, &existing); err != nil {
-		return nil, fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
-	}
-	byName := make(map[string]int64, len(existing))
-	for _, l := range existing {
-		byName[l.Name] = l.ID
-	}
+
 	ids := make([]int64, 0, len(names))
 	for _, name := range names {
 		if id, ok := byName[name]; ok {
@@ -232,7 +250,7 @@ func (c *ForgejoClient) ensureLabelIDs(ctx context.Context, owner, repo string, 
 			ID   int64  `json:"id"`
 			Name string `json:"name"`
 		}
-		if err := c.post(ctx, path, map[string]any{"name": name, "color": "#ededed"}, &created); err != nil {
+		if err := c.post(ctx, basePath, map[string]any{"name": name, "color": "#ededed"}, &created); err != nil {
 			return nil, fmt.Errorf("create label %q on %s/%s: %w", name, owner, repo, err)
 		}
 		ids = append(ids, created.ID)
