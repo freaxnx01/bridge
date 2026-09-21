@@ -46,8 +46,8 @@ func TestInWindowNoWindowsMeansNeverInWindow(t *testing.T) {
 
 func TestInWindowSkipsMalformedEntries(t *testing.T) {
 	s := Schedule{Windows: []Window{
-		{From: "not-a-time", To: "18:00", BudgetRung: true},
-		{From: "07:00", To: "18:00"},
+		{Span: Span{From: "not-a-time", To: "18:00"}, BudgetRung: true},
+		{Span: Span{From: "07:00", To: "18:00"}},
 	}}
 	w, ok := s.InWindow(at(12, 0))
 	if !ok {
@@ -59,7 +59,7 @@ func TestInWindowSkipsMalformedEntries(t *testing.T) {
 }
 
 func TestInWindowGapIsNotInAnyWindow(t *testing.T) {
-	s := Schedule{Windows: []Window{{From: "07:00", To: "12:00"}}}
+	s := Schedule{Windows: []Window{{Span: Span{From: "07:00", To: "12:00"}}}}
 	if _, ok := s.InWindow(at(15, 0)); ok {
 		t.Error("15:00 is outside the only window")
 	}
@@ -68,8 +68,8 @@ func TestInWindowGapIsNotInAnyWindow(t *testing.T) {
 // --- Window.StartOf -------------------------------------------------------
 
 func TestWindowStartOfResolvesTheCoveringOccurrence(t *testing.T) {
-	night := Window{From: "18:00", To: "07:00"}
-	day := Window{From: "07:00", To: "18:00"}
+	night := Window{Span: Span{From: "18:00", To: "07:00"}}
+	day := Window{Span: Span{From: "07:00", To: "18:00"}}
 
 	tests := []struct {
 		name string
@@ -92,7 +92,7 @@ func TestWindowStartOfResolvesTheCoveringOccurrence(t *testing.T) {
 }
 
 func TestWindowStartOfMalformedFromIsZero(t *testing.T) {
-	if got := (Window{From: "nope", To: "07:00"}).StartOf(at(12, 0)); !got.IsZero() {
+	if got := (Window{Span: Span{From: "nope", To: "07:00"}}).StartOf(at(12, 0)); !got.IsZero() {
 		t.Errorf("a malformed From must yield the zero time, got %v", got)
 	}
 }
@@ -150,7 +150,7 @@ func TestRungGuard(t *testing.T) {
 }
 
 func TestRungGuardNoRungWindowIsNeverGuarded(t *testing.T) {
-	s := Schedule{Windows: []Window{{From: "18:00", To: "07:00"}}}
+	s := Schedule{Windows: []Window{{Span: Span{From: "18:00", To: "07:00"}}}}
 	guard, on := s.RungGuard(at(4, 0), 5)
 	if on || !guard.IsZero() {
 		t.Errorf("with no budget_rung window there is nothing to guard: guard=%v on=%v", guard, on)
@@ -169,8 +169,8 @@ func TestWindowBoundariesSurviveDSTTransitions(t *testing.T) {
 	if err != nil {
 		t.Skip("no tzdata available:", err)
 	}
-	night := Window{From: "18:00", To: "07:00"}
-	rung := Schedule{Windows: []Window{night, {From: "07:00", To: "18:00", BudgetRung: true}}}
+	night := Window{Span: Span{From: "18:00", To: "07:00"}}
+	rung := Schedule{Windows: []Window{night, {Span: Span{From: "07:00", To: "18:00"}, BudgetRung: true}}}
 
 	tests := []struct {
 		name          string
@@ -257,7 +257,7 @@ func TestStartOfResolvesTheAmbiguousHourToTheCoveringPass(t *testing.T) {
 	if earlier.Hour() != 2 || earlier.Minute() != 30 {
 		t.Fatalf("fixture assumption broken: %v", earlier)
 	}
-	w := Window{From: "02:30", To: "07:00"}
+	w := Window{Span: Span{From: "02:30", To: "07:00"}}
 
 	t.Run("during the first pass", func(t *testing.T) {
 		now := earlier.Add(15 * time.Minute) // 02:45 +02:00

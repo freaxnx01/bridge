@@ -16,13 +16,20 @@ type Limits struct {
 	Overrides             map[string]int `json:"overrides,omitempty"`
 }
 
-// Window is a span of the local day during which dispatch ticks act. From is
-// inclusive, To exclusive; From > To wraps past midnight. BudgetRung turns the
-// usage-budget rung on for the window.
+// Span is a range of the local day. From is inclusive, To exclusive; From > To
+// wraps past midnight; From == To covers the whole day. It is split out of
+// Window because a lane's windows say only *when*, never anything about the
+// budget rung — that stays global.
+type Span struct {
+	From string `json:"from"`
+	To   string `json:"to"`
+}
+
+// Window is a schedule span plus the rung flag. Embedding Span keeps the JSON
+// shape and every existing `w.From` call site unchanged.
 type Window struct {
-	From       string `json:"from"`
-	To         string `json:"to"`
-	BudgetRung bool   `json:"budget_rung"`
+	Span
+	BudgetRung bool `json:"budget_rung"`
 }
 
 // Schedule is the single source of truth for when dispatch acts. The systemd
@@ -53,6 +60,35 @@ type Config struct {
 	// syntax) driving the ordering ladder's first rung. Absent/empty skips
 	// the rung entirely, which is what keeps pre-existing configs unchanged.
 	RepoPriority []string `json:"repo_priority,omitempty"`
+	Lanes        []Lane   `json:"lanes,omitempty"`
+}
+
+// LaneLimits are a lane's overrides of the top-level limits. A zero field
+// means "inherit", so a lane states only what it changes.
+type LaneLimits struct {
+	PerRepo   int            `json:"per_repo,omitempty"`
+	Overrides map[string]int `json:"overrides,omitempty"`
+	// MaxDispatches bounds one window occurrence of this lane. With a 24h
+	// window that is a calendar day; with the default night window it is one
+	// night. Zero means unbounded by this rung.
+	MaxDispatches int `json:"max_dispatches,omitempty"`
+}
+
+// Lane is one autonomy lane: which repos it claims, when it acts, what bounds
+// it, and which labels a dispatch in it applies.
+type Lane struct {
+	Name  string   `json:"name"`
+	Repos []string `json:"repos"`
+	// Autonomous says this lane's PRs are reviewed and merged by the pipeline.
+	// Three things follow from it: the lane is exempt from global_open_prs, its
+	// repos are gated on agent.yml opting into ai-merge, and its default labels
+	// carry the ai-merge gate label.
+	Autonomous bool `json:"autonomous,omitempty"`
+	// DryRun runs the lane for real through every decision and applies nothing.
+	DryRun  bool       `json:"dry_run,omitempty"`
+	Windows []Span     `json:"windows,omitempty"`
+	Labels  []string   `json:"labels,omitempty"`
+	Limits  LaneLimits `json:"limits,omitempty"`
 }
 
 // State is the only local mutable state the dispatcher keeps. Everything else

@@ -13,6 +13,7 @@ const (
 	LabelNeedsEnrichment = "needs-enrichment"
 	LabelParked          = "🧊 parked"
 	LabelAIImplement     = "ai-implement"
+	LabelAIReviewAIMerge = "ai-review-ai-merge"
 	attemptPrefix        = "attempt:"
 	failedPrefix         = "failed:"
 )
