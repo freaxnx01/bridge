@@ -75,3 +75,90 @@ func TestDispatchesSinceZeroBoundaryReportsNothing(t *testing.T) {
 		t.Errorf("no window occurrence to attribute to, want 0, got %d", got)
 	}
 }
+
+func TestDispatchesInLane(t *testing.T) {
+	since := time.Date(2026, 9, 7, 0, 0, 0, 0, time.Local)
+	s := State{Lanes: map[string]LaneState{
+		"auto": {StartedAt: since.Add(2 * time.Hour), Dispatched: 4},
+	}}
+
+	if got := s.DispatchesInLane("auto", since); got != 4 {
+		t.Errorf("counter inside this occurrence: got %d want 4", got)
+	}
+	if got := s.DispatchesInLane("auto", since.AddDate(0, 0, 1)); got != 0 {
+		t.Errorf("a counter from an earlier occurrence must not carry over: got %d", got)
+	}
+	if got := s.DispatchesInLane("hitl", since); got != 0 {
+		t.Errorf("an unknown lane has spent nothing: got %d", got)
+	}
+	if got := s.DispatchesInLane("auto", time.Time{}); got != 0 {
+		t.Errorf("no boundary means nothing to attribute the counter to: got %d", got)
+	}
+}
+
+func TestRecordLaneDispatchAccumulatesThenResets(t *testing.T) {
+	day1 := time.Date(2026, 9, 7, 0, 0, 0, 0, time.Local)
+	var s State
+
+	s.RecordLaneDispatch("auto", day1, day1.Add(time.Hour), 2)
+	if got := s.DispatchesInLane("auto", day1); got != 2 {
+		t.Fatalf("first write: got %d want 2", got)
+	}
+
+	s.RecordLaneDispatch("auto", day1, day1.Add(3*time.Hour), 1)
+	if got := s.DispatchesInLane("auto", day1); got != 3 {
+		t.Errorf("same occurrence must accumulate: got %d want 3", got)
+	}
+
+	day2 := day1.AddDate(0, 0, 1)
+	s.RecordLaneDispatch("auto", day2, day2.Add(time.Hour), 1)
+	if got := s.DispatchesInLane("auto", day2); got != 1 {
+		t.Errorf("a new occurrence starts from zero: got %d want 1", got)
+	}
+}
+
+// A 24h lane's occurrence boundary is calendar arithmetic, so the counter must
+// survive a 23-hour day. Reuses the Europe/Zurich spring-forward date the window
+// tests pin.
+func TestRecordLaneDispatchAcrossASpringForwardDay(t *testing.T) {
+	zurich, err := time.LoadLocation("Europe/Zurich")
+	if err != nil {
+		t.Skipf("tzdata unavailable: %v", err)
+	}
+	lane := Lane{Name: "auto", Windows: []Span{{From: "00:00", To: "00:00"}}}
+
+	before := time.Date(2026, 3, 29, 1, 0, 0, 0, zurich) // before the 02:00 gap
+	after := time.Date(2026, 3, 29, 13, 0, 0, 0, zurich) // same calendar day
+
+	var s State
+	s.RecordLaneDispatch(lane.Name, lane.WindowStart(Schedule{}, before), before, 1)
+	s.RecordLaneDispatch(lane.Name, lane.WindowStart(Schedule{}, after), after, 1)
+
+	if got := s.DispatchesInLane(lane.Name, lane.WindowStart(Schedule{}, after)); got != 2 {
+		t.Errorf("both dispatches belong to the same 23-hour day: got %d want 2", got)
+	}
+
+	next := time.Date(2026, 3, 30, 9, 0, 0, 0, zurich)
+	if got := s.DispatchesInLane(lane.Name, lane.WindowStart(Schedule{}, next)); got != 0 {
+		t.Errorf("the next day starts fresh: got %d", got)
+	}
+}
+
+func TestRecordLaneDispatchRoundTripsThroughDisk(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "dispatch.json")
+	day := time.Date(2026, 9, 7, 0, 0, 0, 0, time.Local)
+
+	var s State
+	s.RecordLaneDispatch("auto", day, day.Add(time.Hour), 2)
+	if err := WriteState(path, s); err != nil {
+		t.Fatal(err)
+	}
+
+	back, err := ReadState(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := back.DispatchesInLane("auto", day); got != 2 {
+		t.Errorf("after reload: got %d want 2", got)
+	}
+}

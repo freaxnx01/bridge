@@ -94,8 +94,16 @@ type Lane struct {
 // State is the only local mutable state the dispatcher keeps. Everything else
 // lives in the forge as labels so it survives a cache wipe.
 type State struct {
-	Paused            bool      `json:"paused"`
-	LastTick          time.Time `json:"last_tick,omitempty"`
-	DispatchedTonight int       `json:"dispatched_tonight"`
-	NightStartedAt    time.Time `json:"night_started_at,omitempty"`
+	Paused            bool                 `json:"paused"`
+	LastTick          time.Time            `json:"last_tick,omitempty"`
+	DispatchedTonight int                  `json:"dispatched_tonight"`
+	NightStartedAt    time.Time            `json:"night_started_at,omitempty"`
+	Lanes             map[string]LaneState `json:"lanes,omitempty"`
+}
+
+// LaneState is one lane's dispatch counter plus the window occurrence it
+// belongs to. Keyed by lane name in State.Lanes.
+type LaneState struct {
+	StartedAt  time.Time `json:"started_at,omitempty"`
+	Dispatched int       `json:"dispatched"`
 }
