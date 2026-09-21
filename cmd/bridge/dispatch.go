@@ -218,17 +218,25 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 
 	now := time.Now()
 	timing := resolveTiming(cfg, now)
-	// The window gate is --auto only: an explicit `dispatch now` is the
-	// operator asking for a tick, the same exemption the pause flag has.
-	if dispatchAuto && !timing.InWindow {
-		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — nothing to do")
-		return nil
-	}
 
 	ctx := context.Background()
 	repos, err := fetchRepoInputs(ctx)
 	if err != nil {
 		return err
+	}
+
+	gate := resolveGate(ctx, repos, cfg.Lanes, now)
+	candidates := collectCandidates(repos)
+	assignLanes(candidates, cfg.Lanes, gate)
+	acting, outOfWindow := dispatch.PartitionByWindow(
+		dispatch.Order(candidates, cfg.RepoPriority), cfg.Schedule, now)
+
+	// The window gate is --auto only, as before: an explicit `dispatch now` is
+	// the operator asking for a tick. With lanes the question is per lane, so
+	// the tick stops only when no lane acts at all.
+	if dispatchAuto && len(acting) == 0 {
+		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
+		return nil
 	}
 
 	// The rung is keyed on what it guards, not on --auto: a manual tick burns
@@ -241,18 +249,23 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	}
 	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
 
-	openByRepo, globalOpen := countOpenAgentPRs(repos)
-	decisions := dispatch.ApplyCaps(
-		dispatch.Order(collectCandidates(repos), cfg.RepoPriority),
-		cfg,
+	autonomous := func(repo string) bool {
+		lane, _ := dispatch.ResolveLane(cfg.Lanes, repo, gate)
+		return lane.Autonomous
+	}
+	openByRepo, globalOpen := countOpenAgentPRs(repos, autonomous)
+
+	decisions := dispatch.ApplyCaps(acting, cfg,
 		dispatch.Counts{
 			OpenPRsByRepo:     openByRepo,
 			GlobalOpen:        globalOpen,
 			DispatchedTonight: state.DispatchesSince(nightStartForReport(cfg, timing, now)),
 			NightCapApplies:   timing.NightCapApplies,
+			DispatchedByLane:  laneCounts(state, cfg, now),
 		},
 		budget,
 	)
+	decisions = append(decisions, outOfWindow...)
 
 	if dispatchJSON {
 		if err := emitJSON(cmd.OutOrStdout(), decisions); err != nil {
@@ -322,9 +335,21 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	return out, nil
 }
 
+// assignLanes resolves each candidate's lane in place, before ordering, so the
+// cap walk and the label write read the same decision.
+func assignLanes(cs []dispatch.Candidate, lanes []dispatch.Lane, gate dispatch.GateState) {
+	for i := range cs {
+		cs[i].Lane, cs[i].LaneReason = dispatch.ResolveLane(lanes, cs[i].Repo, gate)
+	}
+}
+
 // countOpenAgentPRs counts open PRs that close one of the repo's own issues.
 // Only those are pipeline output, so a hand-written PR never consumes a slot.
-func countOpenAgentPRs(repos []repoInput) (map[string]int, int) {
+//
+// An autonomous lane's PRs are left out of the global total entirely: that cap
+// is the operator's review capacity, and nobody reviews them. They still count
+// per repo, where the bound is conflicting concurrent PRs rather than review.
+func countOpenAgentPRs(repos []repoInput, autonomous func(repo string) bool) (map[string]int, int) {
 	byRepo := make(map[string]int, len(repos))
 	total := 0
 	for _, r := range repos {
@@ -332,13 +357,26 @@ func countOpenAgentPRs(repos []repoInput) (map[string]int, int) {
 			for _, i := range r.Issues {
 				if dispatch.ClosesIssue(pr.Body, i.Number) {
 					byRepo[r.Name]++
-					total++
+					if !autonomous(r.Name) {
+						total++
+					}
 					break
 				}
 			}
 		}
 	}
 	return byRepo, total
+}
+
+// laneCounts reads each configured lane's spent counter for the occurrence it
+// is currently in. The implicit default lane is bounded by the nightly cap, not
+// by a lane ceiling, so it needs no entry here.
+func laneCounts(state dispatch.State, cfg dispatch.Config, now time.Time) map[string]int {
+	out := make(map[string]int, len(cfg.Lanes))
+	for _, l := range cfg.Lanes {
+		out[l.Name] = state.DispatchesInLane(l.Name, l.WindowStart(cfg.Schedule, now))
+	}
+	return out
 }
 
 // applyDecisions writes the one label the dispatcher owns, then persists the
@@ -348,8 +386,15 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 	var runs []usage.Run
 	var dispatchErr error
 
+	laneDispatched := map[string]int{}
 	for _, d := range ds {
 		if !d.Dispatch {
+			continue
+		}
+		lane := d.Candidate.Lane
+		if lane.DryRun {
+			// The lane is being observed, not run. It applies nothing, books no
+			// spend, and advances no counter — see the spec's dry_run section.
 			continue
 		}
 		gh, ok := clientFor("github").(*forge.GithubClient)
@@ -357,7 +402,7 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 			continue
 		}
 		owner, repo, num := d.Candidate.Owner, d.Candidate.Repo, d.Candidate.Issue.Number
-		if _, err := gh.AddLabels(ctx, owner, repo, num, []string{dispatch.LabelAIImplement}); err != nil {
+		if _, err := gh.AddLabels(ctx, owner, repo, num, lane.EffectiveLabels()); err != nil {
 			dispatchErr = fmt.Errorf("label %s#%d: %w", repo, num, err)
 			break
 		}
@@ -368,6 +413,7 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 		runs = append(runs, usage.Run{
 			At: timing.Now, Repo: repo, Issue: num, EstUSD: cfg.Budget.MeanRunCostUSD,
 		})
+		laneDispatched[lane.Name]++
 		if _, err := gh.CommentIssue(ctx, owner, repo, num,
 			"Dispatched by `bridge dispatch`."); err != nil {
 			dispatchErr = fmt.Errorf("comment %s#%d: %w", repo, num, err)
@@ -391,6 +437,11 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 			state.NightStartedAt = timing.Now
 		}
 		state.DispatchedTonight = base + len(runs)
+	}
+	for _, l := range cfg.Lanes {
+		if n := laneDispatched[l.Name]; n > 0 {
+			state.RecordLaneDispatch(l.Name, l.WindowStart(cfg.Schedule, timing.Now), timing.Now, n)
+		}
 	}
 	state.LastTick = timing.Now
 	stateErr := dispatch.WriteState(dispatchStatePath(), state)
