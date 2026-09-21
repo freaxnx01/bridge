@@ -2,7 +2,7 @@
 
 A scheduled decision engine that selects enriched issues for the agent-workflow pipeline.
 
-**Design docs:** [docs/specs/2026-07-27-bridge-dispatcher-design.md](docs/specs/2026-07-27-bridge-dispatcher-design.md), [docs/specs/2026-09-07-dispatch-usage-budget-design.md](docs/specs/2026-09-07-dispatch-usage-budget-design.md)
+**Design docs:** [docs/specs/2026-07-27-bridge-dispatcher-design.md](docs/specs/2026-07-27-bridge-dispatcher-design.md), [docs/specs/2026-09-07-dispatch-usage-budget-design.md](docs/specs/2026-09-07-dispatch-usage-budget-design.md), [docs/specs/2026-09-21-dispatch-autonomy-lanes-design.md](docs/specs/2026-09-21-dispatch-autonomy-lanes-design.md)
 
 ## What it does
 
