@@ -13,6 +13,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   define (#303)
 - Issue bodies are populated by `ListOpenIssues` for internal consumers and
   cleared at the MCP `list_issues` and `GET /api/repos/{repo}` boundaries (#303)
+- `bridge dispatch` autonomy lanes: per-repo `auto` vs `hitl` lanes with their own
+  windows, caps and labels. An autonomous lane is exempt from `global_open_prs`
+  both ways, is gated on `ai-review-ai-merge: true` in the repo's `agent.yml`
+  (falling back to human review when unmet), and can run `dry_run` to be observed
+  before it acts. The systemd heartbeat moves to half-hourly. (#304)
 - `bridge dispatch`: usage-budget rung reserving subscription headroom for
   interactive work during the day, measured from Claude Code transcripts and a
   local ledger of dispatched runs (#254)

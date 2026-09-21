@@ -10,17 +10,17 @@ A scheduled decision engine that selects enriched issues for the agent-workflow 
 - **bridge** owns the eligibility rules, dispatch caps, and ordering ladder.
 - **agent-workflow** owns model selection, the run pipeline, and per-model retry ticks.
 
-Each tick, dispatch reads open issues from every GitHub repo, applies eligibility filters, sorts by repo priority/deadline/type/size/age, applies the usage-budget rung plus per-repo and global WIP caps, and labels the selected issues with `ai-implement` to let the pipeline pick them up. The dispatcher runs on an hourly systemd timer, checks the current time against `schedule.windows`, and no-ops outside every configured window — or runs manually via `bridge dispatch now`, which is not window-gated. Runs are **dry-run only** during the first week — the timer is not enabled until the decisions look right.
+Each tick, dispatch reads open issues from every GitHub repo, applies eligibility filters, sorts by repo priority/deadline/type/size/age, resolves each repo's autonomy lane (see "Autonomy lanes" below), applies the usage-budget rung plus the lane's own caps, and labels the selected issues with `ai-implement` (plus `ai-review-ai-merge` for an autonomous lane) to let the pipeline pick them up. The dispatcher runs on a half-hourly systemd timer, checks the current time against each candidate's lane window, and no-ops outside every lane's window — or runs manually via `bridge dispatch now`, which is not window-gated. Runs are **dry-run only** during the first week — the timer is not enabled until the decisions look right.
 
 ## Schedule windows
 
-`schedule.windows` in `dispatch.json` is the single source of truth for when dispatch acts — the systemd timer is a bare hourly heartbeat with no schedule of its own (see "Systemd timer and service" below). Each window is `{"from": "HH:MM", "to": "HH:MM", "budget_rung": bool}`:
+`schedule.windows` in `dispatch.json` is the single source of truth for when the default lane acts — the systemd timer is a bare half-hourly heartbeat with no schedule of its own (see "Systemd timer and service" below). Each window is `{"from": "HH:MM", "to": "HH:MM", "budget_rung": bool}`:
 
 - `from` is inclusive, `to` is exclusive.
 - `from > to` wraps past midnight (e.g. `18:00`–`07:00` covers the overnight span).
 - `budget_rung` turns the usage-budget rung on for ticks that fall in that window.
 
-`--auto` (the systemd entry point) returns before any repo fetch when the current time matches no configured window. An explicit `bridge dispatch now` is the operator asking for a tick and is never window-gated, mirroring how `now` already ignores the pause flag.
+`--auto` (the systemd entry point) fetches candidates, resolves each one's lane, and returns without applying anything when no candidate's lane is in window at the current time. An explicit `bridge dispatch now` is the operator asking for a tick and is never window-gated, mirroring how `now` already ignores the pause flag.
 
 ## Usage-budget rung
 
@@ -95,7 +95,61 @@ Four independent bounds limit dispatch, checked in this order:
 3. **Global open-PR cap** — Limits the operator's review capacity across all repos. Default: 3 open agent PRs total. Once reached, no further dispatch until some close.
 4. **Per-repo WIP cap** — Prevents conflicting concurrent PRs in one repo by limiting open agent PRs per repo. Default: 1 per repo. Configured per-repo via overrides in `dispatch.json`. Example: `"overrides": {"quotes": 2}` allows 2 concurrent PRs in the `quotes` repo.
 
-All four must pass before an issue is dispatched. Dry-run shows which bound (if any) caused a skip (the first one that was exceeded in the order above).
+All four must pass before an issue is dispatched. Dry-run shows which bound (if any) caused a skip (the first one that was exceeded in the order above). An autonomous lane's candidates skip the nightly and global caps entirely (see "Autonomy lanes" below) but still respect a lane cap and the per-repo WIP cap.
+
+## Autonomy lanes
+
+By default every repo dispatches through one implicit lane — the pre-lane behaviour described above, using the top-level `schedule`/`limits`. `lanes` in `dispatch.json` lets specific repos dispatch on their own schedule and caps instead, because a repo whose PRs merge themselves doesn't consume the operator's review capacity the way a human-reviewed PR does.
+
+```json
+"lanes": [
+  { "name": "auto", "repos": ["game-*"], "autonomous": true, "dry_run": true,
+    "windows": [{"from": "00:00", "to": "00:00"}],
+    "labels": ["ai-implement", "ai-review-ai-merge"],
+    "limits": { "per_repo": 1, "max_dispatches": 12 } },
+  { "name": "hitl", "repos": ["*"] }
+]
+```
+
+Each lane is matched by bare repo name against `repos` (`path.Match` glob syntax); the **first matching lane wins**. A repo matching no lane falls back to the implicit default lane — the pre-lane behaviour. A config with no `lanes` key at all behaves exactly as it did before lanes existed.
+
+| Field | Type | Default | Meaning |
+|---|---|---|---|
+| `name` | string | — | Lane identifier, shown in `--dry-run`, `--json`, and `status` |
+| `repos` | array of strings | — | `path.Match` glob patterns matched against the bare repo name; first lane to match wins |
+| `autonomous` | bool | false | This lane's PRs are reviewed and merged by the pipeline itself. Exempts the lane from the nightly and global caps (nobody reviews these PRs), gates the repo on `ai-review-ai-merge: true` in its `agent.yml`, and changes the default labels (see below) |
+| `dry_run` | bool | false | Run the lane for real through every decision, apply nothing — no labels, no comments, no shared-counter spend. Only the lane's own counter advances |
+| `windows` | array of `{from, to}` | inherits `schedule.windows` | When this lane acts. `from` inclusive, `to` exclusive; `from > to` wraps past midnight; `from == to` covers the whole day. Replaces the schedule's windows for this lane entirely — it does not add to them |
+| `labels` | array of strings | `["ai-implement"]`, or `["ai-implement", "ai-review-ai-merge"]` if `autonomous` | Labels applied in a single API call when this lane dispatches. An explicit list always wins over the autonomous default |
+| `limits.per_repo` | int | inherits top-level `limits.per_repo` | Per-repo WIP cap for this lane |
+| `limits.overrides` | object | inherits top-level `limits.overrides` | Per-repo overrides, same shape as the top-level `limits.overrides` |
+| `limits.max_dispatches` | int | unbounded | Caps dispatches within one occurrence of this lane's window (a calendar day for a 24h window). Independent of, and in addition to, the nightly/global caps |
+
+### Autonomous lanes and the agent.yml gate
+
+A repo matched by an `autonomous` lane must also carry `ai-review-ai-merge: true` in `.github/workflows/agent.yml` — the same input the agent-workflow pipeline itself checks before merging without a human. Bridge reads that file directly (a line-match, not a YAML parse, so no YAML dependency is added), caches the result for 6 hours at `~/.cache/bridge/lane-gate.json`, and only fetches it for repos an autonomous lane actually claims.
+
+**Fail closed.** A repo without the file, without the matching line, or whose fetch fails, is downgraded to the next matching lane (or the implicit default) rather than dispatched autonomously. `--dry-run`, `--json`, and `status` all show the downgrade reason, e.g. `auto→hitl: agent.yml lacks ai-review-ai-merge: true`.
+
+### `dry_run`: observe without consuming
+
+A `dry_run` lane runs through eligibility, ordering, and every cap exactly as a live lane would, and its decisions appear in `--dry-run`/`--json` output — but it applies nothing: no label, no comment, no ledger spend. It still advances its own lane counter (so `limits.max_dispatches` behaves identically to a live run), but it never touches the counters other lanes share — not the per-repo count, not the global count, not the nightly count, not the budget. This is what lets the auto lane run a full observation week without throttling the very dispatches it exists to observe.
+
+The auto lane ships with `dry_run: true` by default. Flipping it to `false` is a one-word edit to `dispatch.json` — no code change, no redeploy — and should only happen after a week of reviewed `--dry-run` output confirms the lane assignments and caps look right.
+
+### Worked example
+
+With the config above, a `--dry-run` tick might render:
+
+```
+  game-tschau-sepp #14   fix: card flip race          auto   → WOULD dispatch (dry-run)
+  game-huusli-jagd #7    feat: leaderboard sync        hitl   → SKIP (auto→hitl: agent.yml lacks ai-review-ai-merge: true; repo at WIP 1/1)
+  bridge           #304  feat(dispatch): autonomy lanes default → dispatch
+
+3 dispatched, 0 skipped
+```
+
+`game-tschau-sepp` matches the `auto` lane and passes the gate, so it would dispatch under `ai-implement` + `ai-review-ai-merge` — but `dry_run` means nothing is actually applied. `game-huusli-jagd` matches `auto` too but its `agent.yml` doesn't opt in, so it's downgraded to `hitl` and then skipped there on an unrelated cap; the downgrade reason is shown alongside the skip reason. `bridge` matches no configured lane, so it falls back to the implicit default lane.
 
 ## Labels
 
@@ -174,7 +228,14 @@ Example with every key:
       "otherepo": 1
     }
   },
-  "repo_priority": ["agent-workflow", "ai-instructions", "*", "game-*"]
+  "repo_priority": ["agent-workflow", "ai-instructions", "*", "game-*"],
+  "lanes": [
+    { "name": "auto", "repos": ["game-*"], "autonomous": true, "dry_run": true,
+      "windows": [{"from": "00:00", "to": "00:00"}],
+      "labels": ["ai-implement", "ai-review-ai-merge"],
+      "limits": { "per_repo": 1, "max_dispatches": 12 } },
+    { "name": "hitl", "repos": ["*"] }
+  ]
 }
 ```
 
@@ -193,6 +254,7 @@ Rates in `budget.pricing` are USD per million tokens; `pricing` overrides the bu
 | `limits.max_dispatches_per_night` | int | 5 | Max dispatches per night window to bound unattended spend |
 | `limits.overrides` | object | {} | Per-repo overrides (key = bare repo name, value = per-repo WIP cap) |
 | `repo_priority` | array of strings | [] (rung skipped) | Ordered list of repo-name patterns (`path.Match` glob syntax); a repo's dispatch priority is the index of the first pattern it matches, scanned in order. Unmatched repos rank after every entry. Empty/absent disables this rung entirely |
+| `lanes` | array of objects | [] (implicit default lane) | Per-repo autonomy lanes — see "Autonomy lanes" above for the full field table |
 
 **Upgrade note.** The retired `schedule.dispatch_at` / `schedule.retry_until` keys are ignored — `encoding/json` skips unknown fields, and `schedule.windows` falls back to the defaults shown above, so a pre-existing config keeps loading. After upgrading, reinstall the timer for the windows to take effect: `systemctl --user daemon-reload && systemctl --user restart bridge-dispatch.timer`.
 
@@ -225,11 +287,11 @@ These are inherent to a proxy measurement, not bugs:
 - `bridge dispatch now` — Run one dispatch tick immediately, apply decisions (not dry-run). Honors the pause flag only if `--auto` is set; explicit `now` always runs.
 - `bridge dispatch pause` — Stop the dispatcher. Sets a local pause flag that `--auto` checks before each tick. Manual `dispatch now` always runs even when paused.
 - `bridge dispatch resume` — Resume the dispatcher. Clears the local pause flag.
-- `bridge dispatch status` — Show configured caps, dispatches this night, trailing-window usage/limit/utilization, and last tick time. Makes no network call (in-flight PR counts require a repo fetch, out of scope for v1; usage comes from local transcripts and the local ledger).
+- `bridge dispatch status` — Show configured caps, dispatches this night, trailing-window usage/limit/utilization, last tick time, and each configured lane's mode/dispatched-this-window count. Makes no network call (in-flight PR counts require a repo fetch, out of scope for v1; usage comes from local transcripts and the local ledger).
 
 ### Systemd timer and service
 
-`docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer is a bare hourly heartbeat — `bridge dispatch --auto` fires every hour on the hour, checks the current time against `schedule.windows`, and returns before any repo fetch on a tick outside every window. The windows in `dispatch.json`, not the timer, are the schedule.
+`docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer is a bare half-hourly heartbeat — `bridge dispatch --auto` fires on the hour and half hour, fetches every repo's candidates, resolves each one's lane, and checks it against that lane's window. If no candidate's lane is currently in window, the tick reports "outside dispatch window" and applies nothing. The windows in `dispatch.json` (top-level `schedule.windows`, or a lane's own `windows`), not the timer, are the schedule.
 
 **Every in-window tick — day or night — runs the same full dispatch path, bounded by the same usage-budget/nightly/global/per-repo bounds** (the budget rung only ever applies on windows with `budget_rung: true`, see "Usage-budget rung" above). There is no separate retry-only mode yet (see "When a run fails" above) — a dedicated `--retry-only` mode is still future work. What keeps repeated ticks from re-labeling and re-commenting an issue that already failed without producing a PR is the "not already dispatched" eligibility guard (an issue already carrying `ai-implement` is skipped), not a retry-specific code path.
 
