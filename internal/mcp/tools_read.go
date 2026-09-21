@@ -245,6 +245,12 @@ func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in l
 	if err != nil {
 		return nil, listIssuesOutput{}, fmt.Errorf("list issues %s/%s: %w", in.Owner, in.Repo, err)
 	}
+	// Body is populated for internal consumers (the dispatcher's empty-body
+	// gate). This is a summary listing, so it is cleared here — in the shared
+	// handler, so the /api/tools/ REST transport gets the same treatment.
+	for i := range issues {
+		issues[i].Body = ""
+	}
 	return nil, listIssuesOutput{Issues: issues}, nil
 }
 

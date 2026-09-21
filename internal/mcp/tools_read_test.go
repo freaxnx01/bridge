@@ -689,3 +689,26 @@ func TestHandleGetIssue_ClientErrorPropagates(t *testing.T) {
 		t.Fatal("want error to propagate, got nil")
 	}
 }
+
+func TestHandleListIssues_StripsBody(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.issues = []forge.Issue{{Number: 1, Title: "t", Body: "a long issue body"}}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListIssues(context.Background(), nil, listIssuesInput{
+		Forge: "github", Owner: "o", Repo: "r",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Issues) != 1 {
+		t.Fatalf("got %d issues", len(out.Issues))
+	}
+	// list_issues is a summary listing; bodies would multiply its token cost.
+	if out.Issues[0].Body != "" {
+		t.Errorf("Body = %q, want empty", out.Issues[0].Body)
+	}
+	if out.Issues[0].Title != "t" {
+		t.Errorf("Title = %q, want the title preserved", out.Issues[0].Title)
+	}
+}
