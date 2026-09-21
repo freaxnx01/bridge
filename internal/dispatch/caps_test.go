@@ -188,6 +188,11 @@ func TestApplyCapsDryRunLaneConsumesNothingShared(t *testing.T) {
 		Enabled: true, UsedUSD: 0, LimitUSD: 9.6, PerRunUSD: 2.0,
 	})
 
+	for i := 0; i < 3; i++ {
+		if !ds[i].Dispatch {
+			t.Fatalf("dry-run candidate %d must still report a decision: %+v", i, ds[i])
+		}
+	}
 	for i := 3; i < 6; i++ {
 		if !ds[i].Dispatch {
 			t.Errorf("hitl candidate %d must be unaffected by the dry-run lane: %+v", i, ds[i])
@@ -223,5 +228,44 @@ func TestPartitionByWindow(t *testing.T) {
 	}
 	if len(skipped) != 1 || skipped[0].Dispatch || skipped[0].Reason != "outside lane window (night)" {
 		t.Errorf("skipped: %+v", skipped)
+	}
+}
+
+// A dry-run lane's preview is only useful if it shows what the live lane would
+// do, and per_repo: 1 is the auto lane's stated "no racing merges" bound. The
+// counter is private to the lane — every repo belongs to exactly one lane — so
+// tracking it costs the live lanes nothing.
+func TestApplyCapsDryRunLaneStillHonoursPerRepo(t *testing.T) {
+	cfg := DefaultConfig() // per_repo 1
+	dry := Lane{Name: "auto", Autonomous: true, DryRun: true}
+
+	ds := ApplyCaps([]Candidate{
+		laneCand("game-a", 1, dry), laneCand("game-a", 2, dry), laneCand("game-a", 3, dry),
+	}, cfg, Counts{}, BudgetState{})
+
+	if !ds[0].Dispatch {
+		t.Fatalf("first: %+v", ds[0])
+	}
+	for i := 1; i < 3; i++ {
+		if ds[i].Dispatch || ds[i].Reason != "repo at WIP 1/1" {
+			t.Errorf("index %d must report the WIP bound the live lane would hit: %+v", i, ds[i])
+		}
+	}
+}
+
+func TestApplyCapsDryRunPerRepoDoesNotLeakIntoALiveLane(t *testing.T) {
+	cfg := DefaultConfig()
+	dry := Lane{Name: "auto", DryRun: true}
+	live := Lane{Name: "hitl"}
+
+	// Same repo name in both lanes cannot happen in practice (first match wins),
+	// so this pins the weaker guarantee: a dry-run dispatch never raises the
+	// count a live decision is measured against.
+	ds := ApplyCaps([]Candidate{
+		laneCand("shared", 1, dry), laneCand("shared", 2, live),
+	}, cfg, Counts{}, BudgetState{})
+
+	if !ds[1].Dispatch {
+		t.Errorf("the live candidate must be unaffected by the dry-run one: %+v", ds[1])
 	}
 }

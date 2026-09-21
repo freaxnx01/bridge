@@ -278,6 +278,16 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	now := time.Now()
 	timing := resolveTiming(cfg, now)
 
+	// The window gate is --auto only, as before: an explicit `dispatch now` is
+	// the operator asking for a tick. With lanes the question is per lane, so
+	// the tick stops only when no lane acts at all — and that question is
+	// answered from the config alone, before any network call, which keeps an
+	// out-of-window tick the free no-op it was before lanes.
+	if dispatchAuto && !anyLaneActs(cfg, now) {
+		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
+		return nil
+	}
+
 	ctx := context.Background()
 	repos, err := fetchRepoInputs(ctx)
 	if err != nil {
@@ -287,16 +297,8 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	gate := resolveGate(ctx, repos, cfg.Lanes, now)
 	candidates := collectCandidates(repos)
 	assignLanes(candidates, cfg.Lanes, gate)
-	acting, outOfWindow := dispatch.PartitionByWindow(
-		dispatch.Order(candidates, cfg.RepoPriority), cfg.Schedule, now)
-
-	// The window gate is --auto only, as before: an explicit `dispatch now` is
-	// the operator asking for a tick. With lanes the question is per lane, so
-	// the tick stops only when no lane acts at all.
-	if dispatchAuto && len(acting) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
-		return nil
-	}
+	ordered := dispatch.Order(candidates, cfg.RepoPriority)
+	acting, outOfWindow := partitionForTick(ordered, cfg, now, dispatchAuto)
 
 	// The rung is keyed on what it guards, not on --auto: a manual tick burns
 	// the same quota, and a pre-dawn tick burns the window the operator will
@@ -324,7 +326,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		},
 		budget,
 	)
-	decisions = append(decisions, outOfWindow...)
+	decisions = mergeInOrder(ordered, decisions, outOfWindow)
 
 	if dispatchJSON {
 		if err := emitJSON(cmd.OutOrStdout(), decisionsJSON(decisions)); err != nil {
@@ -394,6 +396,56 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	return out, nil
 }
 
+// anyLaneActs reports whether any lane acts at now. The implicit default lane
+// is always considered: a repo no configured lane claims still dispatches in
+// it, on the top-level schedule.
+func anyLaneActs(cfg dispatch.Config, now time.Time) bool {
+	if dispatch.DefaultLane().InWindow(cfg.Schedule, now) {
+		return true
+	}
+	for _, l := range cfg.Lanes {
+		if l.InWindow(cfg.Schedule, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// partitionForTick splits candidates into those whose lane acts now and skip
+// decisions for the rest. A manual tick skips the split entirely: `dispatch
+// now` was never window-gated, and partitioning it would turn a documented
+// schedule gap into a tick that dispatches nothing.
+func partitionForTick(ordered []dispatch.Candidate, cfg dispatch.Config, now time.Time, auto bool) ([]dispatch.Candidate, []dispatch.Decision) {
+	if !auto {
+		return ordered, nil
+	}
+	return dispatch.PartitionByWindow(ordered, cfg.Schedule, now)
+}
+
+// mergeInOrder puts the decision groups back into the order Order produced.
+// ApplyCaps only ever sees the acting candidates, so appending the
+// out-of-window skips afterwards would render --dry-run — the review surface —
+// out of ladder order.
+func mergeInOrder(ordered []dispatch.Candidate, groups ...[]dispatch.Decision) []dispatch.Decision {
+	type key struct {
+		repo   string
+		number int
+	}
+	byKey := make(map[key]dispatch.Decision)
+	for _, g := range groups {
+		for _, d := range g {
+			byKey[key{d.Candidate.Repo, d.Candidate.Issue.Number}] = d
+		}
+	}
+	out := make([]dispatch.Decision, 0, len(byKey))
+	for _, c := range ordered {
+		if d, ok := byKey[key{c.Repo, c.Issue.Number}]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
 // assignLanes resolves each candidate's lane in place, before ordering, so the
 // cap walk and the label write read the same decision.
 func assignLanes(cs []dispatch.Candidate, lanes []dispatch.Lane, gate dispatch.GateState) {
@@ -412,11 +464,14 @@ func countOpenAgentPRs(repos []repoInput, autonomous func(repo string) bool) (ma
 	byRepo := make(map[string]int, len(repos))
 	total := 0
 	for _, r := range repos {
+		// Resolved once per repo: the answer cannot change within one repo, and
+		// ResolveLane walks every lane's globs.
+		skipGlobal := autonomous(r.Name)
 		for _, pr := range r.PRs {
 			for _, i := range r.Issues {
 				if dispatch.ClosesIssue(pr.Body, i.Number) {
 					byRepo[r.Name]++
-					if !autonomous(r.Name) {
+					if !skipGlobal {
 						total++
 					}
 					break
@@ -452,8 +507,12 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 		}
 		lane := d.Candidate.Lane
 		if lane.DryRun {
-			// The lane is being observed, not run. It applies nothing, books no
-			// spend, and advances no counter — see the spec's dry_run section.
+			// The lane is being observed, not run: it applies no label and
+			// books no spend. Its own counter still advances and still
+			// persists, so `max_dispatches` bounds the observation week the
+			// way it will bound the live lane — otherwise every tick reports
+			// a full lane's worth of decisions and `status` reads 0 spent.
+			laneDispatched[lane.Name]++
 			continue
 		}
 		gh, ok := clientFor("github").(*forge.GithubClient)
