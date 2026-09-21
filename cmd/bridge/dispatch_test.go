@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -722,6 +723,79 @@ func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
 	}
 	if state.LastTick.IsZero() {
 		t.Error("state must be persisted even when the tick errored")
+	}
+}
+
+func TestDecisionStatus(t *testing.T) {
+	auto := dispatch.Lane{Name: "auto", Autonomous: true}
+	dry := dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true}
+
+	tests := []struct {
+		name string
+		d    dispatch.Decision
+		want string
+	}{
+		{"live dispatch", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: auto}, Dispatch: true}, "dispatch"},
+		{"dry-run dispatch", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: dry}, Dispatch: true}, "WOULD dispatch (dry-run)"},
+		{"skip", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: auto}, Reason: "repo at WIP 1/1"},
+			"SKIP (repo at WIP 1/1)"},
+		{"skip after a lane downgrade shows both", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: dispatch.Lane{Name: "hitl"},
+				LaneReason: "auto→hitl: agent.yml lacks ai-review-ai-merge: true"},
+			Reason: "global cap 3/3"},
+			"SKIP (auto→hitl: agent.yml lacks ai-review-ai-merge: true; global cap 3/3)"},
+		{"a downgrade is still visible on a dispatch", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: dispatch.Lane{Name: "hitl"},
+				LaneReason: "auto→hitl: agent.yml lacks ai-review-ai-merge: true"},
+			Dispatch: true},
+			"dispatch (auto→hitl: agent.yml lacks ai-review-ai-merge: true)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decisionStatus(tc.d); got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderDecisionsShowsTheLaneColumn(t *testing.T) {
+	var buf bytes.Buffer
+	renderDecisions(&buf, []dispatch.Decision{{
+		Candidate: dispatch.Candidate{
+			Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 14, Title: "fix: card flip race"},
+			Lane: dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true},
+		},
+		Dispatch: true,
+	}})
+
+	out := buf.String()
+	if !strings.Contains(out, "auto") || !strings.Contains(out, "WOULD dispatch (dry-run)") {
+		t.Errorf("lane column and dry-run status must both show:\n%s", out)
+	}
+}
+
+func TestDecisionsJSONCarriesTheLane(t *testing.T) {
+	js := decisionsJSON([]dispatch.Decision{{
+		Candidate: dispatch.Candidate{
+			Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 14, Title: "fix: card flip race"},
+			Lane: dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true},
+		},
+		Dispatch: true,
+	}})
+
+	if len(js) != 1 {
+		t.Fatalf("%+v", js)
+	}
+	got := js[0]
+	if got.Lane != "auto" || !got.DryRun || got.Repo != "game-tschau-sepp" || got.Issue != 14 {
+		t.Errorf("%+v", got)
+	}
+	if !slices.Equal(got.Labels, []string{"ai-implement", "ai-review-ai-merge"}) {
+		t.Errorf("labels: %v", got.Labels)
 	}
 }
 

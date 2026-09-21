@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -17,20 +18,78 @@ import (
 	"github.com/freaxnx01/bridge/internal/usage"
 )
 
+// decisionStatus renders one decision's outcome. A lane downgrade always shows,
+// dispatch or skip: "why is this repo not in the auto lane" is the question the
+// observation week exists to answer.
+func decisionStatus(d dispatch.Decision) string {
+	reason := d.Candidate.LaneReason
+	switch {
+	case d.Dispatch && d.Candidate.Lane.DryRun:
+		return withReason("WOULD dispatch (dry-run)", reason)
+	case d.Dispatch:
+		return withReason("dispatch", reason)
+	default:
+		if reason != "" {
+			return fmt.Sprintf("SKIP (%s; %s)", reason, d.Reason)
+		}
+		return fmt.Sprintf("SKIP (%s)", d.Reason)
+	}
+}
+
+func withReason(status, reason string) string {
+	if reason == "" {
+		return status
+	}
+	return fmt.Sprintf("%s (%s)", status, reason)
+}
+
 func renderDecisions(w io.Writer, ds []dispatch.Decision) {
 	dispatched, skipped := 0, 0
 	for _, d := range ds {
-		status := "dispatch"
-		if !d.Dispatch {
-			status = fmt.Sprintf("SKIP (%s)", d.Reason)
-			skipped++
-		} else {
+		if d.Dispatch {
 			dispatched++
+		} else {
+			skipped++
 		}
-		fmt.Fprintf(w, "  %-12s #%-4d %-28s → %s\n",
-			d.Candidate.Repo, d.Candidate.Issue.Number, truncate(d.Candidate.Issue.Title, 28), status)
+		fmt.Fprintf(w, "  %-16s #%-4d %-28s %-6s → %s\n",
+			d.Candidate.Repo, d.Candidate.Issue.Number,
+			truncate(d.Candidate.Issue.Title, 28),
+			d.Candidate.Lane.Name, decisionStatus(d))
 	}
 	fmt.Fprintf(w, "\n%d dispatched, %d skipped\n", dispatched, skipped)
+}
+
+// decisionJSON is the machine-readable view of a decision. Decision itself
+// carries no json tags and nests a whole forge.Issue; a named view keeps the
+// documented shape stable as the struct grows.
+type decisionJSON struct {
+	Repo       string   `json:"repo"`
+	Issue      int      `json:"issue"`
+	Title      string   `json:"title"`
+	Lane       string   `json:"lane"`
+	LaneReason string   `json:"lane_reason,omitempty"`
+	Labels     []string `json:"labels"`
+	DryRun     bool     `json:"dry_run"`
+	Dispatch   bool     `json:"dispatch"`
+	Reason     string   `json:"reason,omitempty"`
+}
+
+func decisionsJSON(ds []dispatch.Decision) []decisionJSON {
+	out := make([]decisionJSON, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, decisionJSON{
+			Repo:       d.Candidate.Repo,
+			Issue:      d.Candidate.Issue.Number,
+			Title:      d.Candidate.Issue.Title,
+			Lane:       d.Candidate.Lane.Name,
+			LaneReason: d.Candidate.LaneReason,
+			Labels:     d.Candidate.Lane.EffectiveLabels(),
+			DryRun:     d.Candidate.Lane.DryRun,
+			Dispatch:   d.Dispatch,
+			Reason:     d.Reason,
+		})
+	}
+	return out
 }
 
 // repoInput is one repo's fetched state, kept as a plain struct so
@@ -268,7 +327,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	decisions = append(decisions, outOfWindow...)
 
 	if dispatchJSON {
-		if err := emitJSON(cmd.OutOrStdout(), decisions); err != nil {
+		if err := emitJSON(cmd.OutOrStdout(), decisionsJSON(decisions)); err != nil {
 			return err
 		}
 	} else {
@@ -526,16 +585,17 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 
 	if dispatchJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
-			Limits            dispatch.Limits `json:"limits"`
-			Paused            bool            `json:"paused"`
-			DispatchedTonight int             `json:"dispatched_tonight"`
-			LastTick          time.Time       `json:"last_tick,omitempty"`
-			BudgetWindowHours float64         `json:"budget_window_hours"`
-			BudgetUsedUSD     float64         `json:"budget_used_usd"`
-			BudgetLimitUSD    float64         `json:"budget_limit_usd"`
-			BudgetKnown       bool            `json:"budget_known"`
-			BudgetRungActive  bool            `json:"budget_rung_active"`
-			NightCapApplies   bool            `json:"night_cap_applies"`
+			Limits            dispatch.Limits  `json:"limits"`
+			Paused            bool             `json:"paused"`
+			DispatchedTonight int              `json:"dispatched_tonight"`
+			LastTick          time.Time        `json:"last_tick,omitempty"`
+			BudgetWindowHours float64          `json:"budget_window_hours"`
+			BudgetUsedUSD     float64          `json:"budget_used_usd"`
+			BudgetLimitUSD    float64          `json:"budget_limit_usd"`
+			BudgetKnown       bool             `json:"budget_known"`
+			BudgetRungActive  bool             `json:"budget_rung_active"`
+			NightCapApplies   bool             `json:"night_cap_applies"`
+			Lanes             []laneStatusJSON `json:"lanes,omitempty"`
 		}{
 			Limits:            cfg.Limits,
 			Paused:            state.Paused,
@@ -547,6 +607,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 			BudgetKnown:       !budget.Unknown,
 			BudgetRungActive:  budget.Enabled,
 			NightCapApplies:   timing.NightCapApplies,
+			Lanes:             laneStatuses(cfg, state, now),
 		})
 	}
 
@@ -580,7 +641,46 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 	} else {
 		fmt.Fprintf(w, "last tick: %s\n", state.LastTick.Format(time.RFC3339))
 	}
+	for _, l := range cfg.Lanes {
+		start := l.WindowStart(cfg.Schedule, now)
+		spent := state.DispatchesInLane(l.Name, start)
+		mode := "live"
+		if l.DryRun {
+			mode = "dry-run"
+		}
+		ceiling := "∞"
+		if l.Limits.MaxDispatches > 0 {
+			ceiling = strconv.Itoa(l.Limits.MaxDispatches)
+		}
+		fmt.Fprintf(w, "lane %s: %s, autonomous=%t, dispatched %d/%s this window\n",
+			l.Name, mode, l.Autonomous, spent, ceiling)
+	}
 	return nil
+}
+
+// laneStatusJSON reports one lane's configuration and spent counter.
+type laneStatusJSON struct {
+	Name          string `json:"name"`
+	Autonomous    bool   `json:"autonomous"`
+	DryRun        bool   `json:"dry_run"`
+	Dispatched    int    `json:"dispatched"`
+	MaxDispatches int    `json:"max_dispatches,omitempty"`
+	InWindow      bool   `json:"in_window"`
+}
+
+func laneStatuses(cfg dispatch.Config, state dispatch.State, now time.Time) []laneStatusJSON {
+	out := make([]laneStatusJSON, 0, len(cfg.Lanes))
+	for _, l := range cfg.Lanes {
+		out = append(out, laneStatusJSON{
+			Name:          l.Name,
+			Autonomous:    l.Autonomous,
+			DryRun:        l.DryRun,
+			Dispatched:    state.DispatchesInLane(l.Name, l.WindowStart(cfg.Schedule, now)),
+			MaxDispatches: l.Limits.MaxDispatches,
+			InWindow:      l.InWindow(cfg.Schedule, now),
+		})
+	}
+	return out
 }
 
 // nightStartForReport resolves the occurrence the nightly counter belongs to
