@@ -88,6 +88,10 @@ func (h *ReposHandler) detail(w http.ResponseWriter, r *http.Request, owner, nam
 	if h.Issues != nil {
 		issues, _ = h.Issues(r.Context(), repo.Forge, repo.Owner, repo.Name)
 	}
+	// Same boundary rule as MCP list_issues: bodies are internal-only.
+	for i := range issues {
+		issues[i].Body = ""
+	}
 	writeJSON(w, RepoDetail{Repo: *repo, Sessions: repoSessions, Issues: issues})
 }
 
