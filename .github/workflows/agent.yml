@@ -19,7 +19,7 @@ jobs:
       runner-labels: '["ubuntu-latest"]'
       default-model: claude-sonnet-5
       pipeline-ref: v2
-      pre-preview: true
+      ai-review-human-merge: true
       # A floor only, at v2: classify-turns.sh sizes the budget from the
       # issue body's `### Task N` count, and a `turns:<N>` label overrides
       # both. This value applies only to an issue whose plan has no countable
