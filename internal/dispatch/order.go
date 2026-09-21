@@ -16,6 +16,10 @@ type Candidate struct {
 	Owner        string
 	Repo         string // bare name, e.g. "quotes"
 	MilestoneDue time.Time
+	// Lane is the autonomy lane this candidate dispatches in, resolved before
+	// ordering. LaneReason records a downgrade so --dry-run can explain it.
+	Lane       Lane
+	LaneReason string
 }
 
 // typeRank maps an issue's labels to the ladder's third rung.
