@@ -56,3 +56,30 @@ func (s State) DispatchesSince(since time.Time) int {
 	}
 	return s.DispatchedTonight
 }
+
+// DispatchesInLane returns how many dispatches lane's current window
+// occurrence has already spent. since is that occurrence's start: a counter
+// recorded before it belongs to an earlier occurrence and does not carry over,
+// the same rule DispatchesSince applies to the nightly counter.
+func (s State) DispatchesInLane(lane string, since time.Time) int {
+	ls, ok := s.Lanes[lane]
+	if !ok || since.IsZero() || ls.StartedAt.IsZero() || ls.StartedAt.Before(since) {
+		return 0
+	}
+	return ls.Dispatched
+}
+
+// RecordLaneDispatch adds n dispatches to lane's counter, restarting it when
+// the stored counter belongs to an earlier window occurrence.
+func (s *State) RecordLaneDispatch(lane string, since, now time.Time, n int) {
+	if s.Lanes == nil {
+		s.Lanes = make(map[string]LaneState)
+	}
+	base := s.DispatchesInLane(lane, since)
+	ls := s.Lanes[lane]
+	if base == 0 {
+		ls.StartedAt = now
+	}
+	ls.Dispatched = base + n
+	s.Lanes[lane] = ls
+}
