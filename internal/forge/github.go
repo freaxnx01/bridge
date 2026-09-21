@@ -362,6 +362,7 @@ func (c *GithubClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 type ghIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
+	Body    string `json:"body"`
 	HTMLURL string `json:"html_url"`
 	Labels  []struct {
 		Name string `json:"name"`
@@ -545,6 +546,7 @@ func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) (
 			Repo:      owner + "/" + repo,
 			Number:    i.Number,
 			Title:     i.Title,
+			Body:      i.Body,
 			URL:       i.HTMLURL,
 			Labels:    labels,
 			Milestone: milestone,

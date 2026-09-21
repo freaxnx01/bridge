@@ -522,6 +522,7 @@ func (c *ForgejoClient) listTreeRecursive(ctx context.Context, owner, repo, path
 type fjIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
+	Body    string `json:"body"`
 	HTMLURL string `json:"html_url"`
 	Labels  []struct {
 		Name string `json:"name"`
@@ -546,7 +547,7 @@ func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) 
 		}
 		out = append(out, Issue{
 			Forge: "forgejo", Repo: owner + "/" + repo,
-			Number: i.Number, Title: i.Title, URL: i.HTMLURL,
+			Number: i.Number, Title: i.Title, Body: i.Body, URL: i.HTMLURL,
 			Labels: labels, Updated: i.UpdatedAt,
 		})
 	}

@@ -60,7 +60,7 @@ func TestForgejoListIssues(t *testing.T) {
 		if r.URL.Path != "/api/v1/repos/freax/fj/issues" {
 			t.Errorf("path %s", r.URL.Path)
 		}
-		w.Write([]byte(`[{"number":5,"title":"t","html_url":"u","labels":[{"name":"x"}],"updated_at":"2026-05-02T00:00:00Z","pull_request":null}]`))
+		w.Write([]byte(`[{"number":5,"title":"t","body":"the description","html_url":"u","labels":[{"name":"x"}],"updated_at":"2026-05-02T00:00:00Z","pull_request":null}]`))
 	}))
 	defer srv.Close()
 	c := NewForgejoClient("tok", srv.URL)
@@ -70,6 +70,11 @@ func TestForgejoListIssues(t *testing.T) {
 	}
 	if len(issues) != 1 || issues[0].Number != 5 || issues[0].Labels[0] != "x" {
 		t.Errorf("%+v", issues)
+	}
+	// Body is what Eligible()'s empty-body gate reads; the list endpoint
+	// returns it and we used to discard it.
+	if issues[0].Body != "the description" {
+		t.Errorf("Body = %q, want %q", issues[0].Body, "the description")
 	}
 }
 
