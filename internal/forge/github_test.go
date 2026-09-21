@@ -58,7 +58,7 @@ func TestGithubListIssues(t *testing.T) {
 			t.Errorf("state: %s", r.URL.Query().Get("state"))
 		}
 		w.Write([]byte(`[
-          {"number":30,"title":"feat(dashboard)","html_url":"u30","labels":[{"name":"area:tui"}],"updated_at":"2026-05-01T00:00:00Z","pull_request":null},
+          {"number":30,"title":"feat(dashboard)","body":"the description","html_url":"u30","labels":[{"name":"area:tui"}],"updated_at":"2026-05-01T00:00:00Z","pull_request":null},
           {"number":31,"title":"is a PR","html_url":"u31","pull_request":{"url":"x"},"updated_at":"2026-05-02T00:00:00Z"}
         ]`))
 	}))
@@ -74,6 +74,11 @@ func TestGithubListIssues(t *testing.T) {
 	}
 	if issues[0].Number != 30 || issues[0].Repo != "freaxnx01/bridge" || issues[0].Labels[0] != "area:tui" {
 		t.Errorf("got %+v", issues[0])
+	}
+	// Body is what Eligible()'s empty-body gate reads; the list endpoint
+	// returns it and we used to discard it.
+	if issues[0].Body != "the description" {
+		t.Errorf("Body = %q, want %q", issues[0].Body, "the description")
 	}
 }
 
