@@ -64,12 +64,13 @@ Skip reasons surfaced by `--dry-run` and `--json`:
 
 An issue is eligible for dispatch if it passes these checks in order:
 
-1. **Not needs-enrichment** — The issue must NOT be labeled `needs-enrichment` (i.e. it must already have a clear task description or acceptance criteria). Issues carrying this label are skipped until enriched.
-2. **Not parked** — The issue must not be labeled `🧊 parked`. Parked issues are skipped and must be manually unparked by removing the label.
-3. **Not already dispatched** — The issue must not already carry the `ai-implement` label. This guards against re-labeling/re-commenting an issue on every tick when a prior dispatch failed without producing a PR (see "When a run fails" below) — the open-PR check alone can't catch that case, since no PR exists.
-4. **Attempt budget** — The issue must not have an `attempt:N` label with N ≥ 2. A failed run increments the attempt counter; after 2 failed runs, the issue is parked and skipped.
-5. **No open PR** — The issue must not have an open pull request that closes it (detected by matching closing keywords in the PR body: "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"). A hand-written PR never consumes a dispatch slot.
-6. **Milestone membership** — If the repo has an open milestone with a due date, the issue must belong to that milestone. Undated milestones are treated as inactive (setting a due date is how the operator marks a milestone active for dispatch).
+1. **Non-empty body** — The issue body must not be blank or whitespace-only. Checked before the label rules: an empty issue is unfit for dispatch for a reason that has nothing to do with its labels, and this is the backstop for any intake path that fails to stamp `needs-enrichment`. Reason string: `empty body`.
+2. **Not needs-enrichment** — The issue must NOT be labeled `needs-enrichment` (i.e. it must already have a clear task description or acceptance criteria). Issues carrying this label are skipped until enriched.
+3. **Not parked** — The issue must not be labeled `🧊 parked`. Parked issues are skipped and must be manually unparked by removing the label.
+4. **Not already dispatched** — The issue must not already carry the `ai-implement` label. This guards against re-labeling/re-commenting an issue on every tick when a prior dispatch failed without producing a PR (see "When a run fails" below) — the open-PR check alone can't catch that case, since no PR exists.
+5. **Attempt budget** — The issue must not have an `attempt:N` label with N ≥ 2. A failed run increments the attempt counter; after 2 failed runs, the issue is parked and skipped.
+6. **No open PR** — The issue must not have an open pull request that closes it (detected by matching closing keywords in the PR body: "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"). A hand-written PR never consumes a dispatch slot.
+7. **Milestone membership** — If the repo has an open milestone with a due date, the issue must belong to that milestone. Undated milestones are treated as inactive (setting a due date is how the operator marks a milestone active for dispatch).
 
 The first failure reason is returned; dry-run uses this to explain every skip.
 
@@ -102,7 +103,7 @@ Bridge dispatch checks and creates these labels:
 
 | Label | Meaning | Set by |
 |---|---|---|
-| `needs-enrichment` | Issue lacks clear task description; skip until enriched | Manual (operator) |
+| `needs-enrichment` | Issue lacks clear task description; skip until enriched | Bridge intake (`/api/capture/issue`, MCP `create_issue`) or manual |
 | `🧊 parked` | Issue exhausted the attempt budget; skip until manually unparked | Agent-workflow / future retry-tick component |
 | `ai-implement` | Selected for dispatch; ready for the pipeline | Bridge dispatch (on selection) |
 | `attempt:1`, `attempt:2` | Attempt count; incremented after each failed substantive run | Agent-workflow / future retry-tick component |

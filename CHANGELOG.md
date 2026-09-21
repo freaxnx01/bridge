@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `CreateIssue` accepts labels and creates any that the target repo does not
+  define (#303)
+- Issue bodies are populated by `ListOpenIssues` for internal consumers and
+  cleared at the MCP `list_issues` and `GET /api/repos/{repo}` boundaries (#303)
 - `bridge dispatch`: usage-budget rung reserving subscription headroom for
   interactive work during the day, measured from Claude Code transcripts and a
   local ledger of dispatched runs (#254)
@@ -37,6 +41,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Capture-created issues are no longer dispatch-eligible without enrichment:
+  every intake path (`POST /api/capture/issue`, MCP `create_issue`) now stamps
+  `needs-enrichment`, and `bridge dispatch` rejects an issue with a blank body
+  regardless of its labels (#303)
 - `bridge nav`: the status line is now rendered. `Model.status` is where every
   nav outcome already routed — backend launch/attach failures, clone and
   worktree-create failures, agent resolution, the overview's `⏎ show link/path`
