@@ -725,6 +725,53 @@ func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
 	}
 }
 
+func TestAssignLanes(t *testing.T) {
+	lanes := []dispatch.Lane{
+		{Name: "auto", Repos: []string{"game-*"}, Autonomous: true},
+		{Name: "hitl", Repos: []string{"*"}},
+	}
+	cs := []dispatch.Candidate{
+		{Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 1}},
+		{Repo: "game-huusli-jagd", Issue: forge.Issue{Number: 2}},
+		{Repo: "bridge", Issue: forge.Issue{Number: 3}},
+	}
+
+	assignLanes(cs, lanes, dispatch.GateState{"game-tschau-sepp": true})
+
+	if cs[0].Lane.Name != "auto" || cs[0].LaneReason != "" {
+		t.Errorf("gated repo stays in auto: %+v", cs[0])
+	}
+	if cs[1].Lane.Name != "hitl" || cs[1].LaneReason == "" {
+		t.Errorf("ungated repo falls back with a reason: %+v", cs[1])
+	}
+	if cs[2].Lane.Name != "hitl" {
+		t.Errorf("catch-all: %+v", cs[2])
+	}
+}
+
+func TestCountOpenAgentPRsExcludesAutonomousRepos(t *testing.T) {
+	repos := []repoInput{
+		{Forge: "github", Owner: "freaxnx01", Name: "game-tschau-sepp",
+			Issues: []forge.Issue{{Number: 1}},
+			PRs:    []forge.PullRequest{{Body: "Closes #1"}}},
+		{Forge: "github", Owner: "freaxnx01", Name: "bridge",
+			Issues: []forge.Issue{{Number: 9}},
+			PRs:    []forge.PullRequest{{Body: "Closes #9"}}},
+	}
+	autonomous := func(repo string) bool { return repo == "game-tschau-sepp" }
+
+	byRepo, global := countOpenAgentPRs(repos, autonomous)
+
+	if global != 1 {
+		t.Errorf("only human-reviewed PRs spend review capacity: global=%d want 1", global)
+	}
+	// The per-repo count still has to include it — per_repo bounds conflicting
+	// PRs in one repo, which is true in either lane.
+	if byRepo["game-tschau-sepp"] != 1 {
+		t.Errorf("per-repo count: %+v", byRepo)
+	}
+}
+
 // The ledger and the local state are independent stores. A failing ledger
 // write must not also discard the nightly counter and LastTick — losing both
 // would let the next tick spend the same headroom again, fail-open in two
