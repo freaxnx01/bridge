@@ -56,12 +56,25 @@ func parseHHMM(s string) (int, bool) {
 	return hh*60 + mm, true
 }
 
-// StartOf returns the absolute instant at which w's occurrence covering now
-// began. For a window that wraps past midnight this is the previous day's
+// Covers reports whether now's wall clock falls inside the span.
+func (sp Span) Covers(now time.Time) bool {
+	from, ok := parseHHMM(sp.From)
+	if !ok {
+		return false
+	}
+	to, ok := parseHHMM(sp.To)
+	if !ok {
+		return false
+	}
+	return covers(from, to, now.Hour()*60+now.Minute())
+}
+
+// StartOf returns the absolute instant at which sp's occurrence covering now
+// began. For a span that wraps past midnight this is the previous day's
 // boundary when now is on the morning side of it. A malformed From yields the
 // zero time, which callers treat as "no usable boundary".
-func (w Window) StartOf(now time.Time) time.Time {
-	from, ok := parseHHMM(w.From)
+func (sp Span) StartOf(now time.Time) time.Time {
+	from, ok := parseHHMM(sp.From)
 	if !ok {
 		return time.Time{}
 	}
