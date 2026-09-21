@@ -92,11 +92,16 @@ Each client gets an **unexported** helper that runs before the create. The
 exported surface grows by nothing beyond the `CreateIssue` signature — no
 `ListLabels`, no `CreateLabel`, no interface additions.
 
-- **GitHub:** `GET /repos/{owner}/{repo}/labels/{name}`; on 404,
-  `POST /repos/{owner}/{repo}/labels`. Then pass label *names* to create-issue,
-  which is the shape GitHub expects. This also removes the design's dependence on
-  GitHub's auto-create-on-issue-create behaviour, which cannot be verified without
-  creating a real issue against the real API.
+- **GitHub:** `GET /repos/{owner}/{repo}/labels?per_page=100`, match by name,
+  `POST /repos/{owner}/{repo}/labels` if absent. Then pass label *names* to
+  create-issue, which is the shape GitHub expects. This also removes the design's
+  dependence on GitHub's auto-create-on-issue-create behaviour, which cannot be
+  verified without creating a real issue against the real API.
+
+  List-and-match rather than a `GET /labels/{name}` probe: the clients' `get`
+  helper (`internal/forge/github.go:35-54`) collapses every status ≥ 400 into one
+  formatted error, so a probe cannot distinguish an absent label from a broken
+  request. Listing also makes both forges the same shape.
 - **Forgejo:** `GET /api/v1/repos/{owner}/{repo}/labels`, match by name, create if
   absent, and pass the resulting **IDs**. The lookup is not optional on this forge:
   the instance's own swagger (`git.home.freaxnx01.ch/swagger.v1.json`, verified
