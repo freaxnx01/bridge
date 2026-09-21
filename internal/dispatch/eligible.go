@@ -88,6 +88,12 @@ func HasOpenPR(prs []forge.PullRequest, issueNumber int) bool {
 // skipped. activeMilestone is "" when the repo has no dated open milestone, in
 // which case milestone membership is not checked at all.
 func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (bool, string) {
+	// Checked before the label rules on purpose: an issue with no body is unfit
+	// for dispatch for a reason that has nothing to do with its labels, and an
+	// intake path that forgot to stamp needs-enrichment must still be caught.
+	if strings.TrimSpace(i.Body) == "" {
+		return false, "empty body"
+	}
 	if hasLabel(i.Labels, LabelNeedsEnrichment) {
 		return false, "needs-enrichment"
 	}
