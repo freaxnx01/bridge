@@ -71,3 +71,75 @@ func TestMergeRepoMetaPreservesExisting(t *testing.T) {
 		t.Errorf("merge clobbered existing values: %+v", got[0])
 	}
 }
+
+func TestRepoMetaKey_MatchesMergeRepoMetaLookup(t *testing.T) {
+	roots := []string{"/home/u/repos", "/home/u/other"}
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{"under first root", "/home/u/repos/github/acme/public/bridge", "github/acme/public/bridge"},
+		{"under second root", "/home/u/other/gitlab/acme/thing", "gitlab/acme/thing"},
+		{"under no root falls back to the path", "/elsewhere/repo", "/elsewhere/repo"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := RepoMetaKey(roots, tt.path); got != tt.want {
+				t.Errorf("RepoMetaKey = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestSaveRepoMeta_RoundTripsThroughLoad(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "repo-meta.json")
+	in := map[string]RepoMeta{
+		"github/acme/public/bridge": {
+			Description:   "repo navigator",
+			Topics:        []string{"go", "tui"},
+			DefaultBranch: "main",
+			RemoteURL:     "git@github.com:acme/bridge.git",
+			FetchedAt:     1789000000,
+		},
+	}
+	if err := SaveRepoMeta(path, in); err != nil {
+		t.Fatalf("SaveRepoMeta: %v", err)
+	}
+	got, err := LoadRepoMeta(path)
+	if err != nil {
+		t.Fatalf("LoadRepoMeta: %v", err)
+	}
+	if !reflect.DeepEqual(got, in) {
+		t.Errorf("round-trip mismatch:\n got %+v\nwant %+v", got, in)
+	}
+}
+
+func TestSaveRepoMeta_WrittenFileFeedsMergeRepoMeta(t *testing.T) {
+	root := t.TempDir()
+	path := filepath.Join(t.TempDir(), "repo-meta.json")
+	repoPath := filepath.Join(root, "github", "acme", "public", "bridge")
+	if err := SaveRepoMeta(path, map[string]RepoMeta{
+		RepoMetaKey([]string{root}, repoPath): {
+			Description:   "repo navigator",
+			Topics:        []string{"go"},
+			DefaultBranch: "main",
+			RemoteURL:     "git@github.com:acme/bridge.git",
+		},
+	}); err != nil {
+		t.Fatalf("SaveRepoMeta: %v", err)
+	}
+	meta, err := LoadRepoMeta(path)
+	if err != nil {
+		t.Fatalf("LoadRepoMeta: %v", err)
+	}
+	// The write side and the read side must agree on the key, or the merge
+	// silently does nothing — which is the bug this whole change fixes.
+	out := MergeRepoMeta([]Repo{{Name: "bridge", Path: repoPath}}, []string{root}, meta)
+	if out[0].Desc != "repo navigator" || out[0].DefaultBranch != "main" {
+		t.Errorf("merge did not populate from the written file: %+v", out[0])
+	}
+	if len(out[0].Topics) != 1 || out[0].Topics[0] != "go" {
+		t.Errorf("topics not merged: %+v", out[0].Topics)
+	}
+}
