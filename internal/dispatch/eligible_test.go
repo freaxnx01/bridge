@@ -69,7 +69,7 @@ func TestClosesIssue(t *testing.T) {
 }
 
 func TestEligible(t *testing.T) {
-	base := forge.Issue{Number: 41, Labels: []string{"feat"}, Milestone: "v2 search"}
+	base := forge.Issue{Number: 41, Body: "a real description", Labels: []string{"feat"}, Milestone: "v2 search"}
 
 	cases := []struct {
 		name       string
@@ -81,30 +81,41 @@ func TestEligible(t *testing.T) {
 	}{
 		{"happy path", base, "v2 search", nil, true, ""},
 		{"no active milestone dispatches anyway",
-			forge.Issue{Number: 41, Milestone: ""}, "", nil, true, ""},
+			forge.Issue{Number: 41, Body: "d", Milestone: ""}, "", nil, true, ""},
+		{"empty body",
+			forge.Issue{Number: 41, Body: "", Labels: []string{"feat"}}, "", nil,
+			false, "empty body"},
+		{"whitespace-only body",
+			forge.Issue{Number: 41, Body: "  \n\t ", Labels: []string{"feat"}}, "", nil,
+			false, "empty body"},
+		{"unlabeled capture issue with no body is rejected on the body, not the labels",
+			forge.Issue{Number: 31, Body: ""}, "", nil,
+			false, "empty body"},
 		{"not enriched",
-			forge.Issue{Number: 41, Labels: []string{"needs-enrichment"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d", Labels: []string{"needs-enrichment"}}, "", nil,
 			false, "needs-enrichment"},
 		{"parked",
-			forge.Issue{Number: 41, Labels: []string{"🧊 parked"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d", Labels: []string{"🧊 parked"}}, "", nil,
 			false, "parked"},
 		{"attempt budget spent",
-			forge.Issue{Number: 41, Labels: []string{"attempt:2"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d", Labels: []string{"attempt:2"}}, "", nil,
 			false, "attempts exhausted"},
 		{"has open PR", base, "v2 search",
 			[]forge.PullRequest{{Number: 90, Body: "Closes #41"}},
 			false, "open PR"},
 		{"already dispatched, no open PR",
-			forge.Issue{Number: 41, Labels: []string{"ai-implement"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d", Labels: []string{"ai-implement"}}, "", nil,
 			false, "already dispatched"},
 		{"outside active milestone",
-			forge.Issue{Number: 41, Milestone: "backlog"}, "v2 search", nil,
+			forge.Issue{Number: 41, Body: "d", Milestone: "backlog"}, "v2 search", nil,
 			false, "outside active milestone"},
 	}
 	for _, c := range cases {
-		ok, reason := Eligible(c.issue, c.milestone, c.prs)
-		if ok != c.wantOK || reason != c.wantReason {
-			t.Errorf("%s: got (%v, %q), want (%v, %q)", c.name, ok, reason, c.wantOK, c.wantReason)
-		}
+		t.Run(c.name, func(t *testing.T) {
+			ok, reason := Eligible(c.issue, c.milestone, c.prs)
+			if ok != c.wantOK || reason != c.wantReason {
+				t.Errorf("got (%v, %q), want (%v, %q)", ok, reason, c.wantOK, c.wantReason)
+			}
+		})
 	}
 }
