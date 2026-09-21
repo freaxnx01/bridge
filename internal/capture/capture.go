@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -79,12 +80,16 @@ type IssueCreator interface {
 
 // CaptureIssue creates an issue on the chosen repo's forge and returns the
 // created Issue. body is passed through to the forge as-is.
+//
+// Every captured issue is born carrying needs-enrichment: the dispatcher's
+// "running /enrich is the approval" contract holds only if intake stamps it,
+// and a capture arrives with no labels at all.
 func CaptureIssue(ctx context.Context, w IssueCreator, owner, repo, title, body string) (forge.Issue, error) {
 	title = strings.TrimSpace(title)
 	if title == "" {
 		return forge.Issue{}, fmt.Errorf("empty issue title")
 	}
-	return w.CreateIssue(ctx, owner, repo, title, body, nil)
+	return w.CreateIssue(ctx, owner, repo, title, body, []string{dispatch.LabelNeedsEnrichment})
 }
 
 // slug turns idea text into a filename-safe slug (lowercase, non-alnum -> "-",

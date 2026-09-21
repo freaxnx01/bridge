@@ -7,7 +7,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/capture"
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -174,5 +176,37 @@ func TestCaptureIdea_AmbiguousAlias_Returns409(t *testing.T) {
 	h.ServeHTTP(w, req)
 	if w.Code != http.StatusConflict {
 		t.Fatalf("status = %d", w.Code)
+	}
+}
+
+// fakeIssueCreator is package api's own capture.IssueCreator fake — test
+// helpers don't cross package boundaries.
+type fakeIssueCreator struct {
+	ret       forge.Issue
+	gotLabels []string
+}
+
+func (f *fakeIssueCreator) CreateIssue(_ context.Context, _, _, _, _ string, labels []string) (forge.Issue, error) {
+	f.gotLabels = labels
+	return f.ret, nil
+}
+
+func TestCaptureIssue_HandlerPathCreatesWithNeedsEnrichment(t *testing.T) {
+	fake := &fakeIssueCreator{ret: forge.Issue{Number: 1, URL: "https://forge/issues/1"}}
+	h := &CaptureHandler{
+		Issue: func(ctx context.Context, p IssueParams) (forge.Issue, error) {
+			return capture.CaptureIssue(ctx, fake, "freaxnx01", "bridge", p.Title, p.Body)
+		},
+	}
+	req := httptest.NewRequest(http.MethodPost, "/api/capture/issue",
+		strings.NewReader(`{"alias":"br","title":"Login 500","body":"the detail"}`))
+	w := httptest.NewRecorder()
+	h.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", w.Code, w.Body.String())
+	}
+	if len(fake.gotLabels) != 1 || fake.gotLabels[0] != dispatch.LabelNeedsEnrichment {
+		t.Errorf("labels = %+v, want [%s]", fake.gotLabels, dispatch.LabelNeedsEnrichment)
 	}
 }
