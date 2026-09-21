@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 )
 
@@ -726,5 +727,56 @@ func TestForgejoGetIssue_ZeroCommentsReturnsEmptySliceNotNil(t *testing.T) {
 	}
 	if len(comments) != 0 {
 		t.Fatalf("want 0 comments, got %d", len(comments))
+	}
+}
+
+func TestForgejoCreateIssue_LabelLookupSendsLimitAndPages(t *testing.T) {
+	var limits []string
+	labelCreates := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/api/v1/repos/freax/notes/labels":
+			limits = append(limits, r.URL.Query().Get("limit"))
+			// Page 1 is full and lacks the label; page 2 carries it.
+			if r.URL.Query().Get("page") == "1" {
+				var page []string
+				for i := 0; i < forgejoLabelsPageSize; i++ {
+					page = append(page, fmt.Sprintf(`{"id":%d,"name":"filler-%d"}`, i+100, i))
+				}
+				_, _ = w.Write([]byte("[" + strings.Join(page, ",") + "]"))
+				return
+			}
+			_, _ = w.Write([]byte(`[{"id":11,"name":"needs-enrichment"}]`))
+		case r.Method == "POST" && r.URL.Path == "/api/v1/repos/freax/notes/labels":
+			labelCreates++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":99,"name":"needs-enrichment"}`))
+		case r.Method == "POST" && r.URL.Path == "/api/v1/repos/freax/notes/issues":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":7,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("T", srv.URL)
+	if _, err := c.CreateIssue(context.Background(), "freax", "notes", "t", "", []string{"needs-enrichment"}); err != nil {
+		t.Fatal(err)
+	}
+	// Forgejo's server default page size (commonly 30) is smaller than ours, so
+	// every call needs an explicit limit= — the house rule forgejoCommentsPageSize
+	// documents. Without it, an existing label past the default page is missed
+	// and duplicated, because Forgejo does not enforce label-name uniqueness.
+	if len(limits) == 0 {
+		t.Fatal("no label listing was performed")
+	}
+	for i, l := range limits {
+		if l == "" {
+			t.Errorf("label list call %d carried no limit=", i+1)
+		}
+	}
+	if labelCreates != 0 {
+		t.Errorf("label create calls = %d, want 0 — the label exists on page 2", labelCreates)
 	}
 }

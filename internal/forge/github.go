@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,10 +215,14 @@ func (c *GithubClient) SetTopics(ctx context.Context, owner, repo string, topics
 	return out.Names, nil
 }
 
+// githubLabelsPageSize is the page size requested per call to the repo labels
+// endpoint — GitHub's maximum per_page.
+const githubLabelsPageSize = 100
+
 // ensureLabels makes sure every name exists as a label on owner/repo, creating
 // the ones that don't. Capture targets are not guaranteed to define the labels
-// bridge stamps at intake, and GitHub rejects a create request carrying an
-// undefined label.
+// bridge stamps at intake, so without this a capture into a fresh repo can fail
+// on an undefined label.
 //
 // It lists and matches rather than probing GET /labels/{name}: the get helper
 // collapses every status >= 400 into one error, so a probe cannot tell an
@@ -226,18 +231,28 @@ func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, nam
 	if len(names) == 0 {
 		return nil
 	}
-	var existing []struct {
-		Name string `json:"name"`
+	basePath := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+
+	// Page the listing: a repo carrying the agent-workflow label set plus
+	// GitHub's defaults plus per-area labels can run past one page, and a label
+	// missed there is one this function then tries to create.
+	have := make(map[string]bool)
+	for page := 1; page <= maxLabelPages; page++ {
+		var existing []struct {
+			Name string `json:"name"`
+		}
+		path := fmt.Sprintf("%s?per_page=%d&page=%d", basePath, githubLabelsPageSize, page)
+		if err := c.get(ctx, path, &existing); err != nil {
+			return fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
+		}
+		for _, l := range existing {
+			have[l.Name] = true
+		}
+		if len(existing) < githubLabelsPageSize {
+			break
+		}
 	}
-	path := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels?per_page=100"
-	if err := c.get(ctx, path, &existing); err != nil {
-		return fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
-	}
-	have := make(map[string]bool, len(existing))
-	for _, l := range existing {
-		have[l.Name] = true
-	}
-	createPath := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+
 	for _, name := range names {
 		if have[name] {
 			continue
@@ -245,7 +260,15 @@ func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, nam
 		var created struct {
 			Name string `json:"name"`
 		}
-		if err := c.post(ctx, createPath, map[string]any{"name": name, "color": "ededed"}, &created); err != nil {
+		if err := c.post(ctx, basePath, map[string]any{"name": name, "color": "ededed"}, &created); err != nil {
+			// GitHub answers 422 already_exists when the label is already
+			// defined, and the shared post helper maps every 422 to
+			// ErrRepoExists. That is precisely the state this function wants,
+			// so it is success — not a failed capture reporting, misleadingly,
+			// that the repository already exists.
+			if errors.Is(err, ErrRepoExists) {
+				continue
+			}
 			return fmt.Errorf("create label %q on %s/%s: %w", name, owner, repo, err)
 		}
 	}
