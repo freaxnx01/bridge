@@ -70,6 +70,21 @@ total at all, not merely exempt from the check. `global_open_prs: 3` then means
 what the original spec says it means: three PRs awaiting the operator. A busy
 auto lane can never consume the hitl lane's slots.
 
+### The window gate stays `--auto`-only
+
+Lane windows decide whether a lane acts on a **timer** tick. They do not gate a
+manual `bridge dispatch now`, which was never window-gated and must stay that
+way: a schedule with a deliberate gap is a documented configuration, and
+partitioning a manual tick by lane window turns it into a tick that dispatches
+nothing at all.
+
+The `--auto` gate is also answered **before any network call** — from the
+config and the clock alone — so an out-of-window tick stays the free no-op it
+was before lanes, rather than 48 full repo sweeps a day.
+
+*(Added 2026-09-21: the original spec left this implicit, and the plan's Task 7
+consequently partitioned unconditionally. Caught in review of PR #309.)*
+
 ### Windows, and where the budget rung lives
 
 A lane's `windows` reuse the schedule's `{from, to}` spans, inheriting
@@ -134,11 +149,23 @@ timer tick — lane resolution, the `agent.yml` gate, ordering, every cap, the
 budget — and reports every decision. It applies no labels, books no ledger run,
 and advances no counter.
 
-One rule makes this safe: **a dry-run lane observes the shared counters but
+One rule makes this safe: **a dry-run lane observes the *shared* counters but
 never consumes them.** Its decisions are computed against the current budget
-spend, global count and per-repo counts, but do not mutate them. Without this,
-a dry-run auto lane would book hypothetical spend against the shared quota and
-block real hitl dispatch — the observation would change what it observes.
+spend and global count without mutating either. Without this, a dry-run auto
+lane would book hypothetical spend against the shared quota and block real hitl
+dispatch — the observation would change what it observes.
+
+The counters that are **private to one lane** are the other half of that rule,
+and a dry-run lane does advance and persist them: its own `max_dispatches`
+counter, and its per-repo count. Every repo resolves to exactly one lane, so
+neither can reach a live lane, and suppressing them would make the preview
+*overstate* what the live lane would do — three candidates in one repo all
+reporting "WOULD dispatch" under `per_repo: 1`, and a persisted counter stuck
+at zero while a half-hourly timer replays a full lane's worth of decisions 48
+times a day. An observation week that overstates is worse than none.
+
+*(Amended 2026-09-21 after review of PR #309, which implemented the original
+wording faithfully and surfaced both consequences.)*
 
 Enabling the lane after the week is deleting one word, and the week's output was
 produced by the same code path that then acts.

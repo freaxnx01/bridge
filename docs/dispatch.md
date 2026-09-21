@@ -20,7 +20,7 @@ Each tick, dispatch reads open issues from every GitHub repo, applies eligibilit
 - `from > to` wraps past midnight (e.g. `18:00`–`07:00` covers the overnight span).
 - `budget_rung` turns the usage-budget rung on for ticks that fall in that window.
 
-`--auto` (the systemd entry point) fetches candidates, resolves each one's lane, and returns without applying anything when no candidate's lane is in window at the current time. An explicit `bridge dispatch now` is the operator asking for a tick and is never window-gated, mirroring how `now` already ignores the pause flag.
+`--auto` (the systemd entry point) checks the configured lanes against the clock *before* fetching anything, and returns immediately when no lane — including the implicit default lane — is in window. An explicit `bridge dispatch now` is the operator asking for a tick and is never window-gated, mirroring how `now` already ignores the pause flag: its candidates are never partitioned by lane window at all.
 
 ## Usage-budget rung
 
@@ -49,7 +49,7 @@ Outside both — genuinely deep in the night, or in a schedule gap — the rung 
 
 The defaults tile the whole day, so none of these arise unless you hand-write `schedule.windows`. All four are consequences of the rules above rather than bugs, but they are easy to trip:
 
-- **A gap outside any shoulder has *neither* bound** — but only for a manual tick. The rung is off (nothing to guard within reach) and the nightly cap is off (no covering window), so a `bridge dispatch now` there is limited only by the global and per-repo WIP caps. An `--auto` tick never gets that far: it returns with "outside dispatch window" before any cap is consulted. So the exposure is a hand-run command in a gap, not the timer.
+- **A gap outside any shoulder has *neither* bound** — but only for a manual tick. The rung is off (nothing to guard within reach) and the nightly cap is off (no covering window), so a `bridge dispatch now` there is limited only by the global and per-repo WIP caps. An `--auto` tick never gets that far: it returns with "outside dispatch window" before any repo is fetched, let alone any cap consulted. So the exposure is a hand-run command in a gap, not the timer.
 - **`from == to` covers the whole day**, not zero minutes. `{"from":"07:00","to":"07:00"}` is an always-on window — the opposite of what the `[from, to)` rule suggests at a glance.
 - **Splitting the night into two `budget_rung: false` windows doubles the nightly cap.** The counter resets at each window occurrence's own start, so `18:00`–`22:00` plus `22:00`–`07:00` gives `max_dispatches_per_night` twice per night, once per window.
 - **Window order matters when windows overlap.** `InWindow` takes the *first* match, so listing a non-rung window ahead of an overlapping rung window makes the rung window unreachable — and `RungGuard` then rolls forward to the next day's start, leaving the rung off for hours.
@@ -133,7 +133,7 @@ A repo matched by an `autonomous` lane must also carry `ai-review-ai-merge: true
 
 ### `dry_run`: observe without consuming
 
-A `dry_run` lane runs through eligibility, ordering, and every cap exactly as a live lane would, and its decisions appear in `--dry-run`/`--json` output — but it applies nothing: no label, no comment, no ledger spend. It still advances its own lane counter (so `limits.max_dispatches` behaves identically to a live run), but it never touches the counters other lanes share — not the per-repo count, not the global count, not the nightly count, not the budget. This is what lets the auto lane run a full observation week without throttling the very dispatches it exists to observe.
+A `dry_run` lane runs through eligibility, ordering, and every cap exactly as a live lane would, and its decisions appear in `--dry-run`/`--json` output — but it applies nothing: no label, no comment, no ledger spend. It still advances — and persists — the counters that are private to one lane, so they bound the preview exactly as they will bound the live run: its own `limits.max_dispatches` counter, and the per-repo count that makes `per_repo: 1` mean "no racing merges" in the preview too. What it never touches is the state other lanes share: not the global count, not the nightly count, not the budget. This is what lets the auto lane run a full observation week without throttling the very dispatches it exists to observe.
 
 The auto lane ships with `dry_run: true` by default. Flipping it to `false` is a one-word edit to `dispatch.json` — no code change, no redeploy — and should only happen after a week of reviewed `--dry-run` output confirms the lane assignments and caps look right.
 
@@ -146,7 +146,7 @@ With the config above, a `--dry-run` tick might render:
   game-huusli-jagd #7    feat: leaderboard sync        hitl   → SKIP (auto→hitl: agent.yml lacks ai-review-ai-merge: true; repo at WIP 1/1)
   bridge           #304  feat(dispatch): autonomy lanes default → dispatch
 
-3 dispatched, 0 skipped
+2 dispatched, 1 skipped
 ```
 
 `game-tschau-sepp` matches the `auto` lane and passes the gate, so it would dispatch under `ai-implement` + `ai-review-ai-merge` — but `dry_run` means nothing is actually applied. `game-huusli-jagd` matches `auto` too but its `agent.yml` doesn't opt in, so it's downgraded to `hitl` and then skipped there on an unrelated cap; the downgrade reason is shown alongside the skip reason. `bridge` matches no configured lane, so it falls back to the implicit default lane.

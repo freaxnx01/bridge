@@ -910,3 +910,99 @@ func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
 		t.Error("LastTick must advance even though the ledger write failed")
 	}
 }
+
+// The window gate is --auto only. `bridge dispatch now` is the operator asking
+// for a tick, and before lanes it ran regardless of the schedule; a schedule
+// with a gap (documented in docs/dispatch.md) must keep behaving that way.
+func TestPartitionForTickManualTickIsNeverWindowGated(t *testing.T) {
+	cfg := dispatch.DefaultConfig()
+	cfg.Schedule = dispatch.Schedule{Windows: []dispatch.Window{
+		{Span: dispatch.Span{From: "03:00", To: "03:01"}},
+	}}
+	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local) // outside that window
+	cands := []dispatch.Candidate{{Repo: "bridge", Lane: dispatch.DefaultLane()}}
+
+	acting, skipped := partitionForTick(cands, cfg, now, false)
+	if len(acting) != 1 || len(skipped) != 0 {
+		t.Errorf("manual tick must consider every candidate: acting=%d skipped=%+v", len(acting), skipped)
+	}
+
+	acting, skipped = partitionForTick(cands, cfg, now, true)
+	if len(acting) != 0 || len(skipped) != 1 {
+		t.Errorf("--auto must honour the window: acting=%d skipped=%d", len(acting), len(skipped))
+	}
+}
+
+func TestAnyLaneActs(t *testing.T) {
+	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local)
+	gap := dispatch.Schedule{Windows: []dispatch.Window{{Span: dispatch.Span{From: "03:00", To: "03:01"}}}}
+
+	tests := []struct {
+		name string
+		cfg  dispatch.Config
+		want bool
+	}{
+		{"no lanes, schedule covers now", dispatch.Config{Schedule: dispatch.DefaultConfig().Schedule}, true},
+		{"no lanes, schedule gap", dispatch.Config{Schedule: gap}, false},
+		{"a 24h lane acts even in a schedule gap", dispatch.Config{
+			Schedule: gap,
+			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "00:00", To: "00:00"}}}},
+		}, true},
+		{"lanes all asleep, and the default lane is in a gap", dispatch.Config{
+			Schedule: gap,
+			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "22:00", To: "23:00"}}}},
+		}, false},
+		{"lanes asleep but the default lane's schedule covers now", dispatch.Config{
+			Schedule: dispatch.DefaultConfig().Schedule,
+			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "22:00", To: "23:00"}}}},
+		}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := anyLaneActs(tc.cfg, now); got != tc.want {
+				t.Errorf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A dry-run lane applies no labels, but its own counter has to persist across
+// ticks — otherwise a half-hourly timer reports the same max_dispatches worth
+// of "WOULD dispatch" decisions 48 times a day and `status` shows 0 spent.
+func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cfg := dispatch.DefaultConfig()
+	lane := dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true,
+		Windows: []dispatch.Span{{From: "00:00", To: "00:00"}}}
+	cfg.Lanes = []dispatch.Lane{lane}
+
+	now := time.Now()
+	timing := tickTiming{Now: now}
+	ds := []dispatch.Decision{
+		{Candidate: dispatch.Candidate{Owner: "freaxnx01", Repo: "game-a",
+			Issue: forge.Issue{Number: 1}, Lane: lane}, Dispatch: true},
+		{Candidate: dispatch.Candidate{Owner: "freaxnx01", Repo: "game-b",
+			Issue: forge.Issue{Number: 2}, Lane: lane}, Dispatch: true},
+	}
+
+	if err := applyDecisions(context.Background(), ds, dispatch.State{}, timing, cfg); err != nil {
+		t.Fatalf("applyDecisions: %v", err)
+	}
+
+	state, err := dispatch.ReadState(dispatchStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.DispatchesInLane("auto", lane.WindowStart(cfg.Schedule, now)); got != 2 {
+		t.Errorf("dry-run lane counter: got %d want 2", got)
+	}
+
+	// Nothing may have been booked as real spend.
+	ledger, err := usage.LoadLedger(dispatchLedgerPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Runs) != 0 {
+		t.Errorf("a dry-run lane must book no runs: %+v", ledger.Runs)
+	}
+}

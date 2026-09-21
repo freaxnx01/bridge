@@ -57,6 +57,12 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 	for k, v := range counts.DispatchedByLane {
 		byLane[k] = v
 	}
+	// dryRepo is a dry-run lane's hypothetical per-repo dispatches, kept apart
+	// from perRepo so it bounds only its own lane's preview. Without it the
+	// preview shows N candidates in one repo all dispatching, when the live
+	// lane would stop at per_repo — overstating exactly what the observation
+	// week exists to check.
+	dryRepo := make(map[string]int)
 	global := counts.GlobalOpen
 	night := counts.DispatchedTonight
 	spent := budget.UsedUSD
@@ -66,6 +72,12 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 		lane := c.Lane
 		limit := effectiveRepoLimit(cfg, lane, c.Repo)
 		laneCap := lane.Limits.MaxDispatches
+		// A dry-run lane measures itself against the real count plus its own
+		// hypothetical one; a live lane never sees the hypotheticals.
+		inFlight := perRepo[c.Repo]
+		if lane.DryRun {
+			inFlight += dryRepo[c.Repo]
+		}
 		switch {
 		case budget.Enabled && budget.Unknown:
 			out = append(out, Decision{c, false, "budget-unknown"})
@@ -81,16 +93,21 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 		case !lane.Autonomous && global >= cfg.Limits.GlobalOpenPRs:
 			out = append(out, Decision{c, false,
 				fmt.Sprintf("global cap %d/%d", global, cfg.Limits.GlobalOpenPRs)})
-		case perRepo[c.Repo] >= limit:
+		case inFlight >= limit:
 			out = append(out, Decision{c, false,
-				fmt.Sprintf("repo at WIP %d/%d", perRepo[c.Repo], limit)})
+				fmt.Sprintf("repo at WIP %d/%d", inFlight, limit)})
 		default:
-			// The lane's own counter is private to it, so a dry-run lane still
-			// advances it and still hits its own ceiling. Everything else here
-			// is shared, and a dry-run lane must leave it exactly as it found
-			// it — it dispatches nothing, so it costs nothing.
+			// The lane counter and the per-repo count are private to one lane —
+			// every repo resolves to exactly one lane — so a dry-run lane
+			// advances both and hits both bounds, which is what makes its
+			// preview match what the live lane would do. The genuinely shared
+			// state (budget spend, the global count, the nightly counter) it
+			// must leave exactly as it found it: it dispatches nothing, so it
+			// costs nothing.
 			byLane[lane.Name]++
-			if !lane.DryRun {
+			if lane.DryRun {
+				dryRepo[c.Repo]++
+			} else {
 				perRepo[c.Repo]++
 				spent += budget.PerRunUSD
 				if !lane.Autonomous {

@@ -17,7 +17,8 @@
 - **Purity.** Everything in `internal/dispatch` stays a pure function over plain structs — no clock, no network, no filesystem. `time.Time` is always a parameter. Fetching and caching live in `cmd/bridge`.
 - **Fail closed toward human review.** A missing `agent.yml`, a non-matching one, or a failed fetch all downgrade the repo to a non-autonomous lane. Never the other way.
 - **The budget rung stays global.** Lane windows are `{from, to}` only. Do not add `budget_rung` to a lane window; the rung is computed from the top-level schedule as `resolveTiming` already does.
-- **A dry-run lane observes shared counters but never consumes them** — not budget spend, not the global count, not the per-repo count. Only its own lane counter advances.
+- **A dry-run lane observes the *shared* counters but never consumes them** — not budget spend, not the global count, not the nightly count. The counters private to one lane — its own `max_dispatches` counter and its per-repo count — it does advance, and its lane counter persists across ticks, so the preview bounds match what the live lane would do. *(Corrected 2026-09-21 after PR #309's review; the original wording suppressed the per-repo count too, which made the preview overstate same-repo dispatches.)*
+- **The window gate is `--auto`-only, and is answered before any network call.** A manual `bridge dispatch now` is never partitioned by lane window. *(Corrected 2026-09-21: Task 7 below originally partitioned unconditionally, which broke `dispatch now` for any schedule with a gap.)*
 - Exact label strings: `ai-implement`, `ai-review-ai-merge`.
 - Required green after every task: `gofmt -l .` empty, `go vet ./...`, `golangci-lint run`, `go test -race ./...`.
 
@@ -917,6 +918,9 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 	for k, v := range counts.DispatchedByLane {
 		byLane[k] = v
 	}
+	// dryRepo is a dry-run lane's hypothetical per-repo dispatches, kept apart
+	// from perRepo so it bounds only its own lane's preview.
+	dryRepo := make(map[string]int)
 	global := counts.GlobalOpen
 	night := counts.DispatchedTonight
 	spent := budget.UsedUSD
@@ -926,6 +930,12 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 		lane := c.Lane
 		limit := effectiveRepoLimit(cfg, lane, c.Repo)
 		laneCap := lane.Limits.MaxDispatches
+		// A dry-run lane measures itself against the real count plus its own
+		// hypothetical one; a live lane never sees the hypotheticals.
+		inFlight := perRepo[c.Repo]
+		if lane.DryRun {
+			inFlight += dryRepo[c.Repo]
+		}
 		switch {
 		case budget.Enabled && budget.Unknown:
 			out = append(out, Decision{c, false, "budget-unknown"})
@@ -941,16 +951,21 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 		case !lane.Autonomous && global >= cfg.Limits.GlobalOpenPRs:
 			out = append(out, Decision{c, false,
 				fmt.Sprintf("global cap %d/%d", global, cfg.Limits.GlobalOpenPRs)})
-		case perRepo[c.Repo] >= limit:
+		case inFlight >= limit:
 			out = append(out, Decision{c, false,
-				fmt.Sprintf("repo at WIP %d/%d", perRepo[c.Repo], limit)})
+				fmt.Sprintf("repo at WIP %d/%d", inFlight, limit)})
 		default:
-			// The lane's own counter is private to it, so a dry-run lane still
-			// advances it and still hits its own ceiling. Everything else here
-			// is shared, and a dry-run lane must leave it exactly as it found
-			// it — it dispatches nothing, so it costs nothing.
+			// The lane counter and the per-repo count are private to one lane —
+			// every repo resolves to exactly one lane — so a dry-run lane
+			// advances both and hits both bounds, which is what makes its
+			// preview match what the live lane would do. The genuinely shared
+			// state (budget spend, the global count, the nightly counter) it
+			// must leave exactly as it found it: it dispatches nothing, so it
+			// costs nothing.
 			byLane[lane.Name]++
-			if !lane.DryRun {
+			if lane.DryRun {
+				dryRepo[c.Repo]++
+			} else {
 				perRepo[c.Repo]++
 				spent += budget.PerRunUSD
 				if !lane.Autonomous {
@@ -1019,7 +1034,7 @@ git commit -m "feat(dispatch): apply caps per lane"
 
 **Interfaces:**
 - Consumes: `dispatch.GateState`, `dispatch.AnyAutonomousLaneMatches` (Task 3); `forge.GithubClient.GetFile(ctx, owner, repo, path) ([]byte, string, bool, error)`; `cacheRoot()`; `store.AtomicWrite`.
-- Produces: `func agentYAMLOptsIntoAIMerge(b []byte) bool`; `type laneGateCache struct{ Repos map[string]laneGateEntry }`; `func (c laneGateCache) fresh(repo string, now time.Time) (bool, bool)`; `func loadLaneGateCache(path string) laneGateCache`; `func saveLaneGateCache(path string, c laneGateCache) error`; `func resolveGate(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, now time.Time) dispatch.GateState`.
+- Produces: `type laneGateFetcher func(ctx, owner, repo) ([]byte, bool, error)` and `func resolveGateWith(ctx, repos, lanes, now, fetch laneGateFetcher, cachePath string) dispatch.GateState`, with `resolveGate` a thin wrapper binding the real fetcher and `laneGatePath()` — the seam is what makes every fail-closed path testable without a network, and a failed fetch must **not** write a cache entry; `func agentYAMLOptsIntoAIMerge(b []byte) bool`; `type laneGateCache struct{ Repos map[string]laneGateEntry }`; `func (c laneGateCache) fresh(repo string, now time.Time) (bool, bool)`; `func loadLaneGateCache(path string) laneGateCache`; `func saveLaneGateCache(path string, c laneGateCache) error`; `func resolveGate(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, now time.Time) dispatch.GateState`.
 
 - [ ] **Step 1: Write the failing test**
 
@@ -1327,6 +1342,66 @@ func assignLanes(cs []dispatch.Candidate, lanes []dispatch.Lane, gate dispatch.G
 		cs[i].Lane, cs[i].LaneReason = dispatch.ResolveLane(lanes, cs[i].Repo, gate)
 	}
 }
+
+// anyLaneActs reports whether any lane acts at now. The implicit default lane
+// is always considered: a repo no configured lane claims still dispatches in
+// it, on the top-level schedule.
+func anyLaneActs(cfg dispatch.Config, now time.Time) bool {
+	if dispatch.DefaultLane().InWindow(cfg.Schedule, now) {
+		return true
+	}
+	for _, l := range cfg.Lanes {
+		if l.InWindow(cfg.Schedule, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// partitionForTick splits candidates into those whose lane acts now and skip
+// decisions for the rest. A manual tick skips the split entirely: `dispatch
+// now` was never window-gated, and partitioning it would turn a documented
+// schedule gap into a tick that dispatches nothing.
+func partitionForTick(ordered []dispatch.Candidate, cfg dispatch.Config, now time.Time, auto bool) ([]dispatch.Candidate, []dispatch.Decision) {
+	if !auto {
+		return ordered, nil
+	}
+	return dispatch.PartitionByWindow(ordered, cfg.Schedule, now)
+}
+
+// mergeInOrder puts the decision groups back into the order Order produced.
+// ApplyCaps only ever sees the acting candidates, so appending the
+// out-of-window skips afterwards would render --dry-run — the review surface —
+// out of ladder order.
+func mergeInOrder(ordered []dispatch.Candidate, groups ...[]dispatch.Decision) []dispatch.Decision {
+	type key struct {
+		repo   string
+		number int
+	}
+	byKey := make(map[key]dispatch.Decision)
+	for _, g := range groups {
+		for _, d := range g {
+			byKey[key{d.Candidate.Repo, d.Candidate.Issue.Number}] = d
+		}
+	}
+	out := make([]dispatch.Decision, 0, len(byKey))
+	for _, c := range ordered {
+		if d, ok := byKey[key{c.Repo, c.Issue.Number}]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+```
+
+The `--auto` gate runs **before** `fetchRepoInputs`, from the config and the
+clock alone:
+
+```go
+	if dispatchAuto && !anyLaneActs(cfg, now) {
+		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
+		return nil
+	}
 ```
 
 Change `countOpenAgentPRs` to take the predicate and skip autonomous repos in the global total only:
@@ -1372,16 +1447,8 @@ Replace the block in `runDispatch` from the `ctx := context.Background()` line d
 	gate := resolveGate(ctx, repos, cfg.Lanes, now)
 	candidates := collectCandidates(repos)
 	assignLanes(candidates, cfg.Lanes, gate)
-	acting, outOfWindow := dispatch.PartitionByWindow(
-		dispatch.Order(candidates, cfg.RepoPriority), cfg.Schedule, now)
-
-	// The window gate is --auto only, as before: an explicit `dispatch now` is
-	// the operator asking for a tick. With lanes the question is per lane, so
-	// the tick stops only when no lane acts at all.
-	if dispatchAuto && len(acting) == 0 {
-		fmt.Fprintln(cmd.OutOrStdout(), "outside every lane's dispatch window — nothing to do")
-		return nil
-	}
+	ordered := dispatch.Order(candidates, cfg.RepoPriority)
+	acting, outOfWindow := partitionForTick(ordered, cfg, now, dispatchAuto)
 
 	// The rung is keyed on what it guards, not on --auto: a manual tick burns
 	// the same quota, and a pre-dawn tick burns the window the operator will
@@ -1408,7 +1475,7 @@ Replace the block in `runDispatch` from the `ctx := context.Background()` line d
 		},
 		budget,
 	)
-	decisions = append(decisions, outOfWindow...)
+	decisions = mergeInOrder(ordered, decisions, outOfWindow)
 ```
 
 Delete the now-superseded early return `if dispatchAuto && !timing.InWindow { ... }` above — lane windows subsume it, and the default lane inherits `schedule.windows`, so behaviour without lanes is unchanged.
@@ -1440,8 +1507,11 @@ In `applyDecisions`, replace the loop body's label call and add the dry-run skip
 		}
 		lane := d.Candidate.Lane
 		if lane.DryRun {
-			// The lane is being observed, not run. It applies nothing, books no
-			// spend, and advances no counter — see the spec's dry_run section.
+			// The lane is being observed, not run: it applies no label and
+			// books no spend. Its own counter still advances and still
+			// persists, so `max_dispatches` bounds the observation week the
+			// way it will bound the live lane.
+			laneDispatched[lane.Name]++
 			continue
 		}
 		gh, ok := clientFor("github").(*forge.GithubClient)

@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"path/filepath"
 	"regexp"
@@ -80,8 +81,31 @@ func saveLaneGateCache(path string, c laneGateCache) error {
 // Every failure path answers false: an unreadable policy must route work to a
 // human, never into unattended merge.
 func resolveGate(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, now time.Time) dispatch.GateState {
+	return resolveGateWith(ctx, repos, lanes, now, fetchAgentWorkflow, laneGatePath())
+}
+
+// laneGateFetcher reads one repo's agent.yml. It is injected so every
+// fail-closed path in resolveGateWith can be driven in a test without a
+// network — the guarantee those paths carry is the whole point of the gate.
+type laneGateFetcher func(ctx context.Context, owner, repo string) (content []byte, found bool, err error)
+
+// fetchAgentWorkflow is the real fetcher. An unresolvable client is an error
+// rather than "not found": both fall back to human review, but only one of
+// them should ever be cached.
+func fetchAgentWorkflow(ctx context.Context, owner, repo string) ([]byte, bool, error) {
+	gh, ok := clientFor("github").(*forge.GithubClient)
+	if !ok || gh == nil {
+		return nil, false, errors.New("no GitHub client available")
+	}
+	content, _, found, err := gh.GetFile(ctx, owner, repo, agentWorkflowPath)
+	return content, found, err
+}
+
+// resolveGateWith is resolveGate with its fetcher and cache path injected.
+func resolveGateWith(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, now time.Time,
+	fetch laneGateFetcher, cachePath string) dispatch.GateState {
 	gate := dispatch.GateState{}
-	cache := loadLaneGateCache(laneGatePath())
+	cache := loadLaneGateCache(cachePath)
 	changed := false
 
 	for _, r := range repos {
@@ -92,13 +116,10 @@ func resolveGate(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, 
 			gate[r.Name] = v
 			continue
 		}
-		gh, ok := clientFor("github").(*forge.GithubClient)
-		if !ok || gh == nil {
-			gate[r.Name] = false
-			continue
-		}
-		content, _, found, err := gh.GetFile(ctx, r.Owner, r.Name, agentWorkflowPath)
+		content, found, err := fetch(ctx, r.Owner, r.Name)
 		if err != nil {
+			// Deliberately not cached: one failed request must not pin a repo
+			// out of its lane for the whole TTL.
 			slog.Warn("dispatch: cannot read agent.yml — repo falls back to human review",
 				"repo", r.Name, "error", err)
 			gate[r.Name] = false
@@ -111,7 +132,7 @@ func resolveGate(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, 
 	}
 
 	if changed {
-		if err := saveLaneGateCache(laneGatePath(), cache); err != nil {
+		if err := saveLaneGateCache(cachePath, cache); err != nil {
 			// A cache that will not persist costs one fetch per tick, nothing more.
 			slog.Warn("dispatch: cannot write the lane gate cache", "error", err)
 		}
