@@ -26,9 +26,9 @@
 ### Task 1: `Eligible()` rejects an empty body
 
 **Files:**
-- Modify: `internal/dispatch/eligible.go:89-109` (the `Eligible` function)
-- Test: `internal/dispatch/eligible_test.go:72-110` (the `TestEligible` table)
-- Test: `cmd/bridge/dispatch_test.go:51-68` (`TestCollectCandidatesSkipsNonGithubAndIneligible`)
+- Modify: `internal/dispatch/eligible.go:90-110` (the `Eligible` function)
+- Test: `internal/dispatch/eligible_test.go:71-110` (the `TestEligible` table)
+- Test: `cmd/bridge/dispatch_test.go:53-70` (`TestCollectCandidatesSkipsNonGithubAndIneligible`)
 
 **Interfaces:**
 - Consumes: nothing from earlier tasks.
