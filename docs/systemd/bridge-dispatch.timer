@@ -1,8 +1,8 @@
 [Unit]
-Description=bridge dispatch — hourly heartbeat; the dispatch windows live in dispatch.json
+Description=bridge dispatch — half-hourly heartbeat; the dispatch windows live in dispatch.json
 
 [Timer]
-OnCalendar=*-*-* *:00:00
+OnCalendar=*-*-* *:00,30:00
 Persistent=false
 
 [Install]
