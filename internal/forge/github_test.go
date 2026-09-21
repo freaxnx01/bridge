@@ -674,6 +674,8 @@ func TestGithubCreateRepoExists(t *testing.T) {
 func TestGithubCreateIssue(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Fataling on anything but the create POST is also the assertion that
+		// nil labels skip the label lookup entirely.
 		if r.Method != "POST" || r.URL.Path != "/repos/freaxnx01/bridge/issues" {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -684,9 +686,12 @@ func TestGithubCreateIssue(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "")
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", nil)
 	if err != nil {
 		t.Fatal(err)
+	}
+	if _, ok := gotBody["labels"]; ok {
+		t.Errorf("no labels requested, but the create POST carried %+v", gotBody["labels"])
 	}
 	if gotBody["title"] != "flicker" || gotBody["body"] != "" {
 		t.Errorf("body sent: %+v", gotBody)
@@ -697,6 +702,79 @@ func TestGithubCreateIssue(t *testing.T) {
 	}
 	if is.Updated.IsZero() {
 		t.Fatalf("is.Updated is zero, want populated from response")
+	}
+}
+
+func TestGithubCreateIssue_PassesLabelsAndEnsuresTheyExist(t *testing.T) {
+	var gotIssueBody map[string]any
+	var createdLabel map[string]any
+	labelListCalls := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			labelListCalls++
+			_, _ = w.Write([]byte(`[{"name":"bug"}]`)) // needs-enrichment absent
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			_ = json.NewDecoder(r.Body).Decode(&createdLabel)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"name":"needs-enrichment"}`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			_ = json.NewDecoder(r.Body).Decode(&gotIssueBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":142,"title":"flicker","html_url":"https://github.com/freaxnx01/bridge/issues/142","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", []string{"needs-enrichment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if labelListCalls != 1 {
+		t.Errorf("label list calls = %d, want 1", labelListCalls)
+	}
+	if createdLabel["name"] != "needs-enrichment" {
+		t.Errorf("missing label was not created: %+v", createdLabel)
+	}
+	// The label must ride along on the create POST — a follow-up AddLabels call
+	// would leave a window in which the issue is live and unlabeled.
+	labels, _ := gotIssueBody["labels"].([]any)
+	if len(labels) != 1 || labels[0] != "needs-enrichment" {
+		t.Errorf("labels sent on create: %+v", gotIssueBody["labels"])
+	}
+	if is.Number != 142 || is.URL != "https://github.com/freaxnx01/bridge/issues/142" {
+		t.Errorf("issue: %+v", is)
+	}
+}
+
+func TestGithubCreateIssue_ExistingLabelIsNotRecreated(t *testing.T) {
+	labelCreates := 0
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			_, _ = w.Write([]byte(`[{"name":"needs-enrichment"},{"name":"bug"}]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/labels":
+			labelCreates++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"name":"needs-enrichment"}`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":1,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewGithubClient("T", srv.URL)
+	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}); err != nil {
+		t.Fatal(err)
+	}
+	if labelCreates != 0 {
+		t.Errorf("label create calls = %d, want 0 when the label already exists", labelCreates)
 	}
 }
 

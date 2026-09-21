@@ -129,6 +129,8 @@ func TestForgejoCreateRepoConflict(t *testing.T) {
 func TestForgejoCreateIssue(t *testing.T) {
 	var gotBody map[string]any
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Fataling on anything but the create POST is also the assertion that
+		// nil labels skip the label lookup entirely.
 		if r.Method != "POST" || r.URL.Path != "/api/v1/repos/freax/notes/issues" {
 			t.Fatalf("unexpected %s %s", r.Method, r.URL.Path)
 		}
@@ -139,18 +141,95 @@ func TestForgejoCreateIssue(t *testing.T) {
 	defer srv.Close()
 
 	c := NewForgejoClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "")
+	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "", nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if gotBody["title"] != "rough idea" {
 		t.Errorf("body sent: %+v", gotBody)
 	}
+	if _, ok := gotBody["labels"]; ok {
+		t.Errorf("no labels requested, but the create POST carried %+v", gotBody["labels"])
+	}
 	if is.Forge != "forgejo" || is.Repo != "freax/notes" || is.Number != 7 || is.URL != "https://fj.example/freax/notes/issues/7" {
 		t.Errorf("issue: %+v", is)
 	}
 	if is.Updated.IsZero() {
 		t.Fatalf("is.Updated is zero, want populated from response")
+	}
+}
+
+func TestForgejoCreateIssue_SendsLabelIDsAndCreatesMissingLabel(t *testing.T) {
+	var gotIssueBody map[string]any
+	var createdLabel map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/api/v1/repos/freax/notes/labels":
+			_, _ = w.Write([]byte(`[{"id":3,"name":"bug"}]`)) // needs-enrichment absent
+		case r.Method == "POST" && r.URL.Path == "/api/v1/repos/freax/notes/labels":
+			_ = json.NewDecoder(r.Body).Decode(&createdLabel)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":11,"name":"needs-enrichment"}`))
+		case r.Method == "POST" && r.URL.Path == "/api/v1/repos/freax/notes/issues":
+			_ = json.NewDecoder(r.Body).Decode(&gotIssueBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":7,"title":"rough idea","html_url":"https://fj.example/freax/notes/issues/7","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("T", srv.URL)
+	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "", []string{"needs-enrichment"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if createdLabel["name"] != "needs-enrichment" {
+		t.Errorf("missing label was not created: %+v", createdLabel)
+	}
+	// Forgejo/Gitea's CreateIssueOption.labels is a list of label *ids*, not
+	// names, so the resolved id is what must go over the wire.
+	labels, _ := gotIssueBody["labels"].([]any)
+	if len(labels) != 1 || labels[0] != float64(11) {
+		t.Errorf("labels sent on create = %+v, want [11]", gotIssueBody["labels"])
+	}
+	if is.Number != 7 {
+		t.Errorf("issue: %+v", is)
+	}
+}
+
+func TestForgejoCreateIssue_ExistingLabelIsNotRecreated(t *testing.T) {
+	labelCreates := 0
+	var gotIssueBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/api/v1/repos/freax/notes/labels":
+			_, _ = w.Write([]byte(`[{"id":3,"name":"bug"},{"id":9,"name":"needs-enrichment"}]`))
+		case r.Method == "POST" && r.URL.Path == "/api/v1/repos/freax/notes/labels":
+			labelCreates++
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"id":11,"name":"needs-enrichment"}`))
+		case r.Method == "POST" && r.URL.Path == "/api/v1/repos/freax/notes/issues":
+			_ = json.NewDecoder(r.Body).Decode(&gotIssueBody)
+			w.WriteHeader(http.StatusCreated)
+			_, _ = w.Write([]byte(`{"number":7,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+		default:
+			t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	c := NewForgejoClient("T", srv.URL)
+	if _, err := c.CreateIssue(context.Background(), "freax", "notes", "t", "", []string{"needs-enrichment"}); err != nil {
+		t.Fatal(err)
+	}
+	if labelCreates != 0 {
+		t.Errorf("label create calls = %d, want 0 when the label already exists", labelCreates)
+	}
+	labels, _ := gotIssueBody["labels"].([]any)
+	if len(labels) != 1 || labels[0] != float64(9) {
+		t.Errorf("labels sent on create = %+v, want the existing label's id [9]", gotIssueBody["labels"])
 	}
 }
 

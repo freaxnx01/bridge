@@ -55,7 +55,7 @@ type searchCoder interface {
 
 // issueCreator is asserted by create_issue.
 type issueCreator interface {
-	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
+	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (forge.Issue, error)
 }
 
 // repoCreator is asserted by create_repo.

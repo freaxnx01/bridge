@@ -203,10 +203,55 @@ func (c *ForgejoClient) SetTopics(ctx context.Context, owner, repo string, topic
 	return topics, nil
 }
 
+// ensureLabelIDs resolves each name to its label ID on owner/repo, creating any
+// label that does not exist. Forgejo/Gitea's CreateIssueOption.labels is a list
+// of label *ids*, so this lookup is mandatory here, not merely defensive.
+func (c *ForgejoClient) ensureLabelIDs(ctx context.Context, owner, repo string, names []string) ([]int64, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	var existing []struct {
+		ID   int64  `json:"id"`
+		Name string `json:"name"`
+	}
+	path := "/api/v1/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+	if err := c.get(ctx, path, &existing); err != nil {
+		return nil, fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
+	}
+	byName := make(map[string]int64, len(existing))
+	for _, l := range existing {
+		byName[l.Name] = l.ID
+	}
+	ids := make([]int64, 0, len(names))
+	for _, name := range names {
+		if id, ok := byName[name]; ok {
+			ids = append(ids, id)
+			continue
+		}
+		var created struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := c.post(ctx, path, map[string]any{"name": name, "color": "#ededed"}, &created); err != nil {
+			return nil, fmt.Errorf("create label %q on %s/%s: %w", name, owner, repo, err)
+		}
+		ids = append(ids, created.ID)
+	}
+	return ids, nil
+}
+
 // CreateIssue creates an issue on owner/repo via Forgejo/Gitea and returns the
-// minimal Issue.
-func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
+// minimal Issue. labels are names; they are resolved to ids (and created when
+// absent) before the create request, which carries them atomically.
+func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (Issue, error) {
+	ids, err := c.ensureLabelIDs(ctx, owner, repo, labels)
+	if err != nil {
+		return Issue{}, err
+	}
 	req := map[string]any{"title": title, "body": body}
+	if len(ids) > 0 {
+		req["labels"] = ids
+	}
 	var raw struct {
 		Number    int       `json:"number"`
 		Title     string    `json:"title"`
