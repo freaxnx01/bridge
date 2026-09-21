@@ -9,6 +9,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/freaxnx01/bridge/internal/audit"
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -22,19 +23,25 @@ type createIssueInput struct {
 }
 
 type createIssueOutput struct {
-	Draft bool         `json:"draft"`
-	Forge string       `json:"forge"`
-	Owner string       `json:"owner"`
-	Repo  string       `json:"repo"`
-	Title string       `json:"title"`
-	Body  string       `json:"body,omitempty"`
-	Issue *forge.Issue `json:"issue,omitempty"`
+	Draft  bool         `json:"draft"`
+	Forge  string       `json:"forge"`
+	Owner  string       `json:"owner"`
+	Repo   string       `json:"repo"`
+	Title  string       `json:"title"`
+	Body   string       `json:"body,omitempty"`
+	Labels []string     `json:"labels,omitempty"`
+	Issue  *forge.Issue `json:"issue,omitempty"`
 }
 
 func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in createIssueInput) (*mcp.CallToolResult, createIssueOutput, error) {
+	// Intake stamps needs-enrichment on every path, create_issue included.
+	// There is no opt-out: removing the label is a deliberate act, which is
+	// the fail-closed direction.
+	labels := []string{dispatch.LabelNeedsEnrichment}
 	draft := createIssueOutput{
 		Draft: true,
 		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Title: in.Title, Body: in.Body,
+		Labels: labels,
 	}
 	if !in.Confirm {
 		return nil, draft, nil
@@ -47,7 +54,7 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if !ok {
 		return nil, createIssueOutput{}, fmt.Errorf("forge %q does not support creating issues", in.Forge)
 	}
-	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body, nil)
+	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body, labels)
 	if err != nil {
 		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "create_issue", Confirm: true, Outcome: "error"})
 		return nil, createIssueOutput{}, fmt.Errorf("create issue %s/%s: %w", in.Owner, in.Repo, err)
@@ -56,7 +63,8 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, createIssueOutput{
 		Draft: false,
 		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Title: in.Title, Body: in.Body,
-		Issue: &issue,
+		Labels: labels,
+		Issue:  &issue,
 	}, nil
 }
 

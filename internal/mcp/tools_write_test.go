@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/freaxnx01/bridge/internal/audit"
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -1168,5 +1169,44 @@ func TestHandlePutFile_ForgeLacksCapability(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("want error when the forge client does not support put_file")
+	}
+}
+
+func TestHandleCreateIssue_StampsNeedsEnrichment(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.createCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Body: "b", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// create_issue is a second intake path; leaving it unlabeled reproduces
+	// #303 through a different door.
+	if len(gh.gotLabels) != 1 || gh.gotLabels[0] != dispatch.LabelNeedsEnrichment {
+		t.Errorf("labels = %+v, want [%s]", gh.gotLabels, dispatch.LabelNeedsEnrichment)
+	}
+}
+
+func TestHandleCreateIssue_DraftReportsTheLabel(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Body: "b", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("Confirm=false must return a draft: %+v", out)
+	}
+	// A draft that hides the label misrepresents the issue the caller is about
+	// to confirm.
+	if len(out.Labels) != 1 || out.Labels[0] != dispatch.LabelNeedsEnrichment {
+		t.Errorf("draft labels = %+v, want [%s]", out.Labels, dispatch.LabelNeedsEnrichment)
 	}
 }
