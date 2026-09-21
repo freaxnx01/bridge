@@ -141,12 +141,13 @@ func TestSlug(t *testing.T) {
 
 type fakeIssueCreator struct {
 	gotOwner, gotRepo, gotTitle, gotBody string
+	gotLabels                            []string
 	ret                                  forge.Issue
 	err                                  error
 }
 
-func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string) (forge.Issue, error) {
-	f.gotOwner, f.gotRepo, f.gotTitle, f.gotBody = owner, repo, title, body
+func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string) (forge.Issue, error) {
+	f.gotOwner, f.gotRepo, f.gotTitle, f.gotBody, f.gotLabels = owner, repo, title, body, labels
 	return f.ret, f.err
 }
 

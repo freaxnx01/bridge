@@ -116,12 +116,14 @@ type fakeIssues struct {
 	labelsErr     error
 	commentCalled *int
 	commentErr    error
+	gotLabels     []string
 }
 
-func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string) (forge.Issue, error) {
+func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string, labels []string) (forge.Issue, error) {
 	if f.createCalled != nil {
 		*f.createCalled++
 	}
+	f.gotLabels = labels
 	if f.createErr != nil {
 		return forge.Issue{}, f.createErr
 	}

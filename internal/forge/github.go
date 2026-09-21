@@ -214,8 +214,56 @@ func (c *GithubClient) SetTopics(ctx context.Context, owner, repo string, topics
 	return out.Names, nil
 }
 
-func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
+// ensureLabels makes sure every name exists as a label on owner/repo, creating
+// the ones that don't. Capture targets are not guaranteed to define the labels
+// bridge stamps at intake, and GitHub rejects a create request carrying an
+// undefined label.
+//
+// It lists and matches rather than probing GET /labels/{name}: the get helper
+// collapses every status >= 400 into one error, so a probe cannot tell an
+// absent label from a broken request.
+func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	var existing []struct {
+		Name string `json:"name"`
+	}
+	path := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels?per_page=100"
+	if err := c.get(ctx, path, &existing); err != nil {
+		return fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
+	}
+	have := make(map[string]bool, len(existing))
+	for _, l := range existing {
+		have[l.Name] = true
+	}
+	createPath := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+	for _, name := range names {
+		if have[name] {
+			continue
+		}
+		var created struct {
+			Name string `json:"name"`
+		}
+		if err := c.post(ctx, createPath, map[string]any{"name": name, "color": "ededed"}, &created); err != nil {
+			return fmt.Errorf("create label %q on %s/%s: %w", name, owner, repo, err)
+		}
+	}
+	return nil
+}
+
+// CreateIssue creates an issue on owner/repo and returns the minimal Issue.
+// labels ride along on the create request rather than a follow-up AddLabels
+// call: a second call leaves a window in which the issue is live and
+// unlabeled, which is exactly what the dispatcher must never see.
+func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (Issue, error) {
+	if err := c.ensureLabels(ctx, owner, repo, labels); err != nil {
+		return Issue{}, err
+	}
 	req := map[string]any{"title": title, "body": body}
+	if len(labels) > 0 {
+		req["labels"] = labels
+	}
 	var raw struct {
 		Number    int       `json:"number"`
 		Title     string    `json:"title"`

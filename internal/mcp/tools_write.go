@@ -47,7 +47,7 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if !ok {
 		return nil, createIssueOutput{}, fmt.Errorf("forge %q does not support creating issues", in.Forge)
 	}
-	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body)
+	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body, nil)
 	if err != nil {
 		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "create_issue", Confirm: true, Outcome: "error"})
 		return nil, createIssueOutput{}, fmt.Errorf("create issue %s/%s: %w", in.Owner, in.Repo, err)

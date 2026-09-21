@@ -74,7 +74,7 @@ func CaptureIdea(ctx context.Context, w FileWriter, t Target, text string, now t
 // IssueCreator is the consumer interface for CaptureIssue. Both
 // *forge.GithubClient and *forge.ForgejoClient satisfy it.
 type IssueCreator interface {
-	CreateIssue(ctx context.Context, owner, repo, title, body string) (forge.Issue, error)
+	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (forge.Issue, error)
 }
 
 // CaptureIssue creates an issue on the chosen repo's forge and returns the
@@ -84,7 +84,7 @@ func CaptureIssue(ctx context.Context, w IssueCreator, owner, repo, title, body 
 	if title == "" {
 		return forge.Issue{}, fmt.Errorf("empty issue title")
 	}
-	return w.CreateIssue(ctx, owner, repo, title, body)
+	return w.CreateIssue(ctx, owner, repo, title, body, nil)
 }
 
 // slug turns idea text into a filename-safe slug (lowercase, non-alnum -> "-",
