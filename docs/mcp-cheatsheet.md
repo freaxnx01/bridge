@@ -29,8 +29,8 @@ cross-forge tools over GitHub + Forgejo (seven in `--read-only` mode):
 | `put_file` | Create or update a file directly on the default branch | **Draft by default**, same `confirm: true` gate. No branch/PR — git history is the rollback. Path must fall within the server's path allowlist (default `docs/**/*.md` and `*.md`; configurable, `.github/**` always denied). Updating an existing file requires `sha` (read it via `read_file`/`list_tree` first) — an update without it is rejected before any write is attempted |
 | `cross_forge_status` | The same cross-forge overview snapshot `bridge nav`/WebUI use | Read-only |
 
-The endpoint is guarded by a **static bearer token** (`BRIDGE_MCP_TOKEN`),
-compared in constant time.
+The endpoint is guarded by a **static bearer token** (`BRIDGE_MCP_TOKEN`, or a
+token file — see below), compared in constant time.
 
 ---
 
@@ -46,6 +46,29 @@ bridge mcp serve
 Server logs `Bridge MCP addr=http://127.0.0.1:7788 read_only=false auth=true`
 and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 
+### Token from a file
+
+So that an autostart (scheduled task, systemd unit) never carries the secret
+in its command line or unit file, the token can live in a file instead. The
+first source that is set wins:
+
+1. `BRIDGE_MCP_TOKEN` — deliberately **outranks** the flag, so an existing
+   env-based setup keeps working unchanged
+2. `--token-file <path>` — an error if the file can't be read
+3. `$XDG_CONFIG_HOME/bridge/mcp-token`, else `~/.config/bridge/mcp-token` —
+   on Windows `%USERPROFILE%\.config\bridge\mcp-token`; silently skipped
+   when absent
+
+A UTF-8 BOM (Notepad) and surrounding whitespace / `\r\n` are stripped; a
+file that is empty after that is a startup error.
+
+```bash
+mkdir -p ~/.config/bridge
+openssl rand -hex 24 > ~/.config/bridge/mcp-token
+chmod 600 ~/.config/bridge/mcp-token
+bridge mcp serve
+```
+
 ### Flags
 
 | Flag | Default | Purpose |
@@ -54,13 +77,14 @@ and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 | `--host` | `127.0.0.1` | Host to bind. Combining `--no-auth` with a non-loopback host is rejected at startup |
 | `--read-only` | `false` | Omits `create_issue` and `create_repo` entirely (not just gated — never registered) |
 | `--no-auth` | `false` | Skips the bearer check. **Loopback only** — the server refuses to start otherwise |
+| `--token-file` | — | Read the bearer token from this file (see *Token from a file*); `BRIDGE_MCP_TOKEN` takes precedence |
 | `--put-file-allowlist` | `docs/**/*.md,*.md` | Comma-separated path patterns `put_file` may write to; `.github/**` is always denied regardless |
 
 ### Environment variables
 
 | Var | Required? | Purpose |
 |---|---|---|
-| `BRIDGE_MCP_TOKEN` | yes, unless `--no-auth` | The bearer secret clients must send as `Authorization: Bearer <token>` |
+| `BRIDGE_MCP_TOKEN` | unless `--no-auth` or a token file is used | The bearer secret clients must send as `Authorization: Bearer <token>` |
 | `BRIDGE_MCP_OWNERS` | no | Default `(forge:owner)` targets for `list_repos` when no `owner` is given in a tool call, e.g. `"github:freaxnx01, forgejo:freax"` (comma/space separated) |
 | `BRIDGE_MCP_READONLY` | no | Set to `1` as an alternative to `--read-only` |
 | `BRIDGE_MCP_PUT_FILE_ALLOWLIST` | no | Overrides `--put-file-allowlist` when set |

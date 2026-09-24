@@ -113,7 +113,7 @@ The `--auth` flag selects how callers authenticate:
 
 | `--auth` value | Behavior |
 |---|---|
-| `static` (default) | A single static bearer token from `BRIDGE_MCP_TOKEN`, checked on every request. This is what's in live use today. |
+| `static` (default) | A single static bearer token, checked on every request. It comes from `BRIDGE_MCP_TOKEN`, else the file named by `--token-file`, else `$XDG_CONFIG_HOME/bridge/mcp-token` (`~/.config/bridge/mcp-token`). This is what's in live use today. |
 | `oauth` | Bridge acts as its own OAuth 2.1 authorization server so Claude custom connectors (web and mobile) can authenticate — see below. |
 
 `--no-auth` combined with `--auth=oauth` is a startup error, not a silent downgrade: OAuth mode always requires a bearer token.

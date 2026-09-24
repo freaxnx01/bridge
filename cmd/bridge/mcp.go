@@ -37,6 +37,7 @@ var (
 	mcpNoAuth           bool
 	mcpAuthMode         string
 	mcpPutFileAllowlist string
+	mcpTokenFile        string
 )
 
 func init() {
@@ -59,6 +60,7 @@ func newMCPCmd() *cobra.Command {
 	serveCmd.Flags().BoolVar(&mcpAllowDestructive, "allow-destructive", false, "allow destructive tools to execute when confirmed (reserved for future archive_repo/delete_repo; tier-1 tools are unaffected)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
 	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
+	serveCmd.Flags().StringVar(&mcpTokenFile, "token-file", "", "read the static bearer token from this file (default $XDG_CONFIG_HOME/bridge/mcp-token, else ~/.config/bridge/mcp-token); BRIDGE_MCP_TOKEN still takes precedence when set")
 	serveCmd.Flags().StringVar(&mcpPutFileAllowlist, "put-file-allowlist", "docs/**/*.md,*.md", "comma-separated path patterns put_file may write to (each entry is \"dir/**\" or a root-level \"*.ext\" glob); .github/** is always denied")
 	mcpCmd.AddCommand(serveCmd)
 	return mcpCmd
@@ -140,7 +142,7 @@ func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handle
 		return streamable, nil
 	}
 	if token == "" {
-		return nil, fmt.Errorf("BRIDGE_MCP_TOKEN is required (or pass --no-auth for localhost dev)")
+		return nil, fmt.Errorf("a bearer token is required: set BRIDGE_MCP_TOKEN, pass --token-file, or write it to %s (or pass --no-auth for localhost dev)", mcpTokenDefaultPath())
 	}
 	middleware := sdkauth.RequireBearerToken(imcp.StaticBearerVerifier(token), nil)
 	return middleware(streamable), nil
@@ -287,7 +289,12 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 	)
 	switch mcpAuthMode {
 	case "static":
-		handler, err = buildMCPHandler(srv, os.Getenv("BRIDGE_MCP_TOKEN"), mcpNoAuth)
+		var token string
+		token, err = staticMCPToken()
+		if err != nil {
+			return err
+		}
+		handler, err = buildMCPHandler(srv, token, mcpNoAuth)
 	case "oauth":
 		var stateDir string
 		stateDir, err = mcpStateDir()
@@ -339,6 +346,22 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return nil
+}
+
+// staticMCPToken resolves the bearer token for --auth=static. With --no-auth
+// no token is used, so no file is read and an unreadable one can't block startup.
+func staticMCPToken() (string, error) {
+	if mcpNoAuth {
+		return "", nil
+	}
+	token, source, err := resolveMCPToken(os.Getenv("BRIDGE_MCP_TOKEN"), mcpTokenFile, mcpTokenDefaultPath())
+	if err != nil {
+		return "", err
+	}
+	if token != "" {
+		slog.Info("Bridge MCP bearer token loaded", "token_source", source)
+	}
+	return token, nil
 }
 
 // clientForMCP builds the Deps.ClientFor resolver: per-owner GitHub tokens and
