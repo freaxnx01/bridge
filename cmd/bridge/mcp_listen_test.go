@@ -98,3 +98,21 @@ func TestIsAddrInUse(t *testing.T) {
 		t.Errorf("a real bind conflict must count as address-in-use: %v", err)
 	}
 }
+
+func TestProbeHost_UnspecifiedHost_DialsLoopback(t *testing.T) {
+	tests := map[string]string{
+		"":          "127.0.0.1",
+		"0.0.0.0":   "127.0.0.1",
+		"::":        "::1",
+		"127.0.0.1": "127.0.0.1",
+		"localhost": "localhost",
+		"10.0.0.5":  "10.0.0.5",
+	}
+	for host, want := range tests {
+		t.Run(host, func(t *testing.T) {
+			if got := probeHost(host); got != want {
+				t.Fatalf("probeHost(%q) = %q, want %q", host, got, want)
+			}
+		})
+	}
+}

@@ -33,7 +33,7 @@ func portInUseMessage(host string, port int, accepting bool, freePort int) strin
 	msg := joinHostPort(host, port) + " is already in use"
 	if !accepting {
 		msg += " — yet nothing accepts connections on it, so it may be held by something the OS doesn't show" +
-			" (e.g. a stale WSL2 mirrored-networking reservation on Windows; `wsl --shutdown` releases those)"
+			" (on Windows with WSL2 mirrored networking, possibly a stale reservation that `wsl --shutdown` may release)"
 	}
 	suggestion := "--port <n>"
 	if freePort != 0 {
@@ -44,7 +44,7 @@ func portInUseMessage(host string, port int, accepting bool, freePort int) strin
 
 // isAccepting reports whether a TCP connection to host:port succeeds.
 func isAccepting(host string, port int) bool {
-	conn, err := net.DialTimeout("tcp", joinHostPort(host, port), 500*time.Millisecond)
+	conn, err := net.DialTimeout("tcp", joinHostPort(probeHost(host), port), 500*time.Millisecond)
 	if err != nil {
 		return false
 	}
@@ -64,6 +64,20 @@ func findFreePort(host string, from, count int) int {
 		return port
 	}
 	return 0
+}
+
+// probeHost maps a wildcard bind host to the loopback address of the same
+// family: dialing 0.0.0.0 or :: fails on Windows, which would misreport a
+// visible listener as a hidden one.
+func probeHost(host string) string {
+	ip := net.ParseIP(host)
+	switch {
+	case host == "" || (ip != nil && ip.Equal(net.IPv4zero)):
+		return "127.0.0.1"
+	case ip != nil && ip.IsUnspecified():
+		return "::1"
+	}
+	return host
 }
 
 func joinHostPort(host string, port int) string {

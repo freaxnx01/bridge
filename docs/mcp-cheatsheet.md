@@ -54,10 +54,10 @@ Error: 127.0.0.1:7788 is already in use; restart with --port 7789 and point the 
 ```
 
 When the port refuses to bind **but nothing accepts connections on it**, the
-error adds that it may be held by something the OS doesn't show — on Windows
-typically a stale WSL2 mirrored-networking reservation, which netstat,
-`Get-NetTCPConnection` and `excludedportrange` all miss; `wsl --shutdown`
-releases it.
+error adds that it may be held by something the OS doesn't show. On Windows
+with WSL2 mirrored networking this is suspected (not yet confirmed) to be a
+stale port reservation that netstat, `Get-NetTCPConnection` and
+`excludedportrange` all miss; `wsl --shutdown` may release it.
 
 ### Flags
 
