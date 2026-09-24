@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bridge mcp serve --token-file`: read the static bearer token from a file,
+  defaulting to `$XDG_CONFIG_HOME/bridge/mcp-token`, so an autostart never
+  needs the secret on a command line. `BRIDGE_MCP_TOKEN` still takes
+  precedence; a UTF-8 BOM and CRLF are stripped
 - `CreateIssue` accepts labels and creates any that the target repo does not
   define (#303)
 - Issue bodies are populated by `ListOpenIssues` for internal consumers and
