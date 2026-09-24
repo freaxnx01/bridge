@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bridge mcp serve`: a taken port now fails with a message that says so and
+  suggests a free `--port`, adding a hint when the holder is invisible to the
+  OS (possibly a stale WSL2 mirrored-mode reservation). The "listening" log line
+  is only written once the port is actually bound
 - `CreateIssue` accepts labels and creates any that the target repo does not
   define (#303)
 - Issue bodies are populated by `ListOpenIssues` for internal consumers and
