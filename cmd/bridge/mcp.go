@@ -324,6 +324,11 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		IdleTimeout: 120 * time.Second,
 	}
 
+	ln, err := listenMCP(mcpHost, mcpPort)
+	if err != nil {
+		return err
+	}
+
 	slog.Info("Bridge MCP", "addr", "http://"+addr, "read_only", deps.ReadOnly, "allow_destructive", deps.AllowDestructive, "auth", !mcpNoAuth, "auth_mode", mcpAuthMode)
 
 	quit := make(chan os.Signal, 1)
@@ -335,7 +340,7 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		httpSrv.Shutdown(shutCtx) //nolint:errcheck // shutdown errors are not actionable at process exit
 	}()
 
-	if err := httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+	if err := httpSrv.Serve(ln); err != nil && err != http.ErrServerClosed {
 		return err
 	}
 	return nil

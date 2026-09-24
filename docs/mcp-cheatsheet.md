@@ -46,6 +46,19 @@ bridge mcp serve
 Server logs `Bridge MCP addr=http://127.0.0.1:7788 read_only=false auth=true`
 and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 
+If the port is taken, startup fails before logging that line, and names a
+neighbouring port that is free right now:
+
+```text
+Error: 127.0.0.1:7788 is already in use; restart with --port 7789 and point the MCP client at the same port
+```
+
+When the port refuses to bind **but nothing accepts connections on it**, the
+error adds that it may be held by something the OS doesn't show — on Windows
+typically a stale WSL2 mirrored-networking reservation, which netstat,
+`Get-NetTCPConnection` and `excludedportrange` all miss; `wsl --shutdown`
+releases it.
+
 ### Flags
 
 | Flag | Default | Purpose |
