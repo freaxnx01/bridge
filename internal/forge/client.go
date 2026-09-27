@@ -124,6 +124,11 @@ const maxCommentPages = 20
 // rather than calling the API forever.
 const maxLabelPages = 10
 
+// maxRepoPages bounds the owner repo-listing pagination loop, the same safety
+// backstop as maxCommentPages: at Forgejo's default 50 items per page it
+// covers 1000 repos before the loop gives up.
+const maxRepoPages = 20
+
 // Comment is a single issue comment.
 type Comment struct {
 	ID      int       `json:"id"`

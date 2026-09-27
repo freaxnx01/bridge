@@ -374,9 +374,19 @@ func (c *ForgejoClient) CommentIssue(ctx context.Context, owner, repo string, nu
 }
 
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
+	// Page until an empty page: the server's MAX_RESPONSE_ITEMS can cap pages
+	// below the requested limit, so a short page doesn't mean the last one.
 	var raw []fjRepo
-	if err := c.get(ctx, "/api/v1/users/"+url.PathEscape(owner)+"/repos?limit=50", &raw); err != nil {
-		return nil, err
+	for page := 1; page <= maxRepoPages; page++ {
+		var batch []fjRepo
+		path := fmt.Sprintf("/api/v1/users/%s/repos?limit=50&page=%d", url.PathEscape(owner), page)
+		if err := c.get(ctx, path, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		raw = append(raw, batch...)
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
