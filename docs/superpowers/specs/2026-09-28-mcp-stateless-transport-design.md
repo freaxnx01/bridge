@@ -58,10 +58,11 @@ two auth modes cannot drift.
 | Request | Before (stateful) | After (stateless + JSON) |
 |---|---|---|
 | POST `initialize` | 200, SSE, mints session | 200, `application/json` |
-| POST `tools/call` without prior `initialize`, no session ID | rejected (session not initialised) | 200, result |
+| POST `tools/call` without prior `initialize`, no session ID | JSON-RPC error `method "tools/call" is invalid during initialization` (in an SSE body) | 200, `application/json` result |
+| POST `notifications/initialized` | 202 | 202 |
 | POST with an unknown/stale `Mcp-Session-Id` | **404** `session not found` | 200 — ID not validated |
 | GET (standalone stream) | SSE stream (or 400 without session) | **405**, `Allow: POST` |
-| DELETE with a session ID | closes the session, 204 | 204, no-op |
+| DELETE with a session ID | 204 if known, **404** if unknown | 204, no-op |
 | Missing / wrong bearer | 401 | 401 — unchanged, auth runs per request |
 
 The 405 on GET is what the MCP spec requires of a server that offers no SSE
