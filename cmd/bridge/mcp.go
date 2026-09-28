@@ -131,11 +131,23 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
+// newStreamableHandler mounts srv on a stateless Streamable HTTP handler that
+// answers with plain JSON. No tool makes server→client requests or streams
+// progress, so a protocol session buys nothing — and an in-memory one is lost
+// on every restart, leaving clients with 404s on a dead Mcp-Session-Id. Both
+// auth modes build their transport here so they cannot drift.
+func newStreamableHandler(srv *sdkmcp.Server) http.Handler {
+	return sdkmcp.NewStreamableHTTPHandler(
+		func(*http.Request) *sdkmcp.Server { return srv },
+		&sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+	)
+}
+
 // buildMCPHandler mounts srv on a Streamable HTTP handler and, unless noAuth is
 // set, wraps it in bearer-token middleware. It fails fast when a token is
 // required but empty.
 func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handler, error) {
-	streamable := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
+	streamable := newStreamableHandler(srv)
 	if noAuth {
 		return streamable, nil
 	}
@@ -176,7 +188,7 @@ func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config, discoveryClient *ht
 		AuthorizationServers: []string{cfg.Issuer},
 	})
 
-	streamable := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
+	streamable := newStreamableHandler(srv)
 	guarded := sdkauth.RequireBearerToken(store.Verifier(), &sdkauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: strings.TrimRight(cfg.Issuer, "/") + "/.well-known/oauth-protected-resource",
 	})(streamable)
