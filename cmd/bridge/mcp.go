@@ -146,10 +146,18 @@ func newStreamableHandler(srv *sdkmcp.Server) http.Handler {
 // buildMCPHandler mounts srv on a Streamable HTTP handler and, unless noAuth is
 // set, wraps it in bearer-token middleware. It fails fast when a token is
 // required but empty.
+//
+// In --no-auth mode the handler also gets cross-origin protection. A bearer
+// token is itself a CSRF defence — an attacker's page cannot guess it — but
+// without one the only thing that kept a browser page from invoking a tool on
+// 127.0.0.1:7788 was the session handshake a stateless transport no longer
+// performs: the first POST now executes the tool. go-sdk v1.6.1 rejects a POST
+// whose Content-Type is not application/json but applies no Origin check of its
+// own, which the MCP spec requires of a locally-bound server.
 func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handler, error) {
 	streamable := newStreamableHandler(srv)
 	if noAuth {
-		return streamable, nil
+		return http.NewCrossOriginProtection().Handler(streamable), nil
 	}
 	if token == "" {
 		return nil, fmt.Errorf("BRIDGE_MCP_TOKEN is required (or pass --no-auth for localhost dev)")

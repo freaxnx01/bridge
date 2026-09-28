@@ -348,6 +348,12 @@ func TestBuildMCPHandler_StaticModeUnchanged(t *testing.T) {
 // network requests, so it exercises the transport without any forge fakes.
 const listGitForgesCall = `{"jsonrpc":"2.0","id":1,"method":"tools/call","params":{"name":"list_git_forges","arguments":{}}}`
 
+// listGitForgesResult is a fragment only list_git_forges' own output carries.
+// Asserting on it rather than on "result" is what makes the transport tests
+// prove the tool ran: a result envelope wrapping isError content would contain
+// "result" too.
+const listGitForgesResult = `"read_only":true`
+
 // rawMCPRequest sends one raw HTTP request to the MCP endpoint with the
 // headers a Streamable HTTP client sends, overridden by hdr (an empty value
 // deletes the header). Returns status, headers and body.
@@ -399,10 +405,10 @@ func TestBuildMCPHandler_StatelessTransport_ServesWithoutSession(t *testing.T) {
 		wantAllow       string // "" = don't check
 	}{
 		{"tools/call without initialize or session id", http.MethodPost, listGitForgesCall, nil,
-			http.StatusOK, "application/json", `"result"`, ""},
+			http.StatusOK, "application/json", listGitForgesResult, ""},
 		{"made-up session id is not rejected", http.MethodPost, listGitForgesCall,
 			map[string]string{"Mcp-Session-Id": "never-issued"},
-			http.StatusOK, "application/json", `"result"`, ""},
+			http.StatusOK, "application/json", listGitForgesResult, ""},
 		{"initialize answers with json", http.MethodPost,
 			`{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"clientInfo":{"name":"c","version":"v0"},"protocolVersion":"2025-06-18","capabilities":{}}}`,
 			map[string]string{"MCP-Protocol-Version": "2025-06-18"},
@@ -448,6 +454,79 @@ func TestBuildMCPHandler_StatelessTransport_ServesWithoutSession(t *testing.T) {
 				}
 			})
 		}
+	}
+}
+
+// TestNewStreamableHandler_StatelessContract pins the stateless transport at
+// the shared constructor rather than only through buildMCPHandler.
+// buildOAuthHandler mounts the same handler behind a bearer guard no test
+// outside internal/oauth can pass, so without an assertion here the OAuth call
+// site could drift back to a stateful NewStreamableHTTPHandler with the whole
+// suite staying green.
+func TestNewStreamableHandler_StatelessContract(t *testing.T) {
+	ts := httptest.NewServer(newStreamableHandler(imcp.NewServer(imcp.Deps{ReadOnly: true})))
+	defer ts.Close()
+
+	t.Run("stale session id still serves a tools/call", func(t *testing.T) {
+		status, header, body := rawMCPRequest(t, ts.URL, http.MethodPost, listGitForgesCall,
+			map[string]string{"Mcp-Session-Id": "never-issued"})
+		if status != http.StatusOK {
+			t.Fatalf("status = %d, want 200 (body %q)", status, body)
+		}
+		if ct := header.Get("Content-Type"); ct != "application/json" {
+			t.Errorf("Content-Type = %q, want %q", ct, "application/json")
+		}
+		if !strings.Contains(body, listGitForgesResult) {
+			t.Errorf("body %q does not contain %q", body, listGitForgesResult)
+		}
+	})
+
+	t.Run("GET offers no stream", func(t *testing.T) {
+		status, header, body := rawMCPRequest(t, ts.URL, http.MethodGet, "",
+			map[string]string{"Accept": "text/event-stream", "Content-Type": ""})
+		if status != http.StatusMethodNotAllowed {
+			t.Fatalf("status = %d, want 405 (body %q)", status, body)
+		}
+		if allow := header.Get("Allow"); allow != "POST" {
+			t.Errorf("Allow = %q, want %q", allow, "POST")
+		}
+	})
+}
+
+// TestBuildMCPHandler_NoAuthGuardsAgainstCrossOriginPost pins the CSRF barrier
+// the stateless transport removed: with no bearer token to guess, a page in the
+// user's browser would otherwise be able to POST a mutating tools/call at
+// 127.0.0.1 and have it execute on the first request, even though it cannot
+// read the reply.
+func TestBuildMCPHandler_NoAuthGuardsAgainstCrossOriginPost(t *testing.T) {
+	h, err := buildMCPHandler(imcp.NewServer(imcp.Deps{ReadOnly: true}), "", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := httptest.NewServer(h)
+	defer ts.Close()
+
+	tests := []struct {
+		name       string
+		hdr        map[string]string
+		wantStatus int
+	}{
+		{"cross-origin POST is refused", map[string]string{"Origin": "https://evil.example"}, http.StatusForbidden},
+		{"cross-site fetch metadata is refused", map[string]string{"Sec-Fetch-Site": "cross-site"}, http.StatusForbidden},
+		// A CORS-safelisted Content-Type is what lets a browser POST without a
+		// preflight the server would never answer; the go-sdk handler rejects it,
+		// and this case fails if that ever becomes permissive.
+		{"non-JSON content type is refused", map[string]string{"Content-Type": "text/plain"}, http.StatusUnsupportedMediaType},
+		{"same-origin POST is served", map[string]string{"Sec-Fetch-Site": "same-origin"}, http.StatusOK},
+		{"non-browser POST without an Origin is served", nil, http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			status, _, body := rawMCPRequest(t, ts.URL, http.MethodPost, listGitForgesCall, tt.hdr)
+			if status != tt.wantStatus {
+				t.Fatalf("status = %d, want %d (body %q)", status, tt.wantStatus, body)
+			}
+		})
 	}
 }
 

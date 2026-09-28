@@ -105,6 +105,13 @@ restart without re-initialising. `GET` (a standalone SSE stream) answers `405`
 with `Allow: POST`; `DELETE` answers `204`. Bearer auth still runs on every
 request.
 
+Because the first `POST` now executes a tool instead of being turned away for
+lacking a session, `--no-auth` mode additionally refuses **cross-origin**
+requests with `403` — otherwise a page open in your browser could fire a
+mutating tool call at `127.0.0.1:7788` without a token to guess. Requests that
+carry neither `Origin` nor `Sec-Fetch-Site` (`curl`, MCP clients) are
+unaffected.
+
 ---
 
 ## Integrating with Claude Code

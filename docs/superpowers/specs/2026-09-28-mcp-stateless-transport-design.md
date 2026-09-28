@@ -116,13 +116,22 @@ client sees, not what the SDK client smooths over):
    cover the handler exactly as `bridge mcp serve` mounts it.
    The OAuth builder is **not** re-tested behind its guard: `internal/oauth`
    exposes no way to mint a valid token from outside the package, and adding
-   one is out of scope. Its coverage is structural — it calls the same
-   `newStreamableHandler`, and the existing
-   `TestBuildOAuthHandler_RoutesAndMiddlewarePlacement` keeps proving the
-   routing and 401 placement.
+   one is out of scope. Instead the transport contract is pinned at the shared
+   constructor — `newStreamableHandler(srv)` unwrapped is asserted directly for
+   stale-session → 200 and `GET` → 405, so reverting either call site to a
+   stateful handler goes red. `TestBuildOAuthHandler_RoutesAndMiddlewarePlacement`
+   keeps proving the routing and 401 placement.
 6. Existing `TestBuildMCPHandler_ValidBearerListsTools` (real go-sdk client
    connect + `ListTools`) stays green unchanged — proof that a spec-compliant
    client still works end-to-end.
+7. `--no-auth` mode: a POST carrying a cross-origin `Origin` (or
+   `Sec-Fetch-Site: cross-site`) → 403, a POST with neither → 200. Statelessness
+   removes the session handshake that incidentally blocked a browser page from
+   invoking a tool on `127.0.0.1` without a token to guess, so
+   `buildMCPHandler` wraps the no-auth handler in
+   `http.NewCrossOriginProtection()`. go-sdk v1.6.1 already rejects a POST whose
+   `Content-Type` is not `application/json` (the preflight-free attack shape);
+   that is pinned too, since it is upstream behaviour we now depend on.
 
 Full gate: `gofmt -l .`, `go vet ./...`, `golangci-lint run`,
 `go test -race ./...`.

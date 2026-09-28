@@ -43,10 +43,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge dispatch`: dispatch hours moved from the systemd timer into
   `schedule.windows` in `dispatch.json`; the timer is now an hourly heartbeat.
   The retired `dispatch_at`/`retry_until` keys are ignored (#254)
-- `bridge mcp serve` runs the Streamable HTTP transport stateless with JSON
-  responses: no in-memory MCP session, so clients survive a server restart
-  instead of getting 404 on a stale `Mcp-Session-Id`; `GET` now answers 405
-  (#313)
+- **BREAKING:** `bridge mcp serve` runs the Streamable HTTP transport stateless
+  with JSON responses: no in-memory MCP session, so clients survive a server
+  restart instead of getting 404 on a stale `Mcp-Session-Id`. `GET` no longer
+  opens a standalone SSE stream and answers `405 Allow: POST` instead —
+  spec-compliant clients fall back to POST-only, but a consumer pinned to that
+  stream (the `mcp-remote` path in #232) breaks. (#313)
+- `bridge mcp serve --no-auth` refuses cross-origin requests with `403`. With no
+  bearer token to guess, the session handshake was the only thing stopping a page
+  in the user's browser from reaching a mutating tool on `127.0.0.1`, and a
+  stateless transport executes the tool on the first POST. (#313)
 
 ### Fixed
 
