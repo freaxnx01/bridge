@@ -43,6 +43,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `bridge dispatch`: dispatch hours moved from the systemd timer into
   `schedule.windows` in `dispatch.json`; the timer is now an hourly heartbeat.
   The retired `dispatch_at`/`retry_until` keys are ignored (#254)
+- `bridge mcp serve` runs the Streamable HTTP transport stateless with JSON
+  responses: no in-memory MCP session, so clients survive a server restart
+  instead of getting 404 on a stale `Mcp-Session-Id`; `GET` now answers 405
+  (#313)
 
 ### Fixed
 
