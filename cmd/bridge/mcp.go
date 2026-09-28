@@ -331,8 +331,9 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		// WriteTimeout is intentionally 0: SSE connections are long-lived streams
-		// and a write deadline would terminate them prematurely.
+		// WriteTimeout is intentionally 0: responses are single JSON bodies, but
+		// one tool call (cross_forge_status, list_repos across many owners) can
+		// legitimately run long, and a write deadline would cut it off mid-reply.
 		IdleTimeout: 120 * time.Second,
 	}
 

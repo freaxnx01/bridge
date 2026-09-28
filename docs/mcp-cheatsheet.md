@@ -92,8 +92,18 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:7788/ \
 There's no systemd unit yet (tracked in `TODO.md`) — for now, run it in a
 `tmux` pane, under a process supervisor of your choice, or add
 `--no-auth`-free `bridge mcp serve` to your own service manager. Since
-`WriteTimeout` is intentionally unset (SSE streams are long-lived), don't put
-a strict reverse-proxy timeout in front of it either.
+`WriteTimeout` is intentionally unset (a single tool call can run long), don't
+put a strict reverse-proxy timeout in front of it either.
+
+### Stateless transport
+
+The endpoint runs the Streamable HTTP transport **stateless, with JSON
+responses**: every `POST` is a self-contained JSON-RPC round trip answered with
+`application/json`. There is no server-side MCP session — an `Mcp-Session-Id`
+header is accepted but not validated, so clients keep working across a server
+restart without re-initialising. `GET` (a standalone SSE stream) answers `405`
+with `Allow: POST`; `DELETE` answers `204`. Bearer auth still runs on every
+request.
 
 ---
 
