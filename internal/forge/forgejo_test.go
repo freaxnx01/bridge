@@ -21,6 +21,10 @@ func TestForgejoListRepos(t *testing.T) {
 		if r.Header.Get("Authorization") != "token tok" {
 			t.Errorf("auth %q", r.Header.Get("Authorization"))
 		}
+		if r.URL.Query().Get("page") != "1" {
+			w.Write([]byte(`[]`))
+			return
+		}
 		w.Write([]byte(`[{"name":"fj","default_branch":"main","description":"d","private":false,"html_url":"u","ssh_url":"s","updated_at":"2026-05-01T00:00:00Z"},{"name":"archived-repo","archived":true,"private":false}]`))
 	}))
 	defer srv.Close()
@@ -39,9 +43,41 @@ func TestForgejoListRepos(t *testing.T) {
 	}
 }
 
+func TestForgejoListRepos_MultiplePages_ReturnsReposFromEveryPage(t *testing.T) {
+	// The server caps pages at 3 items (Forgejo's MAX_RESPONSE_ITEMS can sit
+	// below the requested limit), so paging must run until an empty page rather
+	// than stop at the first page shorter than the limit.
+	pages := map[string]string{
+		"1": `[{"name":"a"},{"name":"b"},{"name":"c"}]`,
+		"2": `[{"name":"d"},{"name":"e"},{"name":"old","archived":true}]`,
+		"3": `[{"name":"f"}]`,
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, ok := pages[r.URL.Query().Get("page")]
+		if !ok {
+			body = `[]`
+		}
+		w.Write([]byte(body))
+	}))
+	defer srv.Close()
+	c := NewForgejoClient("tok", srv.URL)
+	repos, err := c.ListRepos(context.Background(), "freax")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var names []string
+	for _, r := range repos {
+		names = append(names, r.Name)
+	}
+	if got, want := strings.Join(names, ","), "a,b,c,d,e,f"; got != want {
+		t.Errorf("names = %q, want %q", got, want)
+	}
+}
+
 func TestForgejoListRepos_EscapesOwnerAgainstQueryInjection(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.RawQuery != "limit=50" {
+		q := r.URL.Query()
+		if len(q) != 2 || q.Get("limit") != "50" || q.Get("page") == "" {
 			t.Errorf("owner leaked into query string: %q", r.URL.RawQuery)
 		}
 		if want := "/api/v1/users/evil?token=x/repos"; r.URL.Path != want {

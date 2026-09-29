@@ -46,6 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Forgejo repo listing pages through every result page instead of stopping
+  after the first 50, so owners with more repos no longer lose the rest from
+  `bridge list -r` and the `nav` picker
 - Capture-created issues are no longer dispatch-eligible without enrichment:
   every intake path (`POST /api/capture/issue`, MCP `create_issue`) now stamps
   `needs-enrichment`, and `bridge dispatch` rejects an issue with a blank body
