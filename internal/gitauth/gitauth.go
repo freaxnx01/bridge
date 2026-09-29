@@ -15,6 +15,26 @@ func CredentialHelper(forge string) string {
 		return `credential.https://dev.azure.com.helper=!f() { echo username=x; echo "password=${AZURE_DEVOPS_EXT_PAT:-$ADO_PAT}"; }; f`
 	case "github":
 		return `credential.https://github.com.helper=!f() { echo username=x-access-token; echo "password=${GH_TOKEN:-$GITHUB_TOKEN}"; }; f`
+	case "forgejo":
+		// Unscoped: the Forgejo host differs per install. Forgejo resolves the
+		// user from the token, so the username is arbitrary.
+		return `credential.helper=!f() { echo username=token; echo "password=$FORGEJO_TOKEN"; }; f`
 	}
 	return ""
+}
+
+// CredentialArgs returns the git global args (`-c …` pairs) that wire the
+// forge's credential helper, or nil when the forge needs none. For Forgejo the
+// helper list is reset first: `-c` helpers run after system/global ones, so a
+// system Git Credential Manager would otherwise prompt (opening a browser on
+// Windows) before the token helper is ever consulted.
+func CredentialArgs(forge string) []string {
+	helper := CredentialHelper(forge)
+	if helper == "" {
+		return nil
+	}
+	if forge == "forgejo" {
+		return []string{"-c", "credential.helper=", "-c", helper}
+	}
+	return []string{"-c", helper}
 }
