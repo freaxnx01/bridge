@@ -6,6 +6,7 @@
 /bridge-go.exe
 
 /bridge
+/bridge.exe
 .superpowers/
 
 # Svelte build output — embedded into binary; committed placeholder keeps go:embed happy
