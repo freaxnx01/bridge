@@ -489,3 +489,54 @@ func mustMkdirEnvrc(t *testing.T, dir string) {
 		t.Fatal(err)
 	}
 }
+
+func TestRefresh_NoClonesDiscovered_LeavesExistingMetaIntact(t *testing.T) {
+	// A repos root that exists but holds no forge subdirectories: DiscoverRepos
+	// guards every walk with dirExists, so it returns (nil, nil) — no error —
+	// which is indistinguishable from "root is empty" by the error alone. An
+	// unmounted root and a -B/--base pointed outside the repos tree both land
+	// here, and the cache path stays global, so writing would truncate it.
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "acme"))
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	metaPath := filepath.Join(t.TempDir(), "repo-meta.json")
+
+	healthy := map[string]core.RepoMeta{
+		"github/acme/public/bridge": {Description: "written by a healthy refresh", FetchedAt: 1},
+	}
+	if err := core.SaveRepoMeta(metaPath, healthy); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := Refresh(context.Background(), []string{root}, cachePath, metaPath); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+
+	got, err := core.LoadRepoMeta(metaPath)
+	if err != nil {
+		t.Fatalf("LoadRepoMeta: %v", err)
+	}
+	if len(got) != 1 || got["github/acme/public/bridge"].Description != "written by a healthy refresh" {
+		t.Errorf("existing cache must survive a discovery that found no clones, got %+v", got)
+	}
+}
+
+func TestRefresh_NoClonesAndNoExistingMeta_WritesEmptyFile(t *testing.T) {
+	// The guard must not block the first-ever write: with nothing cached there
+	// is nothing to lose, and a loadable {} beats a missing file.
+	root := t.TempDir()
+	mustMkdirEnvrc(t, filepath.Join(root, "github", "acme"))
+	t.Setenv("GH_TOKEN", "")
+	t.Setenv("GITHUB_TOKEN", "")
+	cachePath := filepath.Join(t.TempDir(), "remote.list")
+	metaPath := filepath.Join(t.TempDir(), "repo-meta.json")
+
+	if _, err := Refresh(context.Background(), []string{root}, cachePath, metaPath); err != nil {
+		t.Fatalf("Refresh: %v", err)
+	}
+	if _, err := os.Stat(metaPath); err != nil {
+		t.Errorf("first write must still happen with no prior cache: %v", err)
+	}
+}

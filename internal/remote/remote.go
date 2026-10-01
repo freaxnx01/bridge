@@ -65,7 +65,15 @@ func Refresh(ctx context.Context, roots []string, cachePath, metaPath string) ([
 	// A root that could not be enumerated looks identical to "no clones under
 	// it", which would prune every live entry keyed under that root. Leave the
 	// previous file untouched instead and let the next refresh rewrite it.
-	if meta, err := buildRepoMeta(roots, all, existing, time.Now()); err == nil {
+	//
+	// The error is not enough on its own: DiscoverRepos guards every walk with
+	// dirExists, so a root whose forge subdirectories are absent — an unmounted
+	// repos root, or -B/--base pointed outside the repos tree while metaPath
+	// stays global — returns (nil, nil) and yields an empty map with no error.
+	// Writing that would truncate the whole cache to {}. An empty map is only
+	// safe to write when there was nothing to lose.
+	meta, err := buildRepoMeta(roots, all, existing, time.Now())
+	if err == nil && (len(meta) > 0 || len(existing) == 0) {
 		_ = core.SaveRepoMeta(metaPath, meta)
 	}
 	return all, firstErr
