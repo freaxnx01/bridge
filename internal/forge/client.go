@@ -164,6 +164,46 @@ type PullRequest struct {
 	ChangedFiles   int       `json:"changed_files,omitempty"`
 }
 
+// PRFile is one file changed by a pull request.
+type PRFile struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// CheckRun is a check-run on a commit. Conclusion is empty until the run
+// completes. App is the reporting app's slug (e.g. "github-actions").
+type CheckRun struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion,omitempty"`
+	App        string `json:"app,omitempty"`
+}
+
+// CommitStatus is the latest legacy commit status for one context.
+type CommitStatus struct {
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url,omitempty"`
+}
+
+// WorkflowRun is one GitHub Actions run. Actor is who the run is attributed
+// to; TriggeringActor is who actually caused it (they differ on re-runs and
+// bot-triggered events).
+type WorkflowRun struct {
+	Name            string    `json:"name"`
+	Event           string    `json:"event"`
+	Status          string    `json:"status"`
+	Conclusion      string    `json:"conclusion,omitempty"`
+	Actor           string    `json:"actor"`
+	TriggeringActor string    `json:"triggering_actor"`
+	HeadBranch      string    `json:"head_branch,omitempty"`
+	HeadSHA         string    `json:"head_sha"`
+	Created         time.Time `json:"created"`
+	URL             string    `json:"url"`
+}
+
 type Client interface {
 	Name() string
 	ListRepos(ctx context.Context, owner string) ([]RepoRef, error)
