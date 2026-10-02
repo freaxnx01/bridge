@@ -144,12 +144,64 @@ type Milestone struct {
 	DueOn  time.Time `json:"due_on,omitempty"`
 }
 
-// PullRequest is an open pull request. Body is needed to resolve "Closes #N".
+// PullRequest is a pull request. Body is needed to resolve "Closes #N".
+// MergeableState and ChangedFiles are only populated by the single-PR endpoint.
 type PullRequest struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Draft  bool   `json:"draft"`
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	Body           string    `json:"body,omitempty"`
+	Draft          bool      `json:"draft"`
+	State          string    `json:"state,omitempty"`
+	Author         string    `json:"author,omitempty"`
+	HeadRef        string    `json:"head_ref,omitempty"`
+	HeadSHA        string    `json:"head_sha,omitempty"`
+	BaseRef        string    `json:"base_ref,omitempty"`
+	URL            string    `json:"url,omitempty"`
+	Created        time.Time `json:"created,omitempty"`
+	Updated        time.Time `json:"updated,omitempty"`
+	Merged         bool      `json:"merged,omitempty"`
+	MergeableState string    `json:"mergeable_state,omitempty"`
+	ChangedFiles   int       `json:"changed_files,omitempty"`
+}
+
+// PRFile is one file changed by a pull request.
+type PRFile struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// CheckRun is a check-run on a commit. Conclusion is empty until the run
+// completes. App is the reporting app's slug (e.g. "github-actions").
+type CheckRun struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion,omitempty"`
+	App        string `json:"app,omitempty"`
+}
+
+// CommitStatus is the latest legacy commit status for one context.
+type CommitStatus struct {
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url,omitempty"`
+}
+
+// WorkflowRun is one GitHub Actions run. Actor is who the run is attributed
+// to; TriggeringActor is who actually caused it (they differ on re-runs and
+// bot-triggered events).
+type WorkflowRun struct {
+	Name            string    `json:"name"`
+	Event           string    `json:"event"`
+	Status          string    `json:"status"`
+	Conclusion      string    `json:"conclusion,omitempty"`
+	Actor           string    `json:"actor"`
+	TriggeringActor string    `json:"triggering_actor"`
+	HeadBranch      string    `json:"head_branch,omitempty"`
+	HeadSHA         string    `json:"head_sha"`
+	Created         time.Time `json:"created"`
+	URL             string    `json:"url"`
 }
 
 type Client interface {

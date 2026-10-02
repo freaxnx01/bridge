@@ -107,7 +107,7 @@ The shim is ≤20 lines of logic on purpose. All real work lives in the binary.
 
 ## MCP server
 
-`bridge mcp serve` runs a self-hosted, remote (Streamable HTTP) MCP endpoint exposing four cross-forge tools (`list_repos`, `read_file`, `create_issue`, `cross_forge_status`) over GitHub + Forgejo. `--read-only` omits the write tool by construction. `--host`/`--port` bind the listener (default `127.0.0.1:7788`); `--no-auth` skips bearer auth entirely and requires a loopback `--host`.
+`bridge mcp serve` runs a self-hosted, remote (Streamable HTTP) MCP endpoint exposing cross-forge tools over GitHub + Forgejo — repos, files, issues, pull requests with their checks, and Actions runs; see the tool table in [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md). `--read-only` omits the write tools by construction. `--host`/`--port` bind the listener (default `127.0.0.1:7788`); `--no-auth` skips bearer auth entirely and requires a loopback `--host`.
 
 The `--auth` flag selects how callers authenticate:
 
