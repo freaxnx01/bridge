@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"slices"
 	"testing"
 
 	"github.com/freaxnx01/bridge/internal/audit"
@@ -342,6 +343,14 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestCapabilities_ReportsPRAndRunTools(t *testing.T) {
+	got := Capabilities(newFakePRs())
+	want := []string{"list_repos", "list_issues", "list_prs", "get_pr", "list_runs"}
+	if !slices.Equal(got, want) {
+		t.Fatalf("Capabilities = %v, want %v", got, want)
 	}
 }
 

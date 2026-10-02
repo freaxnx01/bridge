@@ -100,6 +100,26 @@ type issueReader interface {
 	GetIssue(ctx context.Context, owner, repo string, number int) (forge.Issue, []forge.Comment, error)
 }
 
+// prLister is asserted by list_prs. GitHub-only: Forgejo does not implement
+// it, and list_prs reports that as a warning rather than an empty list.
+type prLister interface {
+	ListPullRequests(ctx context.Context, owner, repo, state string) ([]forge.PullRequest, error)
+}
+
+// prReader is asserted by get_pr: the PR itself, its changed files, and the
+// check-runs and commit statuses on its head commit.
+type prReader interface {
+	GetPullRequest(ctx context.Context, owner, repo string, number int) (forge.PullRequest, error)
+	ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]forge.PRFile, error)
+	ListCheckRuns(ctx context.Context, owner, repo, sha string) ([]forge.CheckRun, error)
+	ListCommitStatuses(ctx context.Context, owner, repo, sha string) ([]forge.CommitStatus, error)
+}
+
+// runLister is asserted by list_runs.
+type runLister interface {
+	ListWorkflowRuns(ctx context.Context, owner, repo, branch, headSHA string, limit int) ([]forge.WorkflowRun, error)
+}
+
 // repoArchiver and repoDeleter are tier-3/4 capability stubs: declared so
 // Capabilities' switch is complete before those tiers are implemented, but no
 // concrete client satisfies them yet.
@@ -157,6 +177,15 @@ func Capabilities(r ForgeReader) []string {
 	}
 	if _, ok := r.(issueReader); ok {
 		capabilities = append(capabilities, "get_issue")
+	}
+	if _, ok := r.(prLister); ok {
+		capabilities = append(capabilities, "list_prs")
+	}
+	if _, ok := r.(prReader); ok {
+		capabilities = append(capabilities, "get_pr")
+	}
+	if _, ok := r.(runLister); ok {
+		capabilities = append(capabilities, "list_runs")
 	}
 	if _, ok := r.(repoArchiver); ok {
 		capabilities = append(capabilities, "archive_repo")
