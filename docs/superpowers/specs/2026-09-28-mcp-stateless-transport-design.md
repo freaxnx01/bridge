@@ -118,9 +118,12 @@ client sees, not what the SDK client smooths over):
    exposes no way to mint a valid token from outside the package, and adding
    one is out of scope. Instead the transport contract is pinned at the shared
    constructor — `newStreamableHandler(srv)` unwrapped is asserted directly for
-   stale-session → 200 and `GET` → 405, so reverting either call site to a
-   stateful handler goes red. `TestBuildOAuthHandler_RoutesAndMiddlewarePlacement`
-   keeps proving the routing and 401 placement.
+   stale-session → 200 and `GET` → 405, so the constructor cannot regress
+   unnoticed. The **call sites** are covered unevenly: reverting
+   `buildMCPHandler` to a stateful handler goes red (case 5), but reverting
+   `buildOAuthHandler`'s call site does **not** — that one is held only by
+   review. `TestBuildOAuthHandler_RoutesAndMiddlewarePlacement` keeps proving
+   the routing and 401 placement.
 6. Existing `TestBuildMCPHandler_ValidBearerListsTools` (real go-sdk client
    connect + `ListTools`) stays green unchanged — proof that a spec-compliant
    client still works end-to-end.
