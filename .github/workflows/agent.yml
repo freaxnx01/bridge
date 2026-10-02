@@ -16,6 +16,12 @@ jobs:
     uses: freaxnx01/agent-workflow/.github/workflows/agent-implement.yml@v2
     secrets:
       CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+      # Pipeline GitHub App (agent-workflow docs/PIPELINE-APP-SETUP.md). Passed
+      # explicitly: a set-but-unlisted secret never reaches the workflow. While
+      # unset, the pipeline falls back to GITHUB_TOKEN, whose pushes start no CI
+      # — which is what left #316 BLOCKED on missing required checks.
+      PIPELINE_APP_ID: ${{ secrets.PIPELINE_APP_ID }}
+      PIPELINE_APP_PRIVATE_KEY: ${{ secrets.PIPELINE_APP_PRIVATE_KEY }}
     with:
       issue-number: ${{ github.event.issue.number }}
       agent: claude
@@ -55,3 +61,8 @@ jobs:
       # would overrun and kill the job before "Mark issue blocked" runs, which
       # leaves the PR draft with no label and no signal at all.
       self-fix-max-iterations: 1
+      # Both authors, so the review job finds the pipeline's PR whether it was
+      # opened as the App or, before its secrets exist, as github-actions.
+      pipeline-author-allowlist: |
+        github-actions[bot]
+        freaxnx01-pipeline[bot]
