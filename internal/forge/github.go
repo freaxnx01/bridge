@@ -1019,21 +1019,68 @@ func (c *GithubClient) ListOpenMilestones(ctx context.Context, owner, repo strin
 	return out, nil
 }
 
-func (c *GithubClient) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error) {
-	var raw []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Body   string `json:"body"`
-		Draft  bool   `json:"draft"`
+// ghPull is GitHub's pull-request JSON, shared by the list and single-PR
+// endpoints; the single endpoint additionally fills MergeableState and
+// ChangedFiles.
+type ghPull struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Draft  bool   `json:"draft"`
+	State  string `json:"state"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Head struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	HTMLURL        string     `json:"html_url"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at"`
+	MergeableState string     `json:"mergeable_state"`
+	ChangedFiles   int        `json:"changed_files"`
+}
+
+func (p ghPull) toPullRequest() PullRequest {
+	return PullRequest{
+		Number: p.Number, Title: p.Title, Body: p.Body, Draft: p.Draft, State: p.State,
+		Author: p.User.Login, HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA, BaseRef: p.Base.Ref,
+		URL: p.HTMLURL, Created: p.CreatedAt, Updated: p.UpdatedAt, Merged: p.MergedAt != nil,
+		MergeableState: p.MergeableState, ChangedFiles: p.ChangedFiles,
 	}
+}
+
+func toPullRequests(raw []ghPull) []PullRequest {
+	out := make([]PullRequest, 0, len(raw))
+	for _, p := range raw {
+		out = append(out, p.toPullRequest())
+	}
+	return out
+}
+
+func (c *GithubClient) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error) {
+	var raw []ghPull
 	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/pulls?state=open&per_page=100", &raw); err != nil {
 		return nil, err
 	}
-	out := make([]PullRequest, 0, len(raw))
-	for _, p := range raw {
-		out = append(out, PullRequest{Number: p.Number, Title: p.Title, Body: p.Body, Draft: p.Draft})
+	return toPullRequests(raw), nil
+}
+
+// ListPullRequests returns one page (100) of a repo's pull requests in the
+// given state ("open", "closed" or "all"), most recently updated first.
+func (c *GithubClient) ListPullRequests(ctx context.Context, owner, repo, state string) ([]PullRequest, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=%s&sort=updated&direction=desc&per_page=100",
+		url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(state))
+	var raw []ghPull
+	if err := c.get(ctx, path, &raw); err != nil {
+		return nil, err
 	}
-	return out, nil
+	return toPullRequests(raw), nil
 }
 
 // RemoveLabel deletes one label from an issue. A 404 (label not present) is

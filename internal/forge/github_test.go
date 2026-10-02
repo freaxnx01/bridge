@@ -966,7 +966,11 @@ func TestGithubListOpenPullRequests(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Write([]byte(`[
-		  {"number":90,"title":"feat: authors","body":"Closes #41","draft":true}
+		  {"number":90,"title":"feat: authors","body":"Closes #41","draft":true,
+		   "state":"open","user":{"login":"claude[bot]"},
+		   "head":{"ref":"ai/41","sha":"abc123"},"base":{"ref":"main"},
+		   "html_url":"https://github.com/o/r/pull/90",
+		   "created_at":"2026-10-01T10:00:00Z","updated_at":"2026-10-01T11:00:00Z","merged_at":null}
 		]`))
 	}))
 	defer srv.Close()
@@ -980,6 +984,39 @@ func TestGithubListOpenPullRequests(t *testing.T) {
 	}
 	if prs[0].Body != "Closes #41" {
 		t.Errorf("body: %q", prs[0].Body)
+	}
+	if prs[0].Author != "claude[bot]" || prs[0].HeadRef != "ai/41" || prs[0].HeadSHA != "abc123" || prs[0].BaseRef != "main" {
+		t.Errorf("new fields: %+v", prs[0])
+	}
+	if prs[0].URL != "https://github.com/o/r/pull/90" || prs[0].State != "open" || prs[0].Merged {
+		t.Errorf("url/state/merged: %+v", prs[0])
+	}
+}
+
+func TestGithubListPullRequests_PassesStateAndMapsMerged(t *testing.T) {
+	var gotPath, gotQuery string
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath, gotQuery = r.URL.Path, r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		w.Write([]byte(`[
+		  {"number":7,"title":"t","state":"closed","merged_at":"2026-09-30T08:00:00Z","user":{"login":"a"}},
+		  {"number":8,"title":"u","state":"closed","merged_at":null,"user":{"login":"b"}}
+		]`))
+	}))
+	defer srv.Close()
+
+	prs, err := NewGithubClient("token", srv.URL).ListPullRequests(context.Background(), "o", "r", "closed")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotPath != "/repos/o/r/pulls" {
+		t.Errorf("path: %s", gotPath)
+	}
+	if gotQuery != "state=closed&sort=updated&direction=desc&per_page=100" {
+		t.Errorf("query: %s", gotQuery)
+	}
+	if len(prs) != 2 || !prs[0].Merged || prs[1].Merged {
+		t.Fatalf("merged mapping: %+v", prs)
 	}
 }
 

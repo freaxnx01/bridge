@@ -144,12 +144,24 @@ type Milestone struct {
 	DueOn  time.Time `json:"due_on,omitempty"`
 }
 
-// PullRequest is an open pull request. Body is needed to resolve "Closes #N".
+// PullRequest is a pull request. Body is needed to resolve "Closes #N".
+// MergeableState and ChangedFiles are only populated by the single-PR endpoint.
 type PullRequest struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Draft  bool   `json:"draft"`
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	Body           string    `json:"body,omitempty"`
+	Draft          bool      `json:"draft"`
+	State          string    `json:"state,omitempty"`
+	Author         string    `json:"author,omitempty"`
+	HeadRef        string    `json:"head_ref,omitempty"`
+	HeadSHA        string    `json:"head_sha,omitempty"`
+	BaseRef        string    `json:"base_ref,omitempty"`
+	URL            string    `json:"url,omitempty"`
+	Created        time.Time `json:"created,omitempty"`
+	Updated        time.Time `json:"updated,omitempty"`
+	Merged         bool      `json:"merged,omitempty"`
+	MergeableState string    `json:"mergeable_state,omitempty"`
+	ChangedFiles   int       `json:"changed_files,omitempty"`
 }
 
 type Client interface {
