@@ -41,6 +41,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleGetIssue)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_prs",
+		Description: "List a repo's pull requests (number, title, state, draft, author, head/base branch, head SHA, url, created/updated), most recently updated first, one page of 100. state: open (default), closed or all. closes=N keeps only PRs whose body closes issue N. GitHub-only; a Forgejo target returns a warning.",
+	}, deps.handleListPRs)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_git_forges",
 		Description: "List the configured forge targets, whether each is configured, and which tools it supports. Makes no network requests.",
 	}, deps.handleListGitForges)
