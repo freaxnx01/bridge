@@ -11,9 +11,9 @@ is no tool for pull requests, their checks, or Actions runs, so verifying an
 ai-implement run — the step that decides whether a human merges — needs a browser or a
 terminal.
 
-`GithubClient.ListOpenPullRequests` (`internal/forge/github.go:949`) already feeds
-dispatch (`cmd/bridge/dispatch.go:207`) but is not exposed, and `forge.PullRequest`
-(`internal/forge/client.go:137`) carries only number/title/body/draft.
+`GithubClient.ListOpenPullRequests` (`internal/forge/github.go:1022`) already feeds
+dispatch (`cmd/bridge/dispatch.go:379`) but is not exposed, and `forge.PullRequest`
+(`internal/forge/client.go:148`) carries only number/title/body/draft.
 
 ## Non-goals
 
@@ -109,7 +109,7 @@ unchanged), so all three are registered in `server.go` regardless of `--read-onl
 **`list_prs`** — input `forge, owner, repo, state?, closes?`.
 `state` defaults to `open`; anything other than `open|closed|all` is `invalidInput`.
 `closes > 0` keeps only PRs where `dispatch.ClosesIssue(pr.Body, closes)` — the exact
-predicate `dispatch.HasOpenPR` uses (`internal/dispatch/eligible.go:67-85`), imported,
+predicate `dispatch.HasOpenPR` uses (`internal/dispatch/eligible.go:68-86`), imported,
 not copied. Output `{prs, warnings}`; `Body` is cleared in the list output to keep it
 small.
 
