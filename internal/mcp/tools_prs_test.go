@@ -135,6 +135,53 @@ func TestHandleListPRs_RequiresOwnerAndRepo(t *testing.T) {
 	}
 }
 
+func TestHandleListPRs_FlagsTruncationAtPageCap(t *testing.T) {
+	c := newFakePRs()
+	for i := 0; i < 100; i++ {
+		c.prs = append(c.prs, forge.PullRequest{Number: i})
+	}
+
+	_, out, err := depsFor(c).handleListPRs(context.Background(), nil, listPRsInput{Forge: "github", Owner: "o", Repo: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Truncated {
+		t.Error("want truncated=true for a full 100-PR page")
+	}
+}
+
+func TestHandleListPRs_BelowPageCapNotTruncated(t *testing.T) {
+	c := newFakePRs()
+	c.prs = []forge.PullRequest{{Number: 1}}
+
+	_, out, err := depsFor(c).handleListPRs(context.Background(), nil, listPRsInput{Forge: "github", Owner: "o", Repo: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Truncated {
+		t.Error("want truncated=false below the page cap")
+	}
+}
+
+func TestHandleListPRs_TruncatedSurvivesClosesFilter(t *testing.T) {
+	c := newFakePRs()
+	for i := 0; i < 100; i++ {
+		c.prs = append(c.prs, forge.PullRequest{Number: i, Body: "no closing keyword here"})
+	}
+
+	_, out, err := depsFor(c).handleListPRs(context.Background(), nil,
+		listPRsInput{Forge: "github", Owner: "o", Repo: "r", State: "all", Closes: 41})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.PRs) != 0 {
+		t.Fatalf("want closes filter to drop every PR, got %+v", out.PRs)
+	}
+	if !out.Truncated {
+		t.Error("truncated must survive the closes filter even when it empties the result")
+	}
+}
+
 func TestHandleListPRs_ForgeWithoutCapabilityWarns(t *testing.T) {
 	_, out, err := depsFor(&fakeReader{name: "forgejo"}).handleListPRs(context.Background(), nil,
 		listPRsInput{Forge: "forgejo", Owner: "o", Repo: "r"})
@@ -266,6 +313,9 @@ func TestHandleGetPR_ForgeWithoutCapabilityWarns(t *testing.T) {
 	if out.PR != nil || len(out.Warnings) != 1 || out.Warnings[0] != "forgejo does not support get_pr" {
 		t.Fatalf("out: %+v", out)
 	}
+	if out.Checks.CheckRuns == nil || out.Checks.Statuses == nil {
+		t.Errorf("check_runs and statuses must be empty lists, not null: %+v", out.Checks)
+	}
 }
 
 func TestHandleGetPR_PassesDeadline(t *testing.T) {
@@ -348,5 +398,29 @@ func TestHandleListRuns_PassesDeadline(t *testing.T) {
 	}
 	if c.deadline <= 0 || c.deadline > toolTimeout {
 		t.Fatalf("forge call ctx deadline remaining %v, want (0, %v]", c.deadline, toolTimeout)
+	}
+}
+
+// GithubClient must keep satisfying prLister, prReader and runLister: these
+// are the only compile-time guard against a method signature on GithubClient
+// drifting from the interfaces list_prs/get_pr/list_runs assert against. If
+// it ever stops compiling here, the tools would otherwise keep compiling too
+// and silently degrade to "github does not support X" in production.
+var (
+	_ prLister  = (*forge.GithubClient)(nil)
+	_ prReader  = (*forge.GithubClient)(nil)
+	_ runLister = (*forge.GithubClient)(nil)
+)
+
+func TestForgejoClient_DoesNotSatisfyPRCapabilities(t *testing.T) {
+	var c any = forge.NewForgejoClient("", "")
+	if _, ok := c.(prLister); ok {
+		t.Error("ForgejoClient must not satisfy prLister — list_prs is GitHub-only")
+	}
+	if _, ok := c.(prReader); ok {
+		t.Error("ForgejoClient must not satisfy prReader — get_pr is GitHub-only")
+	}
+	if _, ok := c.(runLister); ok {
+		t.Error("ForgejoClient must not satisfy runLister — list_runs is GitHub-only")
 	}
 }

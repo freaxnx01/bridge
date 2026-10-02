@@ -5,8 +5,8 @@ import (
 )
 
 // NewServer builds the Bridge MCP server with the cross-forge tools
-// registered. In read-only mode the write tools (create_issue, create_repo)
-// are not registered at all, so there is nothing to bypass.
+// registered. In read-only mode the write tools are not registered at all,
+// so there is nothing to bypass.
 func NewServer(deps Deps) *mcp.Server {
 	srv := mcp.NewServer(&mcp.Implementation{Name: "bridge", Version: "v1"}, nil)
 

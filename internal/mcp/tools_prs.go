@@ -39,9 +39,14 @@ type listPRsInput struct {
 }
 
 type listPRsOutput struct {
-	PRs      []forge.PullRequest `json:"prs"`
-	Warnings []string            `json:"warnings,omitempty"`
+	PRs       []forge.PullRequest `json:"prs"`
+	Truncated bool                `json:"truncated,omitempty"`
+	Warnings  []string            `json:"warnings,omitempty"`
 }
+
+// maxPRPage is GitHub's per_page cap for ListPullRequests — a result this
+// size means more pages exist that this one-page call did not fetch.
+const maxPRPage = 100
 
 func prState(s string) (string, error) {
 	switch s {
@@ -79,7 +84,7 @@ func (d Deps) handleListPRs(ctx context.Context, _ *mcp.CallToolRequest, in list
 	if err != nil {
 		return nil, listPRsOutput{}, fmt.Errorf("list prs %s/%s: %w", in.Owner, in.Repo, err)
 	}
-	return nil, listPRsOutput{PRs: prSummaries(prs, in.Closes)}, nil
+	return nil, listPRsOutput{PRs: prSummaries(prs, in.Closes), Truncated: len(prs) == maxPRPage}, nil
 }
 
 // prSummaries keeps the PRs that close issue closes (all of them when closes
@@ -136,7 +141,11 @@ func (d Deps) handleGetPR(ctx context.Context, _ *mcp.CallToolRequest, in getPRI
 	}
 	reader, ok := client.(prReader)
 	if !ok {
-		return nil, getPROutput{Files: []forge.PRFile{}, Warnings: unsupported(in.Forge, "get_pr")}, nil
+		return nil, getPROutput{
+			Files:    []forge.PRFile{},
+			Checks:   prChecks{CheckRuns: []forge.CheckRun{}, Statuses: []forge.CommitStatus{}},
+			Warnings: unsupported(in.Forge, "get_pr"),
+		}, nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, toolTimeout)
 	defer cancel()

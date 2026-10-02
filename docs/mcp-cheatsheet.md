@@ -12,8 +12,9 @@ implementation notes, see:
 
 ## What it is
 
-`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing eleven
-cross-forge tools over GitHub + Forgejo (seven in `--read-only` mode):
+`bridge mcp serve` runs a **Streamable HTTP MCP server** exposing the
+cross-forge tools below over GitHub + Forgejo (a subset of them in
+`--read-only` mode):
 
 | Tool | Purpose | Notes |
 |---|---|---|
@@ -22,7 +23,7 @@ cross-forge tools over GitHub + Forgejo (seven in `--read-only` mode):
 | `list_tree` | List a directory's entries, or the full tree with `recursive: true` | Default branch only; a `truncated` flag surfaces when GitHub's recursive trees API cuts off past its size limit rather than silently returning a partial tree; an empty repo returns an empty list, not an error |
 | `search_code` | Cross-repo code search across configured (or requested) owners | **GitHub-only** — Forgejo has no code-search REST API (only an HTML search page), so a Forgejo target lands in `warnings`, not a silent empty result. GitHub's search API reports matching files, not lines; each match is re-fetched via `read_file`'s underlying call to locate the actual line number. A rate-limited target (GitHub's search API has a much tighter limit than the rest) is called out by name in `warnings` too, distinct from "no matches" |
 | `list_issues` | List open issues for a single repo | Needs no capability assertion — part of the tier-1 `ForgeReader` surface, so it works on any wired forge |
-| `list_prs` | List a repo's pull requests (author, head/base branch, head SHA, draft, state, url) | **GitHub-only, read-only** — a Forgejo target returns a warning, not an empty list. `state` is `open` (default), `closed` or `all`; one page of the 100 most recently updated. `closes: N` keeps PRs whose body closes issue N, using the same rule dispatch uses to decide an issue already has a PR |
+| `list_prs` | List a repo's pull requests (author, head/base branch, head SHA, draft, state, url) | **GitHub-only, read-only** — a Forgejo target returns a warning, not an empty list. `state` is `open` (default), `closed` or `all`; one page of the 100 most recently updated, with `truncated: true` when that page is full (set before the `closes` filter, so it survives filtering down to an empty result). `closes: N` keeps PRs whose body closes issue N, using the same rule dispatch uses to decide an issue already has a PR |
 | `get_pr` | One PR's body, merged, mergeable_state, head SHA, changed files, and the checks on its head SHA | **GitHub-only, read-only.** Checks are check-runs (name, status, conclusion, app) plus commit statuses. Files are capped at 100 with `files_truncated`. A failed files/check-runs/statuses fetch lands in `warnings` without failing the call |
 | `list_runs` | List a repo's GitHub Actions runs with `actor` and `triggering_actor` | **GitHub-only, read-only.** Optional `branch` / `head_sha` filters; `limit` defaults to 20, max 100 |
 | `list_git_forges` | List the configured `(forge, owner)` targets, whether each is configured, and which tools it supports | Read-only, no network requests — resolution is cached per process |
