@@ -4,7 +4,7 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 )
 
-// NewServer builds the Bridge MCP server with the seven cross-forge tools
+// NewServer builds the Bridge MCP server with the cross-forge tools
 // registered. In read-only mode the write tools (create_issue, create_repo)
 // are not registered at all, so there is nothing to bypass.
 func NewServer(deps Deps) *mcp.Server {
@@ -49,6 +49,11 @@ func NewServer(deps Deps) *mcp.Server {
 		Name:        "get_pr",
 		Description: "Read one pull request: body, merged, mergeable_state, head SHA, changed files (path, additions, deletions; capped at 100, files_truncated signals more), and checks on the head SHA — check-runs (name, status, conclusion, app) and commit statuses. A failed files/checks fetch lands in warnings without failing the call. GitHub-only; a Forgejo target returns a warning.",
 	}, deps.handleGetPR)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_runs",
+		Description: "List a repo's GitHub Actions runs, newest first: workflow name, event, status, conclusion, actor, triggering_actor, head branch/SHA, created, url. Optional branch / head_sha filters; limit defaults to 20, max 100. GitHub-only; a Forgejo target returns a warning.",
+	}, deps.handleListRuns)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_git_forges",

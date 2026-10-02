@@ -278,3 +278,75 @@ func TestHandleGetPR_PassesDeadline(t *testing.T) {
 		t.Fatalf("forge call ctx deadline remaining %v, want (0, %v]", c.deadline, toolTimeout)
 	}
 }
+
+func TestHandleListRuns_PassesFiltersAndReturnsActors(t *testing.T) {
+	c := newFakePRs()
+	c.runs = []forge.WorkflowRun{{Name: "agent", Actor: "freaxnx01", TriggeringActor: "github-actions[bot]", HeadSHA: "abc"}}
+
+	_, out, err := depsFor(c).handleListRuns(context.Background(), nil,
+		listRunsInput{Forge: "github", Owner: "o", Repo: "r", Branch: "ai/41", HeadSHA: "abc", Limit: 5})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c.gotBranch != "ai/41" || c.gotHeadSHA != "abc" || c.gotLimit != 5 {
+		t.Errorf("filters: branch=%q sha=%q limit=%d", c.gotBranch, c.gotHeadSHA, c.gotLimit)
+	}
+	if len(out.Runs) != 1 || out.Runs[0].Actor != "freaxnx01" || out.Runs[0].TriggeringActor != "github-actions[bot]" {
+		t.Fatalf("runs: %+v", out.Runs)
+	}
+}
+
+func TestHandleListRuns_ClampsLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{"zero defaults to 20", 0, 20},
+		{"negative defaults to 20", -3, 20},
+		{"in range kept", 50, 50},
+		{"over 100 clamped", 500, 100},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			c := newFakePRs()
+			if _, _, err := depsFor(c).handleListRuns(context.Background(), nil,
+				listRunsInput{Forge: "github", Owner: "o", Repo: "r", Limit: tt.limit}); err != nil {
+				t.Fatal(err)
+			}
+			if c.gotLimit != tt.want {
+				t.Errorf("limit %d → %d, want %d", tt.limit, c.gotLimit, tt.want)
+			}
+		})
+	}
+}
+
+func TestHandleListRuns_ForgeWithoutCapabilityWarns(t *testing.T) {
+	_, out, err := depsFor(&fakeReader{name: "forgejo"}).handleListRuns(context.Background(), nil,
+		listRunsInput{Forge: "forgejo", Owner: "o", Repo: "r"})
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if len(out.Runs) != 0 || len(out.Warnings) != 1 || out.Warnings[0] != "forgejo does not support list_runs" {
+		t.Fatalf("out: %+v", out)
+	}
+}
+
+func TestHandleListRuns_ClientErrorPropagates(t *testing.T) {
+	c := newFakePRs()
+	c.runsErr = errors.New("timeout")
+	_, _, err := depsFor(c).handleListRuns(context.Background(), nil, listRunsInput{Forge: "github", Owner: "o", Repo: "r"})
+	if err == nil || !strings.Contains(err.Error(), "timeout") {
+		t.Fatalf("want wrapped error, got %v", err)
+	}
+}
+
+func TestHandleListRuns_PassesDeadline(t *testing.T) {
+	c := newFakePRs()
+	if _, _, err := depsFor(c).handleListRuns(context.Background(), nil, listRunsInput{Forge: "github", Owner: "o", Repo: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	if c.deadline <= 0 || c.deadline > toolTimeout {
+		t.Fatalf("forge call ctx deadline remaining %v, want (0, %v]", c.deadline, toolTimeout)
+	}
+}

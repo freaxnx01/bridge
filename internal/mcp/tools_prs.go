@@ -184,3 +184,56 @@ func capFiles(files []forge.PRFile, changedFiles int) ([]forge.PRFile, bool) {
 	}
 	return files, changedFiles > len(files)
 }
+
+const (
+	defaultRunLimit = 20
+	maxRunLimit     = 100
+)
+
+type listRunsInput struct {
+	Forge   string `json:"forge" jsonschema:"forge hosting the repo: github (forgejo returns a warning)"`
+	Owner   string `json:"owner" jsonschema:"repository owner"`
+	Repo    string `json:"repo" jsonschema:"repository name"`
+	Branch  string `json:"branch,omitempty" jsonschema:"optional branch filter"`
+	HeadSHA string `json:"head_sha,omitempty" jsonschema:"optional head commit filter"`
+	Limit   int    `json:"limit,omitempty" jsonschema:"max runs, default 20, at most 100"`
+}
+
+type listRunsOutput struct {
+	Runs     []forge.WorkflowRun `json:"runs"`
+	Warnings []string            `json:"warnings,omitempty"`
+}
+
+func runLimit(n int) int {
+	if n <= 0 {
+		return defaultRunLimit
+	}
+	return min(n, maxRunLimit)
+}
+
+// handleListRuns lists a repo's GitHub Actions runs, newest first, with the
+// actor and triggering actor of each — what tells a dispatched run apart from
+// a hand-started one.
+func (d Deps) handleListRuns(ctx context.Context, _ *mcp.CallToolRequest, in listRunsInput) (*mcp.CallToolResult, listRunsOutput, error) {
+	if err := requireRepo("list_runs", in.Owner, in.Repo); err != nil {
+		return nil, listRunsOutput{}, err
+	}
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return nil, listRunsOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+	lister, ok := client.(runLister)
+	if !ok {
+		return nil, listRunsOutput{Runs: []forge.WorkflowRun{}, Warnings: unsupported(in.Forge, "list_runs")}, nil
+	}
+	ctx, cancel := context.WithTimeout(ctx, toolTimeout)
+	defer cancel()
+	runs, err := lister.ListWorkflowRuns(ctx, in.Owner, in.Repo, in.Branch, in.HeadSHA, runLimit(in.Limit))
+	if err != nil {
+		return nil, listRunsOutput{}, fmt.Errorf("list runs %s/%s: %w", in.Owner, in.Repo, err)
+	}
+	if runs == nil {
+		runs = []forge.WorkflowRun{}
+	}
+	return nil, listRunsOutput{Runs: runs}, nil
+}

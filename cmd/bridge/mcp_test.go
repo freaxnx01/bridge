@@ -245,8 +245,8 @@ func TestBuildMCPHandler_ValidBearerListsTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(res.Tools) != 8 {
-		t.Fatalf("read-only server: want 8 tools over HTTP, got %d", len(res.Tools))
+	if len(res.Tools) != 11 {
+		t.Fatalf("read-only server: want 11 tools over HTTP, got %d", len(res.Tools))
 	}
 }
 
