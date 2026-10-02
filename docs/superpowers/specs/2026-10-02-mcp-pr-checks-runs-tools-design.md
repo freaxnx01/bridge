@@ -104,7 +104,7 @@ type runLister interface {
 interface, so `list_git_forges` advertises them. None is a write tool (`isWriteTool`
 unchanged), so all three are registered in `server.go` regardless of `--read-only`.
 
-### Tools (handlers in `tools_read.go`)
+### Tools (handlers in a new `tools_prs.go`; `tools_read.go` is already ~400 lines)
 
 **`list_prs`** — input `forge, owner, repo, state?, closes?`.
 `state` defaults to `open`; anything other than `open|closed|all` is `invalidInput`.
