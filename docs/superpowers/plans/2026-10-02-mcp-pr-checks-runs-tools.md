@@ -15,7 +15,7 @@
 - Read-only: no merge, approve, re-run or other write endpoint is called.
 - GitHub only. Forgejo (`ForgejoClient`) implements none of the new methods.
 - `forge.PullRequest` changes are additive; `ListOpenPullRequests` keeps its signature and request URL; dispatch behaviour and dispatch tests unchanged.
-- The `closes` filter uses `dispatch.ClosesIssue` (`internal/dispatch/eligible.go:67`) — imported, never copied.
+- The `closes` filter uses `dispatch.ClosesIssue` (`internal/dispatch/eligible.go:68`) — imported, never copied.
 - `const toolTimeout = 30 * time.Second` wraps each new handler's context.
 - One page per endpoint: `per_page=100` (PRs, files, check-runs), `list_runs` limit default 20, clamped to `[1, 100]`; `maxPRFiles = 100`.
 - Forge lacks the capability → empty result, nil error, warning text exactly `"<forge> does not support <tool>"`.
@@ -56,8 +56,8 @@ Handlers go in a new `tools_prs.go` rather than `tools_read.go` because `tools_r
 ### Task 1: Extend `forge.PullRequest` and add `ListPullRequests`
 
 **Files:**
-- Modify: `internal/forge/client.go:136-142`
-- Modify: `internal/forge/github.go:949-964`
+- Modify: `internal/forge/client.go:147-153`
+- Modify: `internal/forge/github.go:1022-1037`
 - Test: `internal/forge/github_test.go`
 
 **Interfaces:**
@@ -158,7 +158,7 @@ type PullRequest struct {
 }
 ```
 
-`internal/forge/github.go` — replace `ListOpenPullRequests` (lines 949-964) with:
+`internal/forge/github.go` — replace `ListOpenPullRequests` (lines 1022-1037) with:
 
 ```go
 // ghPull is GitHub's pull-request JSON, shared by the list and single-PR
@@ -603,7 +603,7 @@ git commit -m "feat(forge): read PRs, files, checks, statuses and workflow runs 
 ### Task 3: Capability interfaces and `Capabilities()` entries
 
 **Files:**
-- Modify: `internal/mcp/tools.go` (interfaces after `issueReader`, ~line 101; `Capabilities()` before the `repoArchiver` check, ~line 161)
+- Modify: `internal/mcp/tools.go` (interfaces after `issueReader`, lines 99-101; `Capabilities()` between the `issueReader` check at line 158 and the `repoArchiver` check at line 161)
 - Test: `internal/mcp/tools_test.go` (new test function), `internal/mcp/tools_prs_test.go` (create, fake only)
 
 **Interfaces:**
