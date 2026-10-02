@@ -46,6 +46,11 @@ func NewServer(deps Deps) *mcp.Server {
 	}, deps.handleListPRs)
 
 	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "get_pr",
+		Description: "Read one pull request: body, merged, mergeable_state, head SHA, changed files (path, additions, deletions; capped at 100, files_truncated signals more), and checks on the head SHA — check-runs (name, status, conclusion, app) and commit statuses. A failed files/checks fetch lands in warnings without failing the call. GitHub-only; a Forgejo target returns a warning.",
+	}, deps.handleGetPR)
+
+	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_git_forges",
 		Description: "List the configured forge targets, whether each is configured, and which tools it supports. Makes no network requests.",
 	}, deps.handleListGitForges)

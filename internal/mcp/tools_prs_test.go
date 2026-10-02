@@ -3,6 +3,7 @@ package mcp
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,112 @@ func TestHandleListPRs_ClientErrorPropagates(t *testing.T) {
 func TestHandleListPRs_PassesDeadline(t *testing.T) {
 	c := newFakePRs()
 	if _, _, err := depsFor(c).handleListPRs(context.Background(), nil, listPRsInput{Forge: "github", Owner: "o", Repo: "r"}); err != nil {
+		t.Fatal(err)
+	}
+	if c.deadline <= 0 || c.deadline > toolTimeout {
+		t.Fatalf("forge call ctx deadline remaining %v, want (0, %v]", c.deadline, toolTimeout)
+	}
+}
+
+func TestHandleGetPR_ReturnsPRFilesAndChecksForHeadSHA(t *testing.T) {
+	c := newFakePRs()
+	c.pr = forge.PullRequest{Number: 90, Body: "Closes #41", HeadSHA: "abc", MergeableState: "blocked", ChangedFiles: 1}
+	c.files = []forge.PRFile{{Path: "a.go", Additions: 3, Deletions: 1}}
+	c.checkRuns = []forge.CheckRun{{Name: "build", Status: "completed", Conclusion: "failure", App: "github-actions"}}
+	c.statuses = []forge.CommitStatus{{Context: "ci/legacy", State: "success"}}
+
+	_, out, err := depsFor(c).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r", Number: 90})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.PR == nil || out.PR.Body != "Closes #41" || out.PR.MergeableState != "blocked" {
+		t.Fatalf("pr: %+v", out.PR)
+	}
+	if c.gotSHA != "abc" {
+		t.Errorf("checks queried for %q, want head SHA abc", c.gotSHA)
+	}
+	if len(out.Files) != 1 || out.FilesTruncated {
+		t.Errorf("files: %+v truncated=%v", out.Files, out.FilesTruncated)
+	}
+	if len(out.Checks.CheckRuns) != 1 || out.Checks.CheckRuns[0].Conclusion != "failure" {
+		t.Errorf("check runs: %+v", out.Checks.CheckRuns)
+	}
+	if len(out.Checks.Statuses) != 1 || out.Checks.Statuses[0].State != "success" {
+		t.Errorf("statuses: %+v", out.Checks.Statuses)
+	}
+	if len(out.Warnings) != 0 {
+		t.Errorf("warnings: %v", out.Warnings)
+	}
+}
+
+func TestHandleGetPR_CapsFilesAndFlagsTruncation(t *testing.T) {
+	c := newFakePRs()
+	c.pr = forge.PullRequest{Number: 1, HeadSHA: "abc", ChangedFiles: 250}
+	for i := 0; i < 100; i++ {
+		c.files = append(c.files, forge.PRFile{Path: fmt.Sprintf("f%d.go", i)})
+	}
+
+	_, out, err := depsFor(c).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Files) != maxPRFiles || !out.FilesTruncated {
+		t.Fatalf("want %d files and truncated, got %d truncated=%v", maxPRFiles, len(out.Files), out.FilesTruncated)
+	}
+}
+
+func TestHandleGetPR_ChecksFailureIsPartialResult(t *testing.T) {
+	c := newFakePRs()
+	c.pr = forge.PullRequest{Number: 1, HeadSHA: "abc", ChangedFiles: 1}
+	c.files = []forge.PRFile{{Path: "a.go"}}
+	c.checksErr = errors.New("403 resource not accessible")
+
+	_, out, err := depsFor(c).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatalf("a failed check-runs fetch must not fail the call: %v", err)
+	}
+	if out.PR == nil || len(out.Files) != 1 {
+		t.Fatalf("pr and files must still be returned: %+v", out)
+	}
+	if len(out.Warnings) != 1 || !strings.Contains(out.Warnings[0], "check-runs") || !strings.Contains(out.Warnings[0], "403") {
+		t.Fatalf("warnings: %v", out.Warnings)
+	}
+	if out.Checks.CheckRuns == nil {
+		t.Error("check_runs must be an empty list, not null")
+	}
+}
+
+func TestHandleGetPR_PRFetchFailureErrors(t *testing.T) {
+	c := newFakePRs()
+	c.getErr = errors.New("404 not found")
+	_, _, err := depsFor(c).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r", Number: 9})
+	if err == nil || !strings.Contains(err.Error(), "404") {
+		t.Fatalf("want wrapped 404, got %v", err)
+	}
+}
+
+func TestHandleGetPR_RequiresPositiveNumber(t *testing.T) {
+	_, _, err := depsFor(newFakePRs()).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r"})
+	if !errors.Is(err, ErrInvalidInput) {
+		t.Fatalf("want ErrInvalidInput, got %v", err)
+	}
+}
+
+func TestHandleGetPR_ForgeWithoutCapabilityWarns(t *testing.T) {
+	_, out, err := depsFor(&fakeReader{name: "forgejo"}).handleGetPR(context.Background(), nil,
+		getPRInput{Forge: "forgejo", Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatalf("want no error, got %v", err)
+	}
+	if out.PR != nil || len(out.Warnings) != 1 || out.Warnings[0] != "forgejo does not support get_pr" {
+		t.Fatalf("out: %+v", out)
+	}
+}
+
+func TestHandleGetPR_PassesDeadline(t *testing.T) {
+	c := newFakePRs()
+	c.pr = forge.PullRequest{Number: 1, HeadSHA: "abc"}
+	if _, _, err := depsFor(c).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r", Number: 1}); err != nil {
 		t.Fatal(err)
 	}
 	if c.deadline <= 0 || c.deadline > toolTimeout {
