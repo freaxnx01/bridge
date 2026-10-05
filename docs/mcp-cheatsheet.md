@@ -140,6 +140,10 @@ claude mcp add --transport http bridge http://127.0.0.1:7788 \
 
 ## Integrating with Claude Desktop
 
+> For how the deployed endpoint is actually wired into Claude Code and Claude
+> Desktop today (native HTTP vs. the stdio→HTTP proxy), see
+> [`client-connections.md`](client-connections.md).
+
 Claude Desktop adds remote MCP servers as **custom connectors**:
 
 1. Open **Settings → Connectors** (naming/location may shift between
