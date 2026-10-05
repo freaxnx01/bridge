@@ -76,8 +76,9 @@ Config entry shape (token redacted):
 ```
 
 - **Adapter:** `bridge-mcp-proxy.mjs`, a zero-dependency stdio↔Streamable-HTTP
-  script (lives outside this repo, in `~/.local/bin` on the Win11 box). It
-  replaced `mcp-remote` on 2026-10-01.
+  script. Source is in [`contrib/claude-desktop/`](../contrib/claude-desktop/),
+  installed to `~/.local/bin` on the Win11 box. It replaced `mcp-remote` on
+  2026-10-01. Setup on a new machine: [claude-desktop-setup.md](claude-desktop-setup.md).
 - **Why not `mcp-remote`:** it holds a long-lived connection, gives up after two
   reconnect attempts, then stays alive doing nothing. Desktop never respawns a
   dead MCP process, so every network blip meant a Desktop restart (33 in 23
