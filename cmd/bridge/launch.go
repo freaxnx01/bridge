@@ -60,7 +60,7 @@ func init() {
 }
 
 // rcURLPattern matches the Remote Control link claude prints in its pane.
-var rcURLPattern = regexp.MustCompile(`https://claude\.ai/code/[A-Za-z0-9_\-/?=&.]+`)
+var rcURLPattern = regexp.MustCompile(`https://claude\.ai/code/session_[A-Za-z0-9]+`)
 
 func runLaunch(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
@@ -68,6 +68,13 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.ErrOrStderr(), format+"\n", a...)
 		os.Exit(2)
 		return nil
+	}
+	// Validate before resolveLaunchTarget: it creates worktrees and touches the MRU.
+	if launchRC && launchAgent != "" && launchAgent != "claude" {
+		return fail("bridge: --rc needs the claude agent (got %s)", launchAgent)
+	}
+	if launchAgent == "" && os.Getenv("BRIDGE_DEFAULT_AGENT") == "" {
+		return fail("bridge: no agent — pass --agent or set BRIDGE_DEFAULT_AGENT")
 	}
 	t, err := resolveLaunchTarget(args[0], launchWorktree, launchAgent)
 	if err != nil {
@@ -109,6 +116,10 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 	if launchRC {
 		res.RCURL = waitRCURL(t.Slot, launchRCWait)
 		if res.RCURL == "" {
+			if !sessionLive(t.Slot) {
+				fmt.Fprintf(cmd.ErrOrStderr(), "bridge: session %s exited during startup\n", t.Slot)
+				os.Exit(1)
+			}
 			fmt.Fprintf(cmd.ErrOrStderr(), "bridge: no Remote Control URL seen within %s (session is running)\n", launchRCWait)
 		}
 	}
@@ -127,15 +138,18 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 }
 
 // waitRCURL polls the slot's pane for the Remote Control link. Best effort:
-// returns "" on timeout or any tmux error.
+// returns "" on timeout, or early once the session is gone. The last match
+// wins: scrollback may hold links from an earlier run.
 func waitRCURL(slot string, wait time.Duration) string {
 	deadline := time.Now().Add(wait)
 	for {
 		out, err := exec.Command("tmux", "capture-pane", "-p", "-J", "-t", slot, "-S", "-200").Output()
-		if err == nil {
-			if m := rcURLPattern.FindString(string(out)); m != "" {
-				return m
+		if err != nil {
+			if !sessionLive(slot) {
+				return ""
 			}
+		} else if ms := rcURLPattern.FindAllString(string(out), -1); len(ms) > 0 {
+			return ms[len(ms)-1]
 		}
 		if time.Now().After(deadline) {
 			return ""

@@ -24,5 +24,5 @@ ln -sfn "$HERE/skills/bridge-operator"    "$WORKSPACE/.claude/skills/bridge-oper
 
 tmux new-session -d -s "$SESSION" -c "$WORKSPACE" \
   env CLAUDE_CONFIG_DIR="$CONFIG_DIR" \
-  claude -n bridge-admin --channels plugin:telegram@claude-plugins-official
+  claude -n bridge-admin --permission-mode default --channels plugin:telegram@claude-plugins-official
 echo "started $SESSION — attach: tmux attach -t $SESSION"

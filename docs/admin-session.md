@@ -13,6 +13,13 @@ does, get a Remote Control link to jump in from the phone.
    (`dmPolicy: allowlist`).
 3. Make sure no other process polls the same bot (one poller per token).
 
+## First run
+
+1. `tmux attach -t bridge-admin` and accept the workspace-trust / channel prompts.
+2. The telegram plugin must be installed for that config dir; if missing:
+   `CLAUDE_CONFIG_DIR=~/.claude-s0 claude plugin install telegram@claude-plugins-official`
+3. `access.json` must allowlist your Telegram user ID (`dmPolicy: allowlist`).
+
 ## Run
 
     admin/start-admin-session.sh      # idempotent
@@ -30,5 +37,22 @@ would dangle once the worktree is removed.
 - "stop bridge-wt-fix-x" → confirms in chat; the kill itself needs a one-time approval in the
   admin's tmux pane (`tmux attach -t bridge-admin`)
 
+`already_running`: the reported `agent` is the one requested, not necessarily
+the one the live session was started with.
+
 Permissions are scoped in `admin/settings.json`; anything outside the allow
 list prompts in the tmux pane (attach to approve).
+
+## Security model
+
+- The admin runs in **default permission mode** (pinned in `admin/settings.json`
+  and via `--permission-mode default`; bypass mode is disabled).
+- The allow list in `admin/settings.json` is the boundary. The deny list is
+  best-effort only (prefix match).
+- No pane reading: `tmux capture-pane` is denied.
+- Launched sessions use `BRIDGE_DEFAULT_AGENT` / `BRIDGE_DEFAULT_AGENT_ARGS`,
+  the same as `bridge nav`, so they may run in auto mode. They sit idle until
+  you steer them via the RC link. To launch phone-started sessions in default
+  mode instead, change the skill and the allow rule to
+  `bridge launch --agent claude …` (an explicit `--agent` skips the default args).
+- Only allowlisted Telegram users can reach the bot.

@@ -29,7 +29,9 @@ normal `~/.claude`, not this admin session's `~/.claude-s0`.
 - Reply with slot name + the `rc_url` (that link is how the user "attaches"
   from the phone). If `already_running` is true, say so and still send the link.
 - If `rc_url` is missing, say the session is running and the link didn't show
-  within the wait; offer `tmux capture-pane -p -t <slot>` to look again.
+  within the wait; offer to re-run the same
+  `env -u CLAUDE_CONFIG_DIR bridge launch … --rc --json` — on a live session it
+  reports `already_running` and re-scrapes the link.
 
 ## Stop a session
 

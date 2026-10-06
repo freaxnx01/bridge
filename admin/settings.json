@@ -8,14 +8,16 @@
       "Bash(bridge issues:*)",
       "Bash(bridge dispatch status:*)",
       "Bash(env -u CLAUDE_CONFIG_DIR bridge launch:*)",
-      "Bash(tmux list-sessions:*)",
-      "Bash(tmux capture-pane:*)"
+      "Bash(tmux list-sessions:*)"
     ],
     "deny": [
       "Bash(bridge rm:*)",
       "Bash(rm:*)",
       "Bash(git push:*)",
-      "Bash(git worktree remove:*)"
-    ]
+      "Bash(git worktree remove:*)",
+      "Bash(tmux capture-pane:*)"
+    ],
+    "defaultMode": "default",
+    "disableBypassPermissionsMode": "disable"
   }
 }
