@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(bridge status:*)",
+      "Bash(bridge sessions:*)",
+      "Bash(bridge slots:*)",
+      "Bash(bridge list:*)",
+      "Bash(bridge issues:*)",
+      "Bash(bridge dispatch status:*)",
+      "Bash(env -u CLAUDE_CONFIG_DIR bridge launch:*)",
+      "Bash(tmux list-sessions:*)",
+      "Bash(tmux capture-pane:*)",
+      "Bash(tmux kill-session:*)"
+    ],
+    "deny": [
+      "Bash(bridge rm:*)",
+      "Bash(rm:*)",
+      "Bash(git push:*)",
+      "Bash(git worktree remove:*)"
+    ]
+  }
+}
