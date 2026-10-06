@@ -30,6 +30,27 @@ Run it from the main checkout
 from a worktree: the workspace symlinks point at the script's location and
 would dangle once the worktree is removed.
 
+## Boot start + watchdog (systemd)
+
+    just admin-install                # from the main checkout
+
+installs `admin/bridge-admin.service` as a user unit (linger is on, so it
+starts at boot without a login). It runs `admin/run-admin-service.sh`, which
+starts the session and then checks every 30 s:
+
+- tmux session `bridge-admin` or its `claude` process gone → exit, systemd
+  restarts it after 30 s (`Restart=always`);
+- the telegram plugin (`bun server.ts` below this claude) missing for 180 s →
+  kill the session, systemd restarts it.
+
+An expired claude.ai login is not detected — attach and `/login`.
+Logs: `journalctl --user -u bridge-admin`. Tunables: `BRIDGE_ADMIN_PLUGIN_GRACE`,
+`BRIDGE_ADMIN_CHECK_INTERVAL` (seconds).
+
+Retired: the older `agent-dev-admin.service` used the same bot token; keep it
+disabled (`systemctl --user disable --now agent-dev-admin.service`) or the two
+sessions steal each other's Telegram updates.
+
 ## Use (Telegram)
 
 - "what's running?" → `bridge status`
@@ -45,8 +66,8 @@ list prompts in the tmux pane (attach to approve).
 
 ## Security model
 
-- The admin runs in **default permission mode** (pinned in `admin/settings.json`
-  and via `--permission-mode default`; bypass mode is disabled).
+- The admin runs in **auto mode** (`defaultMode: auto` in `admin/settings.json`
+  and `--permission-mode auto`); bypass mode is disabled.
 - `admin/settings.json` allows **all Bash commands** (`"Bash"`), so anything
   you ask via Telegram runs without an approval. The deny list
   (`rm`, `bridge rm`, `git push`, `git worktree remove`, `tmux capture-pane`)

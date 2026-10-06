@@ -31,5 +31,5 @@ fi
 
 tmux new-session -d -s "$SESSION" -c "$WORKSPACE" \
   env CLAUDE_CONFIG_DIR="$CONFIG_DIR" PATH="$HOME/.bun/bin:$PATH" \
-  claude -n bridge-admin --permission-mode default --channels plugin:telegram@claude-plugins-official
+  claude -n bridge-admin --permission-mode auto --channels plugin:telegram@claude-plugins-official
 echo "started $SESSION — attach: tmux attach -t $SESSION"

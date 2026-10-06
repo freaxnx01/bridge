@@ -22,7 +22,7 @@
       "Bash(git worktree remove:*)",
       "Bash(tmux capture-pane:*)"
     ],
-    "defaultMode": "default",
+    "defaultMode": "auto",
     "disableBypassPermissionsMode": "disable"
   }
 }
