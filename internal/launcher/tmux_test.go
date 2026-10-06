@@ -82,3 +82,40 @@ func TestTmuxLaunchRejectsEmptySlot(t *testing.T) {
 		t.Error("expected error on empty slot")
 	}
 }
+
+func TestTmuxLaunchArgvDetached(t *testing.T) {
+	l := &Tmux{}
+	got, err := l.LaunchArgvDetached("bridge-wt-x", "/repo/.worktrees/x",
+		agents.AgentSpec{Name: "claude", Bin: "claude", Args: []string{"-n", "bridge [x]", "--remote-control"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 3 || got[0] != "sh" || got[1] != "-c" {
+		t.Fatalf("want sh -c <body>, got %v", got)
+	}
+	body := got[2]
+	for _, want := range []string{
+		"tmux has-session -t bridge-wt-x 2>/dev/null || ",
+		"tmux new-session -d -s bridge-wt-x -c /repo/.worktrees/x claude -n 'bridge [x]' --remote-control",
+	} {
+		if !strings.Contains(body, want) {
+			t.Errorf("missing %q in %q", want, body)
+		}
+	}
+	if strings.Contains(body, "switch-client") || strings.Contains(body, "attach") {
+		t.Errorf("detached launch must not attach/switch: %q", body)
+	}
+}
+
+func TestTmuxLaunchArgvDetachedValidates(t *testing.T) {
+	l := &Tmux{}
+	if _, err := l.LaunchArgvDetached("", "/d", agents.AgentSpec{Bin: "claude"}); err == nil {
+		t.Error("empty slot: want error")
+	}
+	if _, err := l.LaunchArgvDetached("s", "", agents.AgentSpec{Bin: "claude"}); err == nil {
+		t.Error("empty dir: want error")
+	}
+	if _, err := l.LaunchArgvDetached("s", "/d", agents.AgentSpec{}); err == nil {
+		t.Error("empty bin: want error")
+	}
+}
