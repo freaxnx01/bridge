@@ -22,7 +22,14 @@ ln -sfn "$HERE/CLAUDE.md"                 "$WORKSPACE/CLAUDE.md"
 ln -sfn "$HERE/settings.json"             "$WORKSPACE/.claude/settings.json"
 ln -sfn "$HERE/skills/bridge-operator"    "$WORKSPACE/.claude/skills/bridge-operator"
 
+# The telegram plugin's MCP server runs on bun; the tmux server's PATH
+# usually lacks ~/.bun/bin, so pass it explicitly.
+if [ ! -x "$HOME/.bun/bin/bun" ] && ! command -v bun >/dev/null; then
+  echo "bun not found — the telegram plugin needs it: curl -fsSL https://bun.sh/install | bash" >&2
+  exit 1
+fi
+
 tmux new-session -d -s "$SESSION" -c "$WORKSPACE" \
-  env CLAUDE_CONFIG_DIR="$CONFIG_DIR" \
+  env CLAUDE_CONFIG_DIR="$CONFIG_DIR" PATH="$HOME/.bun/bin:$PATH" \
   claude -n bridge-admin --permission-mode default --channels plugin:telegram@claude-plugins-official
 echo "started $SESSION — attach: tmux attach -t $SESSION"
