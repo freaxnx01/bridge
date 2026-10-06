@@ -18,7 +18,6 @@ import (
 	"github.com/freaxnx01/bridge/internal/shellbridge"
 	"github.com/freaxnx01/bridge/internal/store"
 	"github.com/freaxnx01/bridge/internal/syncer"
-	worktreepkg "github.com/freaxnx01/bridge/internal/worktree"
 )
 
 var preflightCmd = &cobra.Command{
@@ -217,82 +216,29 @@ func preflightOpen(out io.Writer, args []string) error {
 	if name == "" {
 		return shellbridge.EmitNoop(out)
 	}
-	repos, err := reposWithMeta()
+	t, err := resolveLaunchTarget(name, worktree, agentName)
 	if err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		if _, ok := err.(errRepoLookup); ok {
+			os.Exit(2)
+		}
+		if agentName != "" { // unknown --agent: previous behaviour was exit 2
+			os.Exit(2)
+		}
 		return err
 	}
-	repo, ok := findRepoByName(repos, name)
-	if !ok {
-		matches := findReposByKeyword(repos, name)
-		if len(matches) == 1 {
-			repo = matches[0]
-		} else {
-			fmt.Fprintf(os.Stderr, "bridge: unknown repo %q\n", name)
-			os.Exit(2)
-		}
+	if !t.HasAgent {
+		return shellbridge.EmitCD(out, t.WorkDir)
 	}
-	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
-
-	// Resolve the working directory. With -w/--worktree, consult
-	// `git worktree list --porcelain` so an existing worktree is found
-	// wherever it lives (`.claude/worktrees/`, `.worktrees/`, a custom path);
-	// when none matches, one is created under `<repo>/.worktrees/<wt>`. If the
-	// repo isn't a git checkout (or git fails), fall back to the bare
-	// `.worktrees/<wt>` convention path.
-	workDir := repo.Path
-	if worktree != "" {
-		if dir, created, werr := worktreepkg.Resolve(worktreepkg.ExecRunner{}, repo.Path, worktree); werr == nil {
-			workDir = dir
-			if created {
-				fmt.Fprintf(os.Stderr, "bridge: created worktree %s\n", dir)
-			}
-		} else {
-			workDir = filepath.Join(repo.Path, ".worktrees", worktree)
-			fmt.Fprintf(os.Stderr, "bridge: worktree resolve failed (%v); using %s\n", werr, workDir)
-		}
-	}
-
-	// Explicit --agent wins. Otherwise fall back to BRIDGE_DEFAULT_AGENT so
-	// `bridge <repo>` auto-launches when the user has it configured —
-	// matching the picker entry points and the bash bridge's UX.
-	var spec agents.AgentSpec
-	if agentName != "" {
-		spec, err = agents.Resolve(agentName)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "bridge: %v\n", err)
-			os.Exit(2)
-		}
-	} else {
-		var ok bool
-		spec, ok = resolveDefaultAgent()
-		if !ok {
-			return shellbridge.EmitCD(out, workDir)
-		}
-		agentName = spec.Name
-	}
-	spec = withClaudeName(spec, repo, worktree)
-	ensureClaudeRelabel(spec, repo, worktree)
-	slot := slotIDFor(repo, worktree)
-	maybePreLaunchSync(workDir, slot, noSync)
-	// Record the slot in the registry. Non-fatal on failure — emitting the
-	// exec directive is still the right thing to do.
-	if err := core.UpsertSlot(filepath.Join(cacheRoot(), "slots.json"), core.Slot{
-		ID:       slot,
-		Repo:     repo.Name,
-		Worktree: worktree,
-		Agent:    agentName,
-		Created:  time.Now().UTC(),
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: slot upsert failed: %v\n", err)
-	}
+	finalizeLaunch(&t, noSync)
 	l := launcher.New()
 	var argv []string
 	if os.Getenv("TMUX") != "" {
 		// Already inside tmux: nesting `tmux new-session -A` fails, so use the
 		// nested launcher that creates-detached-then-switches the current client.
-		argv, err = l.LaunchArgvNested(slot, workDir, spec)
+		argv, err = l.LaunchArgvNested(t.Slot, t.WorkDir, t.Spec)
 	} else {
-		argv, err = l.LaunchArgv(slot, workDir, spec)
+		argv, err = l.LaunchArgv(t.Slot, t.WorkDir, t.Spec)
 	}
 	if err != nil {
 		return err
