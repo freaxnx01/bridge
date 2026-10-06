@@ -8,7 +8,11 @@
       "Bash(bridge issues:*)",
       "Bash(bridge dispatch status:*)",
       "Bash(env -u CLAUDE_CONFIG_DIR bridge launch:*)",
-      "Bash(tmux list-sessions:*)"
+      "Bash(tmux list-sessions:*)",
+      "mcp__plugin_telegram_telegram__reply",
+      "mcp__plugin_telegram_telegram__react",
+      "mcp__plugin_telegram_telegram__edit_message",
+      "mcp__plugin_telegram_telegram__download_attachment"
     ],
     "deny": [
       "Bash(bridge rm:*)",
