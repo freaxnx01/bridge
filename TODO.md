@@ -169,3 +169,7 @@ session summaries, auto-labeling, WebUI panels — see issue tracker for these).
 
 - [ ] Test starting a new Claude Code session via the Telegram bot
 - [ ] Add support for Hermes Agent
+
+### bridge-bot (Telegram admin session, `@agent_dev_ctl_bot`)
+
+- [ ] How to call `/usage` + `/clear`, or other slash cmds from the chat so they are executed in the CC CLI session?
