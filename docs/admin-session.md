@@ -18,11 +18,17 @@ does, get a Remote Control link to jump in from the phone.
     admin/start-admin-session.sh      # idempotent
     tmux attach -t bridge-admin       # look / approve prompts; Ctrl-B D to leave
 
+Run it from the main checkout
+(`~/repos/github/freaxnx01/public/bridge/admin/start-admin-session.sh`), not
+from a worktree: the workspace symlinks point at the script's location and
+would dangle once the worktree is removed.
+
 ## Use (Telegram)
 
 - "what's running?" → `bridge status`
 - "start bridge worktree fix-x" → `env -u CLAUDE_CONFIG_DIR bridge launch bridge -w fix-x --rc --json` → link
-- "stop bridge-wt-fix-x" → confirms, then kills the tmux session
+- "stop bridge-wt-fix-x" → confirms in chat; the kill itself needs a one-time approval in the
+  admin's tmux pane (`tmux attach -t bridge-admin`)
 
 Permissions are scoped in `admin/settings.json`; anything outside the allow
 list prompts in the tmux pane (attach to approve).

@@ -9,8 +9,7 @@
       "Bash(bridge dispatch status:*)",
       "Bash(env -u CLAUDE_CONFIG_DIR bridge launch:*)",
       "Bash(tmux list-sessions:*)",
-      "Bash(tmux capture-pane:*)",
-      "Bash(tmux kill-session:*)"
+      "Bash(tmux capture-pane:*)"
     ],
     "deny": [
       "Bash(bridge rm:*)",

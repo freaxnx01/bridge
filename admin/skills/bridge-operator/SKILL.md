@@ -34,7 +34,9 @@ normal `~/.claude`, not this admin session's `~/.claude-s0`.
 ## Stop a session
 
 Only on an explicit request naming the session. Confirm once in chat
-("Stop `<slot>`? It has N min of activity"), then `tmux kill-session -t <slot>`.
+("Stop `<slot>`?"), then run `tmux kill-session -t <slot>`. That command is
+not pre-approved: it needs a one-time approval in the admin's tmux pane
+(`tmux attach -t bridge-admin`), so tell the user to approve it there.
 Never kill `bridge-admin` (that's you).
 
 ## Never
