@@ -32,6 +32,12 @@ type errRepoLookup struct{ msg string }
 
 func (e errRepoLookup) Error() string { return e.msg }
 
+// errAgentLookup marks an unknown/invalid --agent; callers print it and exit 2.
+type errAgentLookup struct{ cause error }
+
+func (e errAgentLookup) Error() string { return "bridge: " + e.cause.Error() }
+func (e errAgentLookup) Unwrap() error { return e.cause }
+
 func resolveLaunchTarget(name, worktree, agentName string) (launchTarget, error) {
 	repos, err := reposWithMeta()
 	if err != nil {
@@ -76,7 +82,7 @@ func resolveLaunchTarget(name, worktree, agentName string) (launchTarget, error)
 	if agentName != "" {
 		spec, err := agents.Resolve(agentName)
 		if err != nil {
-			return launchTarget{}, fmt.Errorf("bridge: %w", err)
+			return launchTarget{}, errAgentLookup{err}
 		}
 		t.Spec, t.AgentName, t.HasAgent = spec, agentName, true
 	} else if spec, ok := resolveDefaultAgent(); ok {

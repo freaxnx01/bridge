@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -218,11 +219,10 @@ func preflightOpen(out io.Writer, args []string) error {
 	}
 	t, err := resolveLaunchTarget(name, worktree, agentName)
 	if err != nil {
-		fmt.Fprintln(os.Stderr, err)
-		if _, ok := err.(errRepoLookup); ok {
-			os.Exit(2)
-		}
-		if agentName != "" { // unknown --agent: previous behaviour was exit 2
+		var rl errRepoLookup
+		var al errAgentLookup
+		if errors.As(err, &rl) || errors.As(err, &al) {
+			fmt.Fprintln(os.Stderr, err)
 			os.Exit(2)
 		}
 		return err

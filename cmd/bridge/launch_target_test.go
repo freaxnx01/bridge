@@ -2,6 +2,7 @@ package main
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -51,7 +52,12 @@ func TestResolveLaunchTargetUnknownAgent(t *testing.T) {
 	root := writeFakeRepos(t)
 	t.Setenv("BRIDGE_REPOS_ROOT", root)
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-	if _, err := resolveLaunchTarget("bridge", "", "no-such-agent"); err == nil {
-		t.Fatal("want error for unknown agent")
+	_, err := resolveLaunchTarget("bridge", "", "no-such-agent")
+	var ae errAgentLookup
+	if !errors.As(err, &ae) {
+		t.Fatalf("want errAgentLookup, got %v", err)
+	}
+	if !strings.HasPrefix(err.Error(), "bridge: ") {
+		t.Errorf("message %q lacks bridge: prefix", err.Error())
 	}
 }
