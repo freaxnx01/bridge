@@ -47,8 +47,12 @@ list prompts in the tmux pane (attach to approve).
 
 - The admin runs in **default permission mode** (pinned in `admin/settings.json`
   and via `--permission-mode default`; bypass mode is disabled).
-- The allow list in `admin/settings.json` is the boundary. The deny list is
-  best-effort only (prefix match).
+- `admin/settings.json` allows **all Bash commands** (`"Bash"`), so anything
+  you ask via Telegram runs without an approval. The deny list
+  (`rm`, `bridge rm`, `git push`, `git worktree remove`, `tmux capture-pane`)
+  still wins over the allow, but it is prefix-match only and easy to sidestep.
+  The real boundary is the Telegram allowlist in `access.json`: only your
+  user ID can reach the bot.
 - No pane reading: `tmux capture-pane` is denied.
 - Launched sessions use `BRIDGE_DEFAULT_AGENT` / `BRIDGE_DEFAULT_AGENT_ARGS`,
   the same as `bridge nav`, so they may run in auto mode. They sit idle until
