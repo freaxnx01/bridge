@@ -3,9 +3,13 @@
 package main
 
 import (
+	"bytes"
 	"encoding/json"
+	"errors"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 )
@@ -72,20 +76,32 @@ func TestLaunchStartsDetachedSessionJSON(t *testing.T) {
 
 func TestLaunchAlreadyRunningDoesNotStartAgain(t *testing.T) {
 	bin, logPath := fakeTmux(t)
+	gitLog := filepath.Join(bin, "git.log")
+	gitScript := "#!/bin/sh\necho \"$*\" >> \"" + gitLog + "\"\nexit 0\n"
+	if err := os.WriteFile(filepath.Join(bin, "git"), []byte(gitScript), 0o755); err != nil {
+		t.Fatal(err)
+	}
 	cmd := bridgeCmd("launch", "bridge", "--agent", "claude", "--json")
-	cmd.Env = launchEnv(t, bin, "FAKE_TMUX_LIVE=bridge|0|1700000000|1700000000")
+	// Sync enabled on purpose: a live slot must still never be pulled.
+	cmd.Env = slices.DeleteFunc(launchEnv(t, bin, "FAKE_TMUX_LIVE=bridge|0|1700000000|1700000000"),
+		func(e string) bool { return strings.HasPrefix(e, "BRIDGE_NO_SYNC=") })
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
 	var res launchResult
-	_ = json.Unmarshal(out, &res)
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
 	if !res.AlreadyRunning {
 		t.Errorf("want already_running=true: %s", out)
 	}
 	log, _ := os.ReadFile(logPath)
 	if strings.Contains(string(log), "new-session") {
 		t.Errorf("must not create a session when live; log:\n%s", log)
+	}
+	if g, _ := os.ReadFile(gitLog); strings.Contains(string(g), "pull") || strings.Contains(string(g), "fetch") {
+		t.Errorf("must not sync a live slot; git log:\n%s", g)
 	}
 }
 
@@ -98,7 +114,9 @@ func TestLaunchRCScrapesURL(t *testing.T) {
 		t.Fatalf("run: %v\n%s", err, out)
 	}
 	var res launchResult
-	_ = json.Unmarshal(out, &res)
+	if err := json.Unmarshal(out, &res); err != nil {
+		t.Fatalf("json: %v\n%s", err, out)
+	}
 	if res.RCURL != "https://claude.ai/code/session_01ABCxyz" {
 		t.Errorf("rc_url = %q", res.RCURL)
 	}
@@ -108,9 +126,14 @@ func TestLaunchRCURLMissingStillSucceeds(t *testing.T) {
 	bin, _ := fakeTmux(t)
 	cmd := bridgeCmd("launch", "bridge", "--agent", "claude", "--rc", "--rc-wait", "1s", "--json")
 	cmd.Env = launchEnv(t, bin, "FAKE_TMUX_PANE=starting…")
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
 	out, err := cmd.Output()
 	if err != nil {
 		t.Fatalf("launch must succeed without RC URL: %v\n%s", err, out)
+	}
+	if !strings.Contains(stderr.String(), "no Remote Control URL") {
+		t.Errorf("stderr note missing: %q", stderr.String())
 	}
 	if strings.Contains(string(out), "rc_url") {
 		t.Errorf("rc_url should be omitted: %s", out)
@@ -122,20 +145,32 @@ func TestLaunchErrorsExit2(t *testing.T) {
 	for _, tc := range []struct {
 		name string
 		args []string
+		hint string
 	}{
-		{"unknown repo", []string{"launch", "nope", "--agent", "claude"}},
-		{"no agent", []string{"launch", "bridge"}},
-		{"rc non-claude", []string{"launch", "bridge", "--agent", "code", "--rc"}},
+		{"unknown repo", []string{"launch", "nope", "--agent", "claude"}, "unknown repo"},
+		{"ambiguous repo", []string{"launch", "e", "--agent", "claude"}, "ambiguous"},
+		{"no agent", []string{"launch", "bridge"}, "--agent"},
+		{"rc non-claude", []string{"launch", "bridge", "--agent", "code", "--rc"}, "--rc"},
 	} {
 		cmd := bridgeCmd(tc.args...)
 		cmd.Env = launchEnv(t, bin)
-		out, err := cmd.CombinedOutput()
+		var stderr bytes.Buffer
+		cmd.Stderr = &stderr
+		out, err := cmd.Output()
 		if err == nil {
 			t.Errorf("%s: want non-zero exit, got success: %s", tc.name, out)
 			continue
 		}
-		if ee, ok := err.(interface{ ExitCode() int }); ok && ee.ExitCode() != 2 {
-			t.Errorf("%s: exit %d, want 2: %s", tc.name, ee.ExitCode(), out)
+		var ee *exec.ExitError
+		if !errors.As(err, &ee) {
+			t.Errorf("%s: error is not an exit error: %v", tc.name, err)
+			continue
+		}
+		if ee.ExitCode() != 2 {
+			t.Errorf("%s: exit %d, want 2: %s", tc.name, ee.ExitCode(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), tc.hint) {
+			t.Errorf("%s: stderr %q lacks %q", tc.name, stderr.String(), tc.hint)
 		}
 	}
 	if log, _ := os.ReadFile(logPath); strings.Contains(string(log), "new-session") {
