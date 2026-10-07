@@ -23,11 +23,16 @@ cross-forge tools below over GitHub + Forgejo (a subset of them in
 | `list_tree` | List a directory's entries, or the full tree with `recursive: true` | Default branch only; a `truncated` flag surfaces when GitHub's recursive trees API cuts off past its size limit rather than silently returning a partial tree; an empty repo returns an empty list, not an error |
 | `search_code` | Cross-repo code search across configured (or requested) owners | **GitHub-only** — Forgejo has no code-search REST API (only an HTML search page), so a Forgejo target lands in `warnings`, not a silent empty result. GitHub's search API reports matching files, not lines; each match is re-fetched via `read_file`'s underlying call to locate the actual line number. A rate-limited target (GitHub's search API has a much tighter limit than the rest) is called out by name in `warnings` too, distinct from "no matches" |
 | `list_issues` | List open issues for a single repo | Needs no capability assertion — part of the tier-1 `ForgeReader` surface, so it works on any wired forge |
+| `get_issue` | One issue's body and comment thread (author, body, created, in order) | Read-only. Comments are capped at the newest 20; `comments_truncated` and `total_comments` signal when there are more |
 | `list_prs` | List a repo's pull requests (author, head/base branch, head SHA, draft, state, url) | **GitHub-only, read-only** — a Forgejo target returns a warning, not an empty list. `state` is `open` (default), `closed` or `all`; one page of the 100 most recently updated, with `truncated: true` when that page is full (set before the `closes` filter, so it survives filtering down to an empty result). `closes: N` keeps PRs whose body closes issue N, using the same rule dispatch uses to decide an issue already has a PR |
 | `get_pr` | One PR's body, merged, mergeable_state, head SHA, changed files, and the checks on its head SHA | **GitHub-only, read-only.** Checks are check-runs (name, status, conclusion, app) plus commit statuses. Files are capped at 100 with `files_truncated`. A failed files/check-runs/statuses fetch lands in `warnings` without failing the call |
 | `list_runs` | List a repo's GitHub Actions runs with `actor` and `triggering_actor` | **GitHub-only, read-only.** Optional `branch` / `head_sha` filters; `limit` defaults to 20, max 100 |
 | `list_git_forges` | List the configured `(forge, owner)` targets, whether each is configured, and which tools it supports | Read-only, no network requests — resolution is cached per process |
 | `create_issue` | Create an issue | **Draft by default** — nothing is created unless called with `confirm: true`. Not registered at all when `--read-only` |
+| `close_issue` | Close an issue | **Draft by default**, same `confirm: true` gate. Not registered when `--read-only` |
+| `update_issue` | Update an issue's title and/or body | **Draft by default**, same `confirm: true` gate. Not registered when `--read-only` |
+| `add_labels` | Add labels to an issue | **Draft by default**, same `confirm: true` gate. Not registered when `--read-only` |
+| `comment_issue` | Post a comment on an issue | **Draft by default**, same `confirm: true` gate. Not registered when `--read-only` |
 | `create_repo` | Create a repository | **Draft by default**, same `confirm: true` gate. Not registered at all when `--read-only`. The `owner` input selects which account's **token** to use, not the destination — both clients POST to `/user/repos`, so the repo is created under whichever account the token belongs to, which may differ from the requested owner |
 | `update_repo` | Update description, topics, visibility, and/or archived state | **Draft by default**, same `confirm: true` gate. `topics` lives on a separate endpoint from the rest — if it fails after the description/private/archived PATCH already succeeded, that's reported as a partial result (`topics_error` alongside a populated `result`), not a top-level error that would discard the successful half. `archived: true` additionally requires the server to run with `--allow-destructive`, since archiving blocks all further writes to the repo |
 | `put_file` | Create or update a file directly on the default branch | **Draft by default**, same `confirm: true` gate. No branch/PR — git history is the rollback. Path must fall within the server's path allowlist (default `docs/**/*.md` and `*.md`; configurable, `.github/**` always denied). Updating an existing file requires `sha` (read it via `read_file`/`list_tree` first) — an update without it is rejected before any write is attempted |
@@ -36,7 +41,13 @@ cross-forge tools below over GitHub + Forgejo (a subset of them in
 `list_prs`, `get_pr` and `list_runs` each bound the whole call to 30 s, so a stalled GitHub request fails fast instead of holding the MCP call. Merging, approving and re-running stay human acts — none of them is exposed.
 
 The endpoint is guarded by a **static bearer token** (`BRIDGE_MCP_TOKEN`),
-compared in constant time.
+compared in constant time. Alternatively `--auth=oauth` makes bridge its own
+OAuth 2.1 authorization server for Claude custom connectors; see the
+README's [`--auth=oauth`](../README.md#--authoauth) section.
+
+Every confirmed write (`confirm: true`) is appended to an audit log, success
+or error: `$BRIDGE_AUDIT_LOG_PATH`, else `$XDG_STATE_HOME/bridge/audit.jsonl`,
+else `~/.local/state/bridge/audit.jsonl`.
 
 ---
 
@@ -49,7 +60,7 @@ export BRIDGE_MCP_OWNERS="github:freaxnx01, forgejo:freax"
 bridge mcp serve
 ```
 
-Server logs `Bridge MCP addr=http://127.0.0.1:7788 read_only=false auth=true`
+Server logs `Bridge MCP addr=http://127.0.0.1:7788 read_only=false allow_destructive=false auth=true auth_mode=static`
 and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 
 ### Flags
@@ -58,7 +69,9 @@ and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 |---|---|---|
 | `--port` | `7788` | Port to listen on |
 | `--host` | `127.0.0.1` | Host to bind. Combining `--no-auth` with a non-loopback host is rejected at startup |
-| `--read-only` | `false` | Omits `create_issue` and `create_repo` entirely (not just gated — never registered) |
+| `--read-only` | `false` | Omits all write tools entirely (`create_issue`, `close_issue`, `update_issue`, `add_labels`, `comment_issue`, `create_repo`, `update_repo`, `put_file`). They're never registered, not just gated |
+| `--allow-destructive` | `false` | Lets confirmed destructive changes run. Today that's only `update_repo` with `archived: true` |
+| `--auth` | `static` | `static` (bearer token from `BRIDGE_MCP_TOKEN`) or `oauth` (see the README). `--no-auth` with `--auth=oauth` is a startup error |
 | `--no-auth` | `false` | Skips the bearer check. **Loopback only** — the server refuses to start otherwise |
 | `--put-file-allowlist` | `docs/**/*.md,*.md` | Comma-separated path patterns `put_file` may write to; `.github/**` is always denied regardless |
 
@@ -69,7 +82,10 @@ and listens until `SIGINT`/`SIGTERM` (graceful shutdown, 10s drain).
 | `BRIDGE_MCP_TOKEN` | yes, unless `--no-auth` | The bearer secret clients must send as `Authorization: Bearer <token>` |
 | `BRIDGE_MCP_OWNERS` | no | Default `(forge:owner)` targets for `list_repos` when no `owner` is given in a tool call, e.g. `"github:freaxnx01, forgejo:freax"` (comma/space separated) |
 | `BRIDGE_MCP_READONLY` | no | Set to `1` as an alternative to `--read-only` |
+| `BRIDGE_MCP_ALLOW_DESTRUCTIVE` | no | Set to `1` as an alternative to `--allow-destructive` |
 | `BRIDGE_MCP_PUT_FILE_ALLOWLIST` | no | Overrides `--put-file-allowlist` when set |
+| `BRIDGE_AUDIT_LOG_PATH` | no | Where confirmed writes are logged (default `~/.local/state/bridge/audit.jsonl`, or under `$XDG_STATE_HOME`) |
+| `BRIDGE_MCP_ISSUER`, `BRIDGE_OIDC_*`, … | with `--auth=oauth` | See the README's `--auth=oauth` section for the full list |
 | `BRIDGE_GITHUB_API` / `BRIDGE_FORGEJO_API` | no | Override the default API base URLs (self-hosted Forgejo, GitHub Enterprise, etc.) |
 
 Per-owner **GitHub** tokens and the single **Forgejo** token are resolved the
@@ -95,9 +111,11 @@ curl -s -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:7788/ \
 
 ### Running it long-term
 
-There's no systemd unit yet (tracked in `TODO.md`) — for now, run it in a
-`tmux` pane, under a process supervisor of your choice, or add
-`--no-auth`-free `bridge mcp serve` to your own service manager. Since
+The deployed instances run as a `systemd --user` service
+(`bridge-mcp.service`), but that unit file isn't checked into this repo yet
+(`docs/systemd/` only has the dispatch units). Elsewhere, run it in a `tmux`
+pane or under any process supervisor, with a real token rather than
+`--no-auth`. Since
 `WriteTimeout` is intentionally unset (a single tool call can run long), don't
 put a strict reverse-proxy timeout in front of it either.
 
@@ -135,31 +153,31 @@ claude mcp add --transport http bridge http://127.0.0.1:7788 \
 - Verify it's connected: `claude mcp list` (or `/mcp` inside a Claude Code
   session).
 - Remove it later with `claude mcp remove bridge`.
+- Against a server running `--auth=oauth`, leave out `--header` and log in
+  via `/mcp` instead. The server's `BRIDGE_MCP_ALLOWED_REDIRECT_URIS` must
+  contain a port-less loopback entry (e.g. `http://localhost/callback`),
+  because Claude Code's callback port changes on every launch.
 
 ---
 
 ## Integrating with Claude Desktop
 
-> For how the deployed endpoint is actually wired into Claude Code and Claude
-> Desktop today (native HTTP vs. the stdio→HTTP proxy), see
-> [`client-connections.md`](client-connections.md).
+There are two ways in, and only the first works today:
 
-Claude Desktop adds remote MCP servers as **custom connectors**:
+- **Local stdio proxy (use this).** `claude_desktop_config.json` launches
+  `contrib/claude-desktop/bridge-mcp-proxy.mjs`, which turns each message
+  into one HTTP POST with the bearer token. This works for a server on
+  loopback, behind an SSH tunnel or on HTTPS. Setup:
+  [`claude-desktop-setup.md`](claude-desktop-setup.md). Background:
+  [`client-connections.md`](client-connections.md).
 
-1. Open **Settings → Connectors** (naming/location may shift between
-   versions — look for "Add custom connector" or similar).
-2. Enter the server URL: `http://127.0.0.1:7788`.
-3. If the UI offers a custom-headers field, set
-   `Authorization: Bearer <BRIDGE_MCP_TOKEN>` there.
-
-Desktop's remote-connector UI has historically leaned toward OAuth-style
-auth flows rather than static bearer headers — if your installed version
-doesn't expose a custom-headers option, the workaround is a small local
-reverse proxy that injects the `Authorization` header before forwarding to
-`bridge mcp serve` (e.g. a two-line Caddy/nginx config), or use `--no-auth`
-purely for local Desktop use since the server refuses to bind non-loopback
-without a token anyway. Check Anthropic's current Claude Desktop docs for
-the exact steps in your version.
+- **Custom connector (Settings → Connectors).** These aren't dialled from
+  your machine but from Anthropic's servers, and they authenticate only via
+  OAuth. A `127.0.0.1` URL can't be reached, and neither a static bearer
+  header, a local header-adding reverse proxy nor `--no-auth` helps. The
+  connector route needs a publicly reachable HTTPS endpoint running
+  `--auth=oauth`, and that deployment hasn't been made yet (see the
+  README).
 
 ---
 
@@ -201,6 +219,8 @@ header) still apply regardless of the UI.
 |---|---|
 | Server refuses to start: `BRIDGE_MCP_TOKEN is required` | Set the env var or pass `--no-auth` |
 | Server refuses to start: `--no-auth requires a loopback --host` | Don't combine `--no-auth` with `--host 0.0.0.0`/a public IP — use a real token instead |
+| Server refuses to start: `--no-auth is incompatible with --auth=oauth` | OAuth mode always requires a token; drop `--no-auth` |
+| Custom connector in Claude Desktop/web never connects | Connectors are dialled from Anthropic's servers, so a loopback or LAN URL is unreachable. Use the local stdio proxy instead (see "Integrating with Claude Desktop") |
 | `list_repos` returns fewer repos than expected, with entries in `warnings` | A target's forge token couldn't be resolved (missing direnv scope) or its API call failed — check the warning text for which `(forge, owner)` and why |
 | `read_file`/`list_repos` with an `owner` but no `forge` errors out | This is intentional — `forge` is required alongside an explicit `owner` to avoid silently guessing which forge |
 | `create_issue` call "succeeds" but nothing shows up on GitHub/Forgejo | You didn't pass `confirm: true` — the response is a draft by design |

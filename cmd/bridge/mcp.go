@@ -55,7 +55,7 @@ func newMCPCmd() *cobra.Command {
 	}
 	serveCmd.Flags().IntVar(&mcpPort, "port", 7788, "port to listen on")
 	serveCmd.Flags().StringVar(&mcpHost, "host", "127.0.0.1", "host to bind to")
-	serveCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "disable write tools (create_issue is not registered)")
+	serveCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "disable write tools (none of them is registered)")
 	serveCmd.Flags().BoolVar(&mcpAllowDestructive, "allow-destructive", false, "allow destructive tools to execute when confirmed (reserved for future archive_repo/delete_repo; tier-1 tools are unaffected)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
 	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
