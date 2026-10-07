@@ -19,6 +19,7 @@ Claude Desktop ──stdio──▶ node bridge-mcp-proxy.mjs ──one HTTPS PO
 | `bridge-mcp-proxy.mjs` | stdio ↔ Streamable-HTTP adapter, zero dependencies | **yes** |
 | `bridge-mcp-watchdog.ps1` | Detects a missing or stuck proxy and shows a notification | optional, Windows only |
 | `bridge-mcp-watchdog.vbs` | Silent launcher for the watchdog, so no console window flashes | only with the watchdog |
+| `bridge-mcp-tunnel.ps1` | Keeps an SSH tunnel to a server Desktop can't reach directly | only [via SSH tunnel](#reaching-bridge-through-an-ssh-tunnel) |
 
 ### Differences from mcp-remote
 
@@ -158,13 +159,24 @@ listed.
 
 The watchdog runs every 5 minutes. When Desktop is running, it checks that a
 bridge proxy process exists. If there's none, it shows a single balloon
-notification ("Restart Claude Desktop"), and it won't repeat that
-notification until the problem clears. Because the proxy is stateless, an
-alive proxy counts as healthy. The script still contains the socket-based
-stuck detection for `mcp-remote`, in case you roll back.
+notification, and it won't repeat that notification until the problem
+clears. Because the proxy is stateless, an alive proxy counts as healthy.
+The script still contains the socket-based stuck detection for `mcp-remote`,
+in case you roll back.
 
-If your server URL differs, edit `$ServerUrl` at the top of
-`bridge-mcp-watchdog.ps1`. Then register the task as your user:
+Which notification you get depends on whether the server is reachable:
+
+| Server reachable? | Notification |
+|---|---|
+| no (VPN down, tunnel not up) | "bridge-mcp is unreachable (VPN down?). Connect first" |
+| yes | "Restart Claude Desktop to reconnect" |
+
+So after a Desktop start without VPN you get the first notification, and
+the restart prompt follows once you've connected.
+
+The watchdog reads the server URL from the `bridge` entry in
+`claude_desktop_config.json`, so there's nothing to edit. Pass `-ServerUrl`
+to override it. Register the task as your user:
 
 ```powershell
 $user      = "$env:USERDOMAIN\$env:USERNAME"
@@ -194,9 +206,67 @@ Useful switches when you run it by hand:
 
 | Switch | Effect |
 |---|---|
-| `-DryRun` | Only reports what it would kill |
+| `-DryRun` | Only reports what it would kill or notify |
+| `-ServerUrl URL` | Checks this URL instead of the one in the Desktop config |
 | `-RenotifyHours N` | Repeats the notification every N hours |
 | `-AutoRestartDesktop` | Restarts Desktop unattended. This is disruptive: it kills in-flight Desktop and Claude Code-in-Desktop work |
+
+## Reaching bridge through an SSH tunnel
+
+Use this when the bridge instance you want isn't published over HTTPS and
+only listens on loopback on a server you can SSH into, for example a work
+server that's only reachable from the office or over VPN.
+
+```
+Claude Desktop ──stdio──▶ bridge-mcp-proxy.mjs ──HTTP──▶ localhost:17788 ══ssh -L══▶ <ssh-host>:127.0.0.1:7788 (bridge mcp serve)
+```
+
+1. Check that `ssh <ssh-host>` works without a prompt. The tunnel runs
+   with `BatchMode=yes`, so it needs key-based auth.
+
+2. Copy `bridge-mcp-tunnel.ps1` and `run-hidden.vbs` (step 2 copies all of
+   `contrib/claude-desktop/`) and register a logon task:
+
+   ```powershell
+   $bin  = "$env:USERPROFILE\.local\bin"
+   $user = "$env:USERDOMAIN\$env:USERNAME"
+   $action = New-ScheduledTaskAction -Execute 'C:\Windows\System32\wscript.exe' `
+     -Argument "//B //NoLogo `"$bin\run-hidden.vbs`" `"C:\Program Files\PowerShell\7\pwsh.exe`" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File `"$bin\bridge-mcp-tunnel.ps1`" -SshHost <ssh-host>"
+   $settings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit 0 -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries
+   Register-ScheduledTask -TaskName 'bridge-mcp-tunnel' -Action $action `
+     -Trigger (New-ScheduledTaskTrigger -AtLogOn -User $user) -Settings $settings `
+     -Principal (New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive)
+   Start-ScheduledTask bridge-mcp-tunnel
+   ```
+
+   `-ExecutionTimeLimit 0` matters: the script runs forever, and the default
+   limit of 3 days would kill it. Local port 17788 is the default rather
+   than 7788 because 7788 was stuck on the first Win11 machine, probably a
+   stale WSL port reservation. Change it with `-LocalPort`.
+
+3. In step 3 and step 4, use `http://localhost:17788/` as the server URL,
+   and that bridge instance's own token. A token for the HTTPS endpoint
+   gets a 401 here: each instance has its own `BRIDGE_MCP_TOKEN`.
+
+Log: `%LOCALAPPDATA%\bridge-mcp-tunnel.log`. It rotates at 2 MB.
+
+### When the server is only reachable over VPN
+
+Nothing needs to run in a fixed order, but one thing does need attention:
+
+- **The tunnel** retries forever and backs off from 10 s to 60 s while the
+  server is unreachable. It reconnects by itself within about a minute of
+  the VPN coming up.
+
+- **VPN drops while Desktop is running:** bridge calls fail with "bridge
+  unreachable" until the tunnel is back, then work again. There's no
+  restart.
+
+- **Desktop starts while the VPN is down:** the proxy's `initialize` fails
+  after about 45 s, and Desktop drops bridge for the rest of that run.
+  **Connect the VPN before starting Desktop.** If you forgot, connect and
+  then restart Desktop. The watchdog says which of the two applies: first
+  "connect first", then "restart" once the server is reachable.
 
 ## macOS / Linux
 
