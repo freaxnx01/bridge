@@ -13,6 +13,9 @@ func TestSlotID_RepoAndWorktree(t *testing.T) {
 	tests := []struct{ name, repo, wt, want string }{
 		{"no worktree", "bridge", "", "bridge"},
 		{"with worktree", "bridge", "fix-x", "bridge-wt-fix-x"},
+		{"dotted repo", "freaxnx01.github.io", "", "freaxnx01_github_io"},
+		{"dotted repo and worktree", "freaxnx01.github.io", "fix.1", "freaxnx01_github_io-wt-fix_1"},
+		{"colon", "a:b", "", "a_b"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

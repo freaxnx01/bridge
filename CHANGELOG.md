@@ -57,6 +57,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Repos with a `.` (or `:`) in their name, e.g. `freaxnx01.github.io`, launch
+  and are detected again: slot ids now replace those characters with `_`, the
+  same way tmux rewrites session names. Previously `bridge launch` reported
+  "exited during startup", scraped no RC link, and failed on re-launch with
+  `duplicate session` (#337)
 - Forgejo repo listing pages through every result page instead of stopping
   after the first 50, so owners with more repos no longer lose the rest from
   `bridge list -r` and the `nav` picker

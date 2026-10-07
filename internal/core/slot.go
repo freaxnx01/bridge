@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/freaxnx01/bridge/internal/store"
@@ -21,15 +22,21 @@ type slotFile struct {
 	Slots []Slot `json:"slots"`
 }
 
+// tmuxNameReplacer mirrors tmux's own session-name rewrite: tmux silently
+// turns '.' and ':' into '_' (they are target separators), so a slot id must
+// already be in that form or has-session / capture-pane miss the session.
+var tmuxNameReplacer = strings.NewReplacer(".", "_", ":", "_")
+
 // SlotID is the deterministic tmux session name / slot id for a repo and
-// optional worktree: "<repo>" or "<repo>-wt-<worktree>". It is the single source
-// of truth shared by the launch (cmd/bridge) and navigator (internal/nav) paths.
+// optional worktree: "<repo>" or "<repo>-wt-<worktree>", with '.' and ':'
+// replaced by '_' exactly as tmux does. It is the single source of truth
+// shared by the launch (cmd/bridge) and navigator (internal/nav) paths.
 func SlotID(repoName, worktree string) string {
 	id := repoName
 	if worktree != "" {
 		id += "-wt-" + worktree
 	}
-	return id
+	return tmuxNameReplacer.Replace(id)
 }
 
 // LoadSlots reads the slot registry written by WriteSlots.
