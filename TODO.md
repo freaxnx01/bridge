@@ -63,13 +63,21 @@ two post-review design amendments).
 
 ## Bridge MCP endpoint (#195, merged 2026-07-12)
 
-- [ ] Cheat sheet for starting/operating `bridge mcp serve` and integrating
+- [x] Cheat sheet for starting/operating `bridge mcp serve` and integrating
       it with Claude Code / Claude Desktop: [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md)
+      — brought in line with the server in #341 (2026-10-07)
 - [x] Spin up `bridge mcp serve` and test it end to end (real client
       connect, all four tools, read-only + write/confirm paths)
-- [ ] `bridge mcp serve` systemd unit for always-on access (same follow-up as
-      the WebUI one below — could share a unit-file pattern)
-- [ ] MCP test with Claude App
+- [x] `bridge mcp serve` systemd unit for always-on access — runs as the
+      `systemd --user` unit `bridge-mcp.service` on the deployed hosts
+- [ ] Check the `bridge-mcp.service` unit file into `docs/systemd/` (only the
+      dispatch units are there; the deployed one exists only on the hosts)
+- [x] MCP test with Claude Desktop — works through the stdio proxy
+      ([`docs/claude-desktop-setup.md`](docs/claude-desktop-setup.md)),
+      verified on the Win11 work notebook 2026-10-05
+- [ ] MCP test with the Claude web/mobile app — needs a custom connector,
+      i.e. the public `--auth=oauth` deployment that hasn't been decided yet
+      (see README, `--auth=oauth`)
 
 ## Bridge WebUI — Plan 2 (Svelte UI Components)
 
