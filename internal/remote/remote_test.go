@@ -164,6 +164,11 @@ func TestFetchTargetRepos_Forgejo_ResolvesAPIBaseFromEnvrc(t *testing.T) {
 		if r.URL.Path != "/api/v1/users/freax/repos" {
 			t.Errorf("request path = %q, want /api/v1/users/freax/repos", r.URL.Path)
 		}
+		// The listing pages until an empty page (#314); serve only page 1.
+		if r.URL.Query().Get("page") != "1" {
+			_, _ = w.Write([]byte(`[]`))
+			return
+		}
 		_, _ = w.Write([]byte(`[{"name":"obsidian-me","default_branch":"main"}]`))
 	}))
 	defer srv.Close()
