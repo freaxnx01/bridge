@@ -36,6 +36,17 @@
     until Clear-NotifyState runs (the condition resolved). Pass -RenotifyHours N if you
     want a periodic reminder instead of a single one.
 
+    VPN-only servers: when Desktop starts while bridge is unreachable (home office, VPN not
+    yet connected), its initialize fails and it drops the server for the rest of that run.
+    The no-proxy case therefore checks reachability first and notifies "connect first"
+    instead of "restart Desktop"; once the server answers again, the notification key
+    changes and the restart prompt follows. A proxy that is alive while the VPN is down is
+    left alone -- its calls fail and recover by themselves.
+
+    The server URL comes from the bridge entry in claude_desktop_config.json (override with
+    -ServerUrl), so a machine on an SSH tunnel needs no edit here. -DryRun also suppresses
+    notifications.
+
     If you hit a blocker running this, fix it here and update this header so the
     next run does not have to re-derive it.
 #>
@@ -44,10 +55,13 @@ param(
     [int]$GraceMinutes = 10,
     [int]$RenotifyHours = 0,
     [switch]$AutoRestartDesktop,
-    [switch]$DryRun
+    [switch]$DryRun,
+    # Empty = the URL from the bridge entry's args in claude_desktop_config.json, so a
+    # machine that reaches bridge another way (e.g. an SSH tunnel) needs no local edit.
+    [string]$ServerUrl = ''
 )
 
-$ServerUrl  = 'https://bridge-mcp.home.freaxnx01.ch/mcp'
+$DefaultServerUrl = 'https://bridge-mcp.home.freaxnx01.ch/mcp'
 $ConfigPath = Join-Path $env:APPDATA 'Claude\claude_desktop_config.json'
 $LogDir     = Join-Path $env:LOCALAPPDATA 'bridge-mcp-watchdog'
 $LogFile    = Join-Path $LogDir 'watchdog.log'
@@ -103,6 +117,11 @@ function Show-ToastOnce {
     # it clears via Clear-NotifyState, or, if -RenotifyHours is set, until that many hours pass.
     param([string]$Key, [string]$Text)
 
+    if ($DryRun) {
+        Write-Log "[dry-run] would notify '$Key': $Text"
+        return
+    }
+
     $last = $null
     if (Test-Path $StateFile) {
         try {
@@ -132,6 +151,25 @@ function Show-ToastOnce {
 
     Show-Toast $Text
     Set-Content -Path $StateFile -Encoding utf8 -Value ('{0}|{1}' -f $Key, (Get-Date).ToString('o'))
+}
+
+function Resolve-ServerUrl {
+    if ($ServerUrl) { return $ServerUrl }
+    try {
+        $cfg = Get-Content $ConfigPath -Raw | ConvertFrom-Json
+        $url = @($cfg.mcpServers.bridge.args) | Where-Object { $_ -match '^https?://' } | Select-Object -First 1
+        if ($url) { return $url }
+    } catch {
+        Write-Log "could not read the bridge URL from $ConfigPath : $($_.Exception.Message)" 'WARN'
+    }
+    return $DefaultServerUrl
+}
+
+function Test-BridgeReachable {
+    # Any HTTP answer (a 401/405 included) means the network path works; curl reports 000
+    # when it got none -- VPN down, SSH tunnel not listening, DNS failure.
+    $code = & curl.exe -s -o NUL -w '%{http_code}' --max-time 10 -X POST $ServerUrl 2>$null
+    return ($code -and $code -ne '000')
 }
 
 function Test-BridgeEndpoint {
@@ -184,6 +222,8 @@ function Get-EstablishedCount {
     }
 }
 
+$ServerUrl = Resolve-ServerUrl
+
 $desktop = @(Get-DesktopProcess)
 if ($desktop.Count -eq 0) {
     Write-Log 'Claude Desktop is not running; nothing to supervise.'
@@ -194,6 +234,14 @@ if ($desktop.Count -eq 0) {
 $proxies = @(Get-ProxyProcess)
 if ($proxies.Count -eq 0) {
     Write-Log 'Claude Desktop is running but no bridge mcp-remote proxy exists -- bridge is unavailable until Desktop restarts.' 'WARN'
+    # Desktop gives up on a server whose initialize failed, e.g. when it started while the
+    # VPN was down. Restarting Desktop before the server is reachable just fails again, so
+    # say "connect first" -- the key changes once it is reachable, which notifies again.
+    if (-not (Test-BridgeReachable)) {
+        Write-Log "bridge server $ServerUrl is unreachable (VPN down? tunnel not up?)." 'WARN'
+        Show-ToastOnce 'server-unreachable' 'bridge-mcp is unreachable (VPN down?). Connect first -- you will be told when to restart Claude Desktop.'
+        return
+    }
     Show-ToastOnce 'needs-desktop-restart' 'No bridge proxy is running. Restart Claude Desktop to reconnect bridge-mcp.'
     return
 }

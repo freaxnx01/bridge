@@ -93,6 +93,10 @@ Config entry shape (token redacted):
 - **Safety net:** the `bridge-mcp-watchdog` scheduled task, and the
   `bridge-mcp-check` Claude Code skill for a layered health check when bridge
   goes missing.
+- **Server only on loopback / VPN:** point the proxy at `http://localhost:17788/`
+  and keep an SSH tunnel to the server open with `bridge-mcp-tunnel.ps1`. See
+  [claude-desktop-setup.md](claude-desktop-setup.md#reaching-bridge-through-an-ssh-tunnel),
+  including what happens when the VPN is down.
 
 None of the Desktop setup is needed for a machine that only uses the CLI.
 
