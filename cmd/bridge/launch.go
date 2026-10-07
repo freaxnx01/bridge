@@ -105,7 +105,7 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 			return err
 		}
 		if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-			return fmt.Errorf("tmux: %v: %s", err, out)
+			return fmt.Errorf("tmux: %w: %s", err, out)
 		}
 	}
 
