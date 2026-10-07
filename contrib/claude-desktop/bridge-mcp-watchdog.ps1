@@ -233,7 +233,7 @@ if ($desktop.Count -eq 0) {
 
 $proxies = @(Get-ProxyProcess)
 if ($proxies.Count -eq 0) {
-    Write-Log 'Claude Desktop is running but no bridge mcp-remote proxy exists -- bridge is unavailable until Desktop restarts.' 'WARN'
+    Write-Log 'Claude Desktop is running but no bridge proxy (bridge-mcp-proxy or mcp-remote) is running -- bridge is unavailable until Desktop restarts.' 'WARN'
     # Desktop gives up on a server whose initialize failed, e.g. when it started while the
     # VPN was down. Restarting Desktop before the server is reachable just fails again, so
     # say "connect first" -- the key changes once it is reachable, which notifies again.
