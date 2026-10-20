@@ -85,16 +85,28 @@ func ambiguousError(matches []forge.Milestone, ref string) error {
 	return fmt.Errorf("%w: %q matches %s", ErrMilestoneAmbiguous, ref, strings.Join(parts, ", "))
 }
 
+// clientAs returns the configured client for forgeName/owner asserted to the
+// capability T. unsupported completes "does not support ..." when the client
+// lacks it.
+func clientAs[T any](d Deps, forgeName, owner, unsupported string) (T, error) {
+	var zero T
+	client := d.ClientFor(forgeName, owner)
+	if client == nil {
+		return zero, fmt.Errorf("forge %q not configured", forgeName)
+	}
+	capable, ok := client.(T)
+	if !ok {
+		return zero, fmt.Errorf("forge %q does not support %s", forgeName, unsupported)
+	}
+	return capable, nil
+}
+
 // lookupMilestone resolves ref against owner/repo's milestones of all states,
 // so closed milestones resolve too.
 func (d Deps) lookupMilestone(ctx context.Context, forgeName, owner, repo, ref string) (forge.Milestone, error) {
-	client := d.ClientFor(forgeName, owner)
-	if client == nil {
-		return forge.Milestone{}, fmt.Errorf("forge %q not configured", forgeName)
-	}
-	lister, ok := client.(milestoneLister)
-	if !ok {
-		return forge.Milestone{}, fmt.Errorf("forge %q does not support milestones", forgeName)
+	lister, err := clientAs[milestoneLister](d, forgeName, owner, "milestones")
+	if err != nil {
+		return forge.Milestone{}, err
 	}
 	ms, err := lister.ListMilestones(ctx, owner, repo, "all")
 	if err != nil {
@@ -126,13 +138,9 @@ func (d Deps) handleListMilestones(ctx context.Context, _ *mcp.CallToolRequest, 
 	if state != "open" && state != "closed" && state != "all" {
 		return nil, listMilestonesOutput{}, fmt.Errorf("invalid state %q: must be open, closed or all", in.State)
 	}
-	client := d.ClientFor(in.Forge, in.Owner)
-	if client == nil {
-		return nil, listMilestonesOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
-	}
-	lister, ok := client.(milestoneLister)
-	if !ok {
-		return nil, listMilestonesOutput{}, fmt.Errorf("forge %q does not support milestones", in.Forge)
+	lister, err := clientAs[milestoneLister](d, in.Forge, in.Owner, "milestones")
+	if err != nil {
+		return nil, listMilestonesOutput{}, err
 	}
 	ms, err := lister.ListMilestones(ctx, in.Owner, in.Repo, state)
 	if err != nil {
@@ -195,13 +203,9 @@ func (d Deps) handleSetMilestone(ctx context.Context, _ *mcp.CallToolRequest, in
 // applyMilestone performs the confirmed write and audits its outcome. A nil
 // milestone clears.
 func (d Deps) applyMilestone(ctx context.Context, in setMilestoneInput, m *forge.Milestone) (forge.Issue, error) {
-	client := d.ClientFor(in.Forge, in.Owner)
-	if client == nil {
-		return forge.Issue{}, fmt.Errorf("forge %q not configured", in.Forge)
-	}
-	setter, ok := client.(milestoneSetter)
-	if !ok {
-		return forge.Issue{}, fmt.Errorf("forge %q does not support milestones", in.Forge)
+	setter, err := clientAs[milestoneSetter](d, in.Forge, in.Owner, "milestones")
+	if err != nil {
+		return forge.Issue{}, err
 	}
 	number := 0
 	if m != nil {

@@ -1,16 +1,15 @@
 package mcp
 
 import (
-	"os"
-	"path/filepath"
-
 	"context"
 	"errors"
-	"github.com/freaxnx01/bridge/internal/audit"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/audit"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 

@@ -222,9 +222,10 @@ func (d Deps) handleCrossForgeStatus(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 type listIssuesInput struct {
-	Forge string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
-	Owner string `json:"owner" jsonschema:"repository owner"`
-	Repo  string `json:"repo" jsonschema:"repository name"`
+	Forge     string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner     string `json:"owner" jsonschema:"repository owner"`
+	Repo      string `json:"repo" jsonschema:"repository name"`
+	Milestone string `json:"milestone,omitempty" jsonschema:"only issues in this milestone (title or number)"`
 }
 
 type listIssuesOutput struct {
@@ -237,13 +238,9 @@ type listIssuesOutput struct {
 // to repos × issues per call. Needs no capability assertion — ListOpenIssues
 // is part of ForgeReader.
 func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in listIssuesInput) (*mcp.CallToolResult, listIssuesOutput, error) {
-	client := d.ClientFor(in.Forge, in.Owner)
-	if client == nil {
-		return nil, listIssuesOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
-	}
-	issues, err := client.ListOpenIssues(ctx, in.Owner, in.Repo)
+	issues, err := d.fetchOpenIssues(ctx, in)
 	if err != nil {
-		return nil, listIssuesOutput{}, fmt.Errorf("list issues %s/%s: %w", in.Owner, in.Repo, err)
+		return nil, listIssuesOutput{}, err
 	}
 	// Body is populated for internal consumers (the dispatcher's empty-body
 	// gate). This is a summary listing, so it is cleared here — in the shared
@@ -252,6 +249,35 @@ func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in l
 		issues[i].Body = ""
 	}
 	return nil, listIssuesOutput{Issues: issues}, nil
+}
+
+// fetchOpenIssues lists the repo's open issues, restricted to one milestone
+// when the input names one.
+func (d Deps) fetchOpenIssues(ctx context.Context, in listIssuesInput) ([]forge.Issue, error) {
+	if in.Milestone == "" {
+		client := d.ClientFor(in.Forge, in.Owner)
+		if client == nil {
+			return nil, fmt.Errorf("forge %q not configured", in.Forge)
+		}
+		issues, err := client.ListOpenIssues(ctx, in.Owner, in.Repo)
+		if err != nil {
+			return nil, fmt.Errorf("list issues %s/%s: %w", in.Owner, in.Repo, err)
+		}
+		return issues, nil
+	}
+	lister, err := clientAs[milestoneIssueLister](d, in.Forge, in.Owner, "filtering issues by milestone")
+	if err != nil {
+		return nil, err
+	}
+	m, err := d.lookupMilestone(ctx, in.Forge, in.Owner, in.Repo, in.Milestone)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := lister.ListOpenIssuesInMilestone(ctx, in.Owner, in.Repo, m.Number)
+	if err != nil {
+		return nil, fmt.Errorf("list issues %s/%s in milestone %q: %w", in.Owner, in.Repo, m.Title, err)
+	}
+	return issues, nil
 }
 
 // maxIssueComments bounds get_issue's comment payload. When a thread exceeds

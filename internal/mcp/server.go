@@ -32,7 +32,7 @@ func NewServer(deps Deps) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_issues",
-		Description: "List open issues for a single repository (live).",
+		Description: "List open issues for a single repository (live), optionally only those in one milestone (title or number).",
 	}, deps.handleListIssues)
 
 	mcp.AddTool(srv, &mcp.Tool{
