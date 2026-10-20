@@ -906,3 +906,37 @@ func TestForgejoSetMilestone(t *testing.T) {
 		})
 	}
 }
+
+func TestForgejoListOpenIssuesInMilestone_SendsIDFilter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("milestones") != "12" || q.Get("type") != "issues" || q.Get("state") != "open" {
+			t.Errorf("query: %v", q)
+		}
+		_, _ = w.Write([]byte(`[{"number":3,"title":"a","milestone":{"id":12,"title":"v1"}}]`))
+	}))
+	defer srv.Close()
+
+	is, err := NewForgejoClient("T", srv.URL).ListOpenIssuesInMilestone(context.Background(), "o", "r", 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 1 || is[0].Number != 3 || is[0].Milestone != "v1" {
+		t.Errorf("issues: %+v", is)
+	}
+}
+
+func TestForgejoListOpenIssues_MapsMilestoneTitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"number":1,"title":"a","milestone":{"id":1,"title":"v1"}},{"number":2,"title":"b","milestone":null}]`))
+	}))
+	defer srv.Close()
+
+	is, err := NewForgejoClient("T", srv.URL).ListOpenIssues(context.Background(), "o", "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 2 || is[0].Milestone != "v1" || is[1].Milestone != "" {
+		t.Errorf("issues: %+v", is)
+	}
+}

@@ -639,13 +639,27 @@ type fjIssue struct {
 	Labels  []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	PullRequest any       `json:"pull_request"`
 }
 
 func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, "")
+}
+
+// ListOpenIssuesInMilestone lists owner/repo's open issues in the milestone
+// with the given Forgejo id, filtered server-side.
+func (c *ForgejoClient) ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, fmt.Sprintf("&milestones=%d", milestone))
+}
+
+// listOpenIssues lists open issues; extraQuery is appended to the query string.
+func (c *ForgejoClient) listOpenIssues(ctx context.Context, owner, repo, extraQuery string) ([]Issue, error) {
 	var raw []fjIssue
-	if err := c.get(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues?state=open&type=issues&limit=50", &raw); err != nil {
+	if err := c.get(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues?state=open&type=issues&limit=50"+extraQuery, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, 0, len(raw))
@@ -657,10 +671,14 @@ func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) 
 		for _, l := range i.Labels {
 			labels = append(labels, l.Name)
 		}
+		milestone := ""
+		if i.Milestone != nil {
+			milestone = i.Milestone.Title
+		}
 		out = append(out, Issue{
 			Forge: "forgejo", Repo: owner + "/" + repo,
 			Number: i.Number, Title: i.Title, Body: i.Body, URL: i.HTMLURL,
-			Labels: labels, Updated: i.UpdatedAt,
+			Labels: labels, Milestone: milestone, Updated: i.UpdatedAt,
 		})
 	}
 	return out, nil

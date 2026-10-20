@@ -1367,3 +1367,22 @@ func TestGithubSetMilestone(t *testing.T) {
 		})
 	}
 }
+
+func TestGithubListOpenIssuesInMilestone_SendsNumberFilter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("milestone") != "5" || q.Get("state") != "open" {
+			t.Errorf("query: %v", q)
+		}
+		_, _ = w.Write([]byte(`[{"number":1,"title":"a","milestone":{"number":5,"title":"v2"}}]`))
+	}))
+	defer srv.Close()
+
+	is, err := NewGithubClient("T", srv.URL).ListOpenIssuesInMilestone(context.Background(), "o", "r", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 1 || is[0].Number != 1 || is[0].Milestone != "v2" {
+		t.Errorf("issues: %+v", is)
+	}
+}

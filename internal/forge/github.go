@@ -615,8 +615,19 @@ func (c *GithubClient) ListProjectV2Items(ctx context.Context, owner string, num
 }
 
 func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, "")
+}
+
+// ListOpenIssuesInMilestone lists owner/repo's open issues in the milestone
+// with the given GitHub number, filtered server-side.
+func (c *GithubClient) ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, fmt.Sprintf("&milestone=%d", milestone))
+}
+
+// listOpenIssues lists open issues; extraQuery is appended to the query string.
+func (c *GithubClient) listOpenIssues(ctx context.Context, owner, repo, extraQuery string) ([]Issue, error) {
 	var raw []ghIssue
-	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/issues?state=open&per_page=100", &raw); err != nil {
+	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/issues?state=open&per_page=100"+extraQuery, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, 0, len(raw))
