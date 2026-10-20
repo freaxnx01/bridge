@@ -686,12 +686,15 @@ func TestGithubCreateIssue(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", nil)
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := gotBody["labels"]; ok {
 		t.Errorf("no labels requested, but the create POST carried %+v", gotBody["labels"])
+	}
+	if _, ok := gotBody["milestone"]; ok {
+		t.Errorf("milestone 0 must be omitted, but the create POST carried %+v", gotBody["milestone"])
 	}
 	if gotBody["title"] != "flicker" || gotBody["body"] != "" {
 		t.Errorf("body sent: %+v", gotBody)
@@ -729,7 +732,7 @@ func TestGithubCreateIssue_PassesLabelsAndEnsuresTheyExist(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", []string{"needs-enrichment"})
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", []string{"needs-enrichment"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +773,7 @@ func TestGithubCreateIssue_ExistingLabelIsNotRecreated(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}); err != nil {
+	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if labelCreates != 0 {
@@ -1237,7 +1240,7 @@ func TestGithubCreateIssue_ExistingLabelPastTheFirstPageIsNotRecreated(t *testin
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}); err != nil {
+	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	// A label sitting past page 1 must be found, not duplicated.
@@ -1269,7 +1272,7 @@ func TestGithubCreateIssue_LabelAlreadyExistsDoesNotFailTheCapture(t *testing.T)
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"})
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}, 0)
 	if err != nil {
 		t.Fatalf("a duplicate label must not fail the capture, got %v", err)
 	}
@@ -1307,5 +1310,22 @@ func TestGithubListMilestones_AllStates_PaginatesAndMapsCounts(t *testing.T) {
 	last := ms[100]
 	if last.Number != 7 || last.State != "closed" || last.ClosedIssues != 4 || !last.DueOn.IsZero() {
 		t.Errorf("last: %+v", last)
+	}
+}
+
+func TestGithubCreateIssue_WithMilestone_SendsNumber(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":1,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewGithubClient("T", srv.URL).CreateIssue(context.Background(), "o", "r", "t", "", nil, 5); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["milestone"] != float64(5) {
+		t.Errorf("milestone sent: %+v", gotBody["milestone"])
 	}
 }

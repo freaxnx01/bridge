@@ -186,7 +186,7 @@ type fakeIssueCreator struct {
 	gotLabels []string
 }
 
-func (f *fakeIssueCreator) CreateIssue(_ context.Context, _, _, _, _ string, labels []string) (forge.Issue, error) {
+func (f *fakeIssueCreator) CreateIssue(_ context.Context, _, _, _, _ string, labels []string, _ int) (forge.Issue, error) {
 	f.gotLabels = labels
 	return f.ret, nil
 }

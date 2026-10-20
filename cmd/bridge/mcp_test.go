@@ -31,7 +31,7 @@ func (fakeResolvedClient) ListOpenIssues(context.Context, string, string) ([]for
 func (fakeResolvedClient) GetFile(context.Context, string, string, string) ([]byte, string, bool, error) {
 	return nil, "", false, nil
 }
-func (fakeResolvedClient) CreateIssue(context.Context, string, string, string, string) (forge.Issue, error) {
+func (fakeResolvedClient) CreateIssue(context.Context, string, string, string, string, []string, int) (forge.Issue, error) {
 	return forge.Issue{}, nil
 }
 

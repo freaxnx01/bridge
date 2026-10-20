@@ -120,7 +120,7 @@ type fakeIssues struct {
 	gotLabels     []string
 }
 
-func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string, labels []string) (forge.Issue, error) {
+func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string, labels []string, _ int) (forge.Issue, error) {
 	if f.createCalled != nil {
 		*f.createCalled++
 	}

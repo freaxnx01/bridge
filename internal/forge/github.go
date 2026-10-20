@@ -279,13 +279,16 @@ func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, nam
 // labels ride along on the create request rather than a follow-up AddLabels
 // call: a second call leaves a window in which the issue is live and
 // unlabeled, which is exactly what the dispatcher must never see.
-func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (Issue, error) {
+func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
 	if err := c.ensureLabels(ctx, owner, repo, labels); err != nil {
 		return Issue{}, err
 	}
 	req := map[string]any{"title": title, "body": body}
 	if len(labels) > 0 {
 		req["labels"] = labels
+	}
+	if milestone > 0 {
+		req["milestone"] = milestone
 	}
 	var raw struct {
 		Number    int       `json:"number"`

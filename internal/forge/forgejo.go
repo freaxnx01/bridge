@@ -261,7 +261,7 @@ func (c *ForgejoClient) ensureLabelIDs(ctx context.Context, owner, repo string, 
 // CreateIssue creates an issue on owner/repo via Forgejo/Gitea and returns the
 // minimal Issue. labels are names; they are resolved to ids (and created when
 // absent) before the create request, which carries them atomically.
-func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (Issue, error) {
+func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
 	ids, err := c.ensureLabelIDs(ctx, owner, repo, labels)
 	if err != nil {
 		return Issue{}, err
@@ -269,6 +269,9 @@ func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, bod
 	req := map[string]any{"title": title, "body": body}
 	if len(ids) > 0 {
 		req["labels"] = ids
+	}
+	if milestone > 0 {
+		req["milestone"] = milestone
 	}
 	var raw struct {
 		Number    int       `json:"number"`
