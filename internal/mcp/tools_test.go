@@ -252,6 +252,37 @@ func (f *fakeIssueReader) GetIssue(_ context.Context, _, _ string, _ int) (forge
 	return f.issue, f.comments, nil
 }
 
+// fakeMilestones supplies the milestoneLister and milestoneSetter capabilities
+// and records how it was called.
+type fakeMilestones struct {
+	milestones    []forge.Milestone
+	milestonesErr error
+	setErr        error
+	listCalls     int
+	listState     string
+	setCalls      int
+	setNumber     int
+	setTo         int
+}
+
+func (f *fakeMilestones) ListMilestones(_ context.Context, _, _, state string) ([]forge.Milestone, error) {
+	f.listCalls++
+	f.listState = state
+	if f.milestonesErr != nil {
+		return nil, f.milestonesErr
+	}
+	return f.milestones, nil
+}
+
+func (f *fakeMilestones) SetMilestone(_ context.Context, _, _ string, number, milestone int) (forge.Issue, error) {
+	f.setCalls++
+	f.setNumber, f.setTo = number, milestone
+	if f.setErr != nil {
+		return forge.Issue{}, f.setErr
+	}
+	return forge.Issue{Number: number}, nil
+}
+
 // fakeFull has every capability — the GitHub/Forgejo shape.
 type fakeFull struct {
 	*fakeReader
@@ -262,6 +293,7 @@ type fakeFull struct {
 	*fakeRepoUpdater
 	*fakePutFile
 	*fakeIssueReader
+	*fakeMilestones
 }
 
 // newFakeFull builds a fully capable client. Tests set fields on the embedded
@@ -277,6 +309,7 @@ func newFakeFull(name string) *fakeFull {
 		fakeRepoUpdater: &fakeRepoUpdater{forgeName: name},
 		fakePutFile:     &fakePutFile{fakeFiles: files},
 		fakeIssueReader: &fakeIssueReader{},
+		fakeMilestones:  &fakeMilestones{milestones: testMilestones()},
 	}
 }
 
@@ -328,6 +361,7 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			want: []string{
 				"list_repos", "list_issues", "read_file", "put_file", "list_tree", "create_issue", "create_repo",
 				"update_repo", "close_issue", "update_issue", "add_labels", "comment_issue", "get_issue",
+				"list_milestones",
 			},
 		},
 	}
