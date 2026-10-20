@@ -592,6 +592,28 @@ func (c *ForgejoClient) listTreeRecursive(ctx context.Context, owner, repo, path
 	return entries, tree.Truncated, nil
 }
 
+// ListMilestones lists owner/repo's milestones in the given state (open,
+// closed or all, passed through verbatim), across pages. Number carries the
+// Forgejo milestone id, which is what the issues API takes.
+func (c *ForgejoClient) ListMilestones(ctx context.Context, owner, repo, state string) ([]Milestone, error) {
+	const pageSize = 50
+	out := make([]Milestone, 0)
+	for page := 1; page <= maxMilestonePages; page++ {
+		var raw []milestoneWire
+		path := fmt.Sprintf("/api/v1/repos/%s/%s/milestones?state=%s&limit=%d&page=%d", owner, repo, url.QueryEscape(state), pageSize, page)
+		if err := c.get(ctx, path, &raw); err != nil {
+			return nil, err
+		}
+		for _, m := range raw {
+			out = append(out, m.toMilestone(m.ID))
+		}
+		if len(raw) < pageSize {
+			break
+		}
+	}
+	return out, nil
+}
+
 type fjIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`

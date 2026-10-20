@@ -1277,3 +1277,35 @@ func TestGithubCreateIssue_LabelAlreadyExistsDoesNotFailTheCapture(t *testing.T)
 		t.Errorf("issue was not created: created=%v issue=%+v", issueCreated, is)
 	}
 }
+
+func TestGithubListMilestones_AllStates_PaginatesAndMapsCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("state") != "all" || q.Get("per_page") != "100" {
+			t.Errorf("query: %v", q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if q.Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"number":7,"title":"old","state":"closed","open_issues":0,"closed_issues":4,"due_on":null}]`))
+			return
+		}
+		items := make([]string, 0, 100)
+		for i := 1; i <= 100; i++ {
+			items = append(items, fmt.Sprintf(`{"number":%d,"title":"m%d","state":"open"}`, 100+i, i))
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+	}))
+	defer srv.Close()
+
+	ms, err := NewGithubClient("token", srv.URL).ListMilestones(context.Background(), "o", "r", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 101 {
+		t.Fatalf("len = %d, want 101", len(ms))
+	}
+	last := ms[100]
+	if last.Number != 7 || last.State != "closed" || last.ClosedIssues != 4 || !last.DueOn.IsZero() {
+		t.Errorf("last: %+v", last)
+	}
+}

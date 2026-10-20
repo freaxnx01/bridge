@@ -137,11 +137,43 @@ type Comment struct {
 	Created time.Time `json:"created,omitempty"`
 }
 
-// Milestone is an open milestone. DueOn is the zero time when unset.
+// Milestone is a repo milestone. Number is the value the forge's issues API
+// takes: GitHub's milestone number, Forgejo's milestone id. DueOn is zero when unset.
 type Milestone struct {
-	Number int       `json:"number"`
-	Title  string    `json:"title"`
-	DueOn  time.Time `json:"due_on,omitempty"`
+	Number       int       `json:"number"`
+	Title        string    `json:"title"`
+	State        string    `json:"state,omitempty"`
+	DueOn        time.Time `json:"due_on,omitempty"`
+	OpenIssues   int       `json:"open_issues"`
+	ClosedIssues int       `json:"closed_issues"`
+}
+
+// maxMilestonePages bounds the milestone pagination loop in each client's
+// ListMilestones, the same safety backstop as maxLabelPages.
+const maxMilestonePages = 10
+
+// milestoneWire is the milestone JSON shared by both forges; ID is Forgejo's
+// key, Number GitHub's.
+type milestoneWire struct {
+	ID           int        `json:"id"`
+	Number       int        `json:"number"`
+	Title        string     `json:"title"`
+	State        string     `json:"state"`
+	DueOn        *time.Time `json:"due_on"`
+	OpenIssues   int        `json:"open_issues"`
+	ClosedIssues int        `json:"closed_issues"`
+}
+
+// toMilestone maps the wire form; number is the forge-specific issues-API value.
+func (m milestoneWire) toMilestone(number int) Milestone {
+	ms := Milestone{
+		Number: number, Title: m.Title, State: m.State,
+		OpenIssues: m.OpenIssues, ClosedIssues: m.ClosedIssues,
+	}
+	if m.DueOn != nil {
+		ms.DueOn = *m.DueOn
+	}
+	return ms
 }
 
 // PullRequest is a pull request. Body is needed to resolve "Closes #N".

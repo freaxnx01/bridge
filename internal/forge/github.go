@@ -999,22 +999,28 @@ func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, co
 	return out.Content.HTMLURL, nil
 }
 
+// ListOpenMilestones lists the repo's open milestones.
 func (c *GithubClient) ListOpenMilestones(ctx context.Context, owner, repo string) ([]Milestone, error) {
-	var raw []struct {
-		Number int        `json:"number"`
-		Title  string     `json:"title"`
-		DueOn  *time.Time `json:"due_on"`
-	}
-	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/milestones?state=open&per_page=100", &raw); err != nil {
-		return nil, err
-	}
-	out := make([]Milestone, 0, len(raw))
-	for _, m := range raw {
-		ms := Milestone{Number: m.Number, Title: m.Title}
-		if m.DueOn != nil {
-			ms.DueOn = *m.DueOn
+	return c.ListMilestones(ctx, owner, repo, "open")
+}
+
+// ListMilestones lists owner/repo's milestones in the given state (open,
+// closed or all, passed through verbatim), across pages.
+func (c *GithubClient) ListMilestones(ctx context.Context, owner, repo, state string) ([]Milestone, error) {
+	const pageSize = 100
+	out := make([]Milestone, 0)
+	for page := 1; page <= maxMilestonePages; page++ {
+		var raw []milestoneWire
+		path := fmt.Sprintf("/repos/%s/%s/milestones?state=%s&per_page=%d&page=%d", owner, repo, url.QueryEscape(state), pageSize, page)
+		if err := c.get(ctx, path, &raw); err != nil {
+			return nil, err
 		}
-		out = append(out, ms)
+		for _, m := range raw {
+			out = append(out, m.toMilestone(m.Number))
+		}
+		if len(raw) < pageSize {
+			break
+		}
 	}
 	return out, nil
 }

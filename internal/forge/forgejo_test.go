@@ -816,3 +816,35 @@ func TestForgejoCreateIssue_LabelLookupSendsLimitAndPages(t *testing.T) {
 		t.Errorf("label create calls = %d, want 0 — the label exists on page 2", labelCreates)
 	}
 }
+
+func TestForgejoListMilestones_AllStates_PaginatesAndMapsID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/api/v1/repos/o/r/milestones" || q.Get("state") != "all" || q.Get("limit") != "50" {
+			t.Errorf("request: %s ?%v", r.URL.Path, q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if q.Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"id":12,"title":"v1","state":"open","open_issues":3,"closed_issues":1,"due_on":"2026-11-01T00:00:00Z"}]`))
+			return
+		}
+		items := make([]string, 0, 50)
+		for i := 1; i <= 50; i++ {
+			items = append(items, fmt.Sprintf(`{"id":%d,"title":"m%d","state":"open"}`, 100+i, i))
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+	}))
+	defer srv.Close()
+
+	ms, err := NewForgejoClient("T", srv.URL).ListMilestones(context.Background(), "o", "r", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 51 {
+		t.Fatalf("len = %d, want 51", len(ms))
+	}
+	last := ms[50]
+	if last.Number != 12 || last.OpenIssues != 3 || last.DueOn.Format("2006-01-02") != "2026-11-01" {
+		t.Errorf("last: %+v", last)
+	}
+}
