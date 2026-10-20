@@ -196,6 +196,9 @@ func Capabilities(r ForgeReader) []string {
 	if _, ok := r.(milestoneLister); ok {
 		capabilities = append(capabilities, "list_milestones")
 	}
+	if _, ok := r.(milestoneSetter); ok {
+		capabilities = append(capabilities, "set_milestone")
+	}
 	if _, ok := r.(prLister); ok {
 		capabilities = append(capabilities, "list_prs")
 	}

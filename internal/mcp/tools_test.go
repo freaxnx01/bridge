@@ -361,7 +361,7 @@ func TestCapabilities_ReportsToolNamesPerCapability(t *testing.T) {
 			want: []string{
 				"list_repos", "list_issues", "read_file", "put_file", "list_tree", "create_issue", "create_repo",
 				"update_repo", "close_issue", "update_issue", "add_labels", "comment_issue", "get_issue",
-				"list_milestones",
+				"list_milestones", "set_milestone",
 			},
 		},
 	}

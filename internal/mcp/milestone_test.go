@@ -1,8 +1,12 @@
 package mcp
 
 import (
+	"os"
+	"path/filepath"
+
 	"context"
 	"errors"
+	"github.com/freaxnx01/bridge/internal/audit"
 	"slices"
 	"strings"
 	"testing"
@@ -123,11 +127,141 @@ func TestCapabilities_RealClients_ReportMilestoneTools(t *testing.T) {
 	for name, c := range clients {
 		t.Run(name, func(t *testing.T) {
 			got := Capabilities(c)
-			for _, want := range []string{"list_milestones"} {
+			for _, want := range []string{"list_milestones", "set_milestone"} {
 				if !slices.Contains(got, want) {
 					t.Errorf("Capabilities = %v, missing %q", got, want)
 				}
 			}
 		})
+	}
+}
+
+func TestHandleSetMilestone(t *testing.T) {
+	tests := []struct {
+		name      string
+		in        setMilestoneInput
+		setErr    error
+		wantErr   string
+		wantIs    error
+		wantDraft bool
+		wantList  int
+		wantSets  int
+		wantTo    int
+		wantClear bool
+		wantMS    int
+	}{
+		{name: "both milestone and clear", in: setMilestoneInput{Milestone: "v1", Clear: true, Confirm: true}, wantErr: "exactly one of milestone or clear is required"},
+		{name: "neither", in: setMilestoneInput{Confirm: true}, wantErr: "exactly one of milestone or clear is required"},
+		{name: "draft assign resolves without writing", in: setMilestoneInput{Milestone: "v1"}, wantDraft: true, wantList: 1, wantMS: 1},
+		{name: "draft clear is network-free", in: setMilestoneInput{Clear: true}, wantDraft: true, wantClear: true},
+		{name: "confirm assign by number", in: setMilestoneInput{Milestone: "3", Confirm: true}, wantList: 1, wantSets: 1, wantTo: 3, wantMS: 3},
+		{name: "confirm clear sends zero", in: setMilestoneInput{Clear: true, Confirm: true}, wantSets: 1, wantTo: 0, wantClear: true},
+		{name: "unknown title", in: setMilestoneInput{Milestone: "nope", Confirm: true}, wantIs: ErrMilestoneNotFound, wantList: 1},
+		{name: "setter error is wrapped", in: setMilestoneInput{Milestone: "v1", Confirm: true}, setErr: errors.New("boom"), wantErr: "boom", wantList: 1, wantSets: 1, wantTo: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeFull("github")
+			fake.setErr = tt.setErr
+			d := depsWith(map[string]*fakeFull{"github": fake}, nil)
+			tt.in.Forge, tt.in.Owner, tt.in.Repo, tt.in.IssueNumber = "github", "o", "r", 7
+
+			_, out, err := d.handleSetMilestone(context.Background(), nil, tt.in)
+
+			if fake.listCalls != tt.wantList || fake.setCalls != tt.wantSets {
+				t.Errorf("list/set calls = %d/%d, want %d/%d", fake.listCalls, fake.setCalls, tt.wantList, tt.wantSets)
+			}
+			if tt.wantSets > 0 && (fake.setNumber != 7 || fake.setTo != tt.wantTo) {
+				t.Errorf("setter got issue %d milestone %d, want 7 / %d", fake.setNumber, fake.setTo, tt.wantTo)
+			}
+			if tt.wantErr != "" || tt.wantIs != nil {
+				assertSetMilestoneErr(t, err, tt.wantErr, tt.wantIs)
+				return
+			}
+			if err != nil {
+				t.Fatal(err)
+			}
+			assertSetMilestoneOut(t, out, tt.wantDraft, tt.wantClear, tt.wantMS)
+		})
+	}
+}
+
+func assertSetMilestoneErr(t *testing.T, err error, wantMsg string, wantIs error) {
+	t.Helper()
+	if err == nil {
+		t.Fatal("want an error")
+	}
+	if wantMsg != "" && !strings.Contains(err.Error(), wantMsg) {
+		t.Errorf("err = %v, want containing %q", err, wantMsg)
+	}
+	if wantIs != nil && !errors.Is(err, wantIs) {
+		t.Errorf("err = %v, want %v", err, wantIs)
+	}
+}
+
+func assertSetMilestoneOut(t *testing.T, out setMilestoneOutput, draft, clear bool, milestone int) {
+	t.Helper()
+	if out.Draft != draft || out.Clear != clear {
+		t.Errorf("draft/clear = %v/%v, want %v/%v", out.Draft, out.Clear, draft, clear)
+	}
+	if milestone == 0 && out.Milestone != nil {
+		t.Errorf("unexpected milestone %+v", out.Milestone)
+	}
+	if milestone != 0 && (out.Milestone == nil || out.Milestone.Number != milestone) {
+		t.Errorf("milestone = %+v, want number %d", out.Milestone, milestone)
+	}
+	if draft == (out.Issue != nil) {
+		t.Errorf("issue = %+v with draft=%v", out.Issue, draft)
+	}
+}
+
+func TestHandleSetMilestone_AuditsOutcome(t *testing.T) {
+	for _, tt := range []struct {
+		name    string
+		setErr  error
+		outcome string
+	}{
+		{name: "success", outcome: `"outcome":"success"`},
+		{name: "error", setErr: errors.New("boom"), outcome: `"outcome":"error"`},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			fake := newFakeFull("github")
+			fake.setErr = tt.setErr
+			path := filepath.Join(t.TempDir(), "audit.jsonl")
+			logger, err := audit.Open(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			d := depsWith(map[string]*fakeFull{"github": fake}, nil)
+			d.Audit = logger
+
+			_, _, _ = d.handleSetMilestone(context.Background(), nil, setMilestoneInput{
+				Forge: "github", Owner: "o", Repo: "r", IssueNumber: 7, Milestone: "v1", Confirm: true,
+			})
+
+			data, err := os.ReadFile(path)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !strings.Contains(string(data), `"tool":"set_milestone"`) || !strings.Contains(string(data), tt.outcome) {
+				t.Errorf("audit = %q, want set_milestone with %s", data, tt.outcome)
+			}
+		})
+	}
+}
+
+func TestHandleListGitForges_ReadOnlyHidesSetMilestone(t *testing.T) {
+	d := Deps{
+		ReadOnly:      true,
+		DefaultOwners: []Target{{Forge: "github", Owner: "o"}},
+		ClientFor:     func(string, string) ForgeReader { return newFakeFull("github") },
+	}
+	_, out, err := d.handleListGitForges(context.Background(), nil, listGitForgesInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	caps := out.Forges[0].Capabilities
+	if slices.Contains(caps, "set_milestone") || !slices.Contains(caps, "list_milestones") {
+		t.Errorf("read-only capabilities = %v, want list_milestones without set_milestone", caps)
 	}
 }

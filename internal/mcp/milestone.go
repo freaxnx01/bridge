@@ -9,6 +9,7 @@ import (
 
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
+	"github.com/freaxnx01/bridge/internal/audit"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -138,4 +139,81 @@ func (d Deps) handleListMilestones(ctx context.Context, _ *mcp.CallToolRequest, 
 		return nil, listMilestonesOutput{}, fmt.Errorf("list milestones %s/%s: %w", in.Owner, in.Repo, err)
 	}
 	return nil, listMilestonesOutput{Milestones: ms}, nil
+}
+
+type setMilestoneInput struct {
+	Forge       string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner       string `json:"owner" jsonschema:"repository owner"`
+	Repo        string `json:"repo" jsonschema:"repository name"`
+	IssueNumber int    `json:"issue_number" jsonschema:"issue number to assign"`
+	Milestone   string `json:"milestone,omitempty" jsonschema:"milestone title or number; exactly one of milestone or clear is required"`
+	Clear       bool   `json:"clear,omitempty" jsonschema:"remove the issue's milestone"`
+	Confirm     bool   `json:"confirm,omitempty" jsonschema:"when false, returns a draft without changing anything; set true to apply"`
+}
+
+type setMilestoneOutput struct {
+	Draft       bool             `json:"draft"`
+	Forge       string           `json:"forge"`
+	Owner       string           `json:"owner"`
+	Repo        string           `json:"repo"`
+	IssueNumber int              `json:"issue_number"`
+	Milestone   *forge.Milestone `json:"milestone,omitempty"`
+	Clear       bool             `json:"clear,omitempty"`
+	Issue       *forge.Issue     `json:"issue,omitempty"`
+}
+
+// handleSetMilestone assigns, changes or clears an issue's milestone,
+// draft-by-default. A draft reads the repo's milestones only to resolve a
+// supplied reference; a clear draft makes no network call.
+func (d Deps) handleSetMilestone(ctx context.Context, _ *mcp.CallToolRequest, in setMilestoneInput) (*mcp.CallToolResult, setMilestoneOutput, error) {
+	if (in.Milestone == "") == !in.Clear {
+		return nil, setMilestoneOutput{}, fmt.Errorf("set milestone %s/%s#%d: exactly one of milestone or clear is required", in.Owner, in.Repo, in.IssueNumber)
+	}
+	out := setMilestoneOutput{
+		Draft: true,
+		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, IssueNumber: in.IssueNumber,
+		Clear: in.Clear,
+	}
+	if in.Milestone != "" {
+		m, err := d.lookupMilestone(ctx, in.Forge, in.Owner, in.Repo, in.Milestone)
+		if err != nil {
+			return nil, setMilestoneOutput{}, err
+		}
+		out.Milestone = &m
+	}
+	if !in.Confirm {
+		return nil, out, nil
+	}
+	issue, err := d.applyMilestone(ctx, in, out.Milestone)
+	if err != nil {
+		return nil, setMilestoneOutput{}, err
+	}
+	out.Draft, out.Issue = false, &issue
+	return nil, out, nil
+}
+
+// applyMilestone performs the confirmed write and audits its outcome. A nil
+// milestone clears.
+func (d Deps) applyMilestone(ctx context.Context, in setMilestoneInput, m *forge.Milestone) (forge.Issue, error) {
+	client := d.ClientFor(in.Forge, in.Owner)
+	if client == nil {
+		return forge.Issue{}, fmt.Errorf("forge %q not configured", in.Forge)
+	}
+	setter, ok := client.(milestoneSetter)
+	if !ok {
+		return forge.Issue{}, fmt.Errorf("forge %q does not support milestones", in.Forge)
+	}
+	number := 0
+	if m != nil {
+		number = m.Number
+	}
+	entry := audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "set_milestone", Confirm: true, Outcome: "success"}
+	issue, err := setter.SetMilestone(ctx, in.Owner, in.Repo, in.IssueNumber, number)
+	if err != nil {
+		entry.Outcome = "error"
+		d.auditLog(entry)
+		return forge.Issue{}, fmt.Errorf("set milestone %s/%s#%d: %w", in.Owner, in.Repo, in.IssueNumber, err)
+	}
+	d.auditLog(entry)
+	return issue, nil
 }

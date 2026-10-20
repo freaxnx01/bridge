@@ -323,7 +323,7 @@ type listGitForgesOutput struct {
 // is no mutable global state.
 func isWriteTool(name string) bool {
 	switch name {
-	case "create_issue", "create_repo", "update_repo", "close_issue", "update_issue", "add_labels", "comment_issue", "put_file":
+	case "create_issue", "create_repo", "update_repo", "close_issue", "update_issue", "set_milestone", "add_labels", "comment_issue", "put_file":
 		return true
 	default:
 		return false

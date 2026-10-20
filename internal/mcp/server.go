@@ -97,6 +97,11 @@ func NewServer(deps Deps) *mcp.Server {
 		}, deps.handleUpdateIssue)
 
 		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "set_milestone",
+			Description: "Assign, change or clear (clear=true) an issue's milestone, by milestone title or number. Without confirm=true this returns a draft showing the resolved milestone and changes nothing.",
+		}, deps.handleSetMilestone)
+
+		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "add_labels",
 			Description: "Add labels to an issue. Without confirm=true this returns a draft and adds nothing.",
 		}, deps.handleAddLabels)
