@@ -868,3 +868,41 @@ func TestForgejoCreateIssue_WithMilestone_SendsID(t *testing.T) {
 		t.Errorf("milestone sent: %+v", gotBody["milestone"])
 	}
 }
+
+func TestForgejoSetMilestone(t *testing.T) {
+	tests := []struct {
+		name      string
+		milestone int
+		response  string
+		wantKey   float64
+		wantTitle string
+	}{
+		{"assign", 12, `"milestone":{"id":12,"title":"v1"}`, 12, "v1"},
+		{"clear", 0, `"milestone":null`, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "PATCH" || r.URL.Path != "/api/v1/repos/o/r/issues/42" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				_, _ = w.Write([]byte(`{"number":42,"title":"t","state":"open","html_url":"u",` + tt.response + `}`))
+			}))
+			defer srv.Close()
+
+			is, err := NewForgejoClient("T", srv.URL).SetMilestone(context.Background(), "o", "r", 42, tt.milestone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, ok := gotBody["milestone"]
+			if !ok || v != tt.wantKey {
+				t.Errorf("body: %+v, want milestone key = %v", gotBody, tt.wantKey)
+			}
+			if is.Milestone != tt.wantTitle || is.Number != 42 {
+				t.Errorf("issue: %+v", is)
+			}
+		})
+	}
+}

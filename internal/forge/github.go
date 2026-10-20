@@ -363,6 +363,23 @@ func (c *GithubClient) UpdateIssue(ctx context.Context, owner, repo string, numb
 	}, nil
 }
 
+// SetMilestone assigns milestone (GitHub number) to owner/repo#number; 0
+// clears it. The returned Issue's Milestone is the title the forge reports
+// after the change ("" when cleared).
+func (c *GithubClient) SetMilestone(ctx context.Context, owner, repo string, number, milestone int) (Issue, error) {
+	// GitHub clears a milestone with JSON null, so the key is always sent.
+	req := map[string]any{"milestone": nil}
+	if milestone > 0 {
+		req["milestone"] = milestone
+	}
+	var raw milestonePatchResponse
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return raw.toIssue("github", owner+"/"+repo), nil
+}
+
 // AddLabels adds labels to owner/repo#number and returns the issue's full
 // label set after the call.
 func (c *GithubClient) AddLabels(ctx context.Context, owner, repo string, number int, labels []string) ([]string, error) {
