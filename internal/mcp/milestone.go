@@ -154,7 +154,7 @@ type setMilestoneInput struct {
 	Owner       string `json:"owner" jsonschema:"repository owner"`
 	Repo        string `json:"repo" jsonschema:"repository name"`
 	IssueNumber int    `json:"issue_number" jsonschema:"issue number to assign"`
-	Milestone   string `json:"milestone,omitempty" jsonschema:"milestone title or number; exactly one of milestone or clear is required"`
+	Milestone   string `json:"milestone,omitempty" jsonschema:"milestone title, or its number as a string (e.g. \"3\"); exactly one of milestone or clear is required"`
 	Clear       bool   `json:"clear,omitempty" jsonschema:"remove the issue's milestone"`
 	Confirm     bool   `json:"confirm,omitempty" jsonschema:"when false, returns a draft without changing anything; set true to apply"`
 }

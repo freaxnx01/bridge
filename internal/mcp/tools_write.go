@@ -19,7 +19,7 @@ type createIssueInput struct {
 	Repo      string `json:"repo" jsonschema:"repository name"`
 	Title     string `json:"title" jsonschema:"issue title"`
 	Body      string `json:"body,omitempty" jsonschema:"issue body (markdown)"`
-	Milestone string `json:"milestone,omitempty" jsonschema:"optional milestone title or number; resolved against the repo's milestones (any state)"`
+	Milestone string `json:"milestone,omitempty" jsonschema:"optional milestone: its title, or its number as a string (e.g. \"3\"); resolved against the repo's milestones (any state)"`
 	Confirm   bool   `json:"confirm,omitempty" jsonschema:"when false, returns a draft without creating; set true to create"`
 }
 

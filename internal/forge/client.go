@@ -143,7 +143,7 @@ type Milestone struct {
 	Number       int       `json:"number"`
 	Title        string    `json:"title"`
 	State        string    `json:"state,omitempty"`
-	DueOn        time.Time `json:"due_on,omitempty"`
+	DueOn        time.Time `json:"due_on,omitzero"`
 	OpenIssues   int       `json:"open_issues"`
 	ClosedIssues int       `json:"closed_issues"`
 }

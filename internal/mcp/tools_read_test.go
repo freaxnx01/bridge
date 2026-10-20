@@ -716,7 +716,7 @@ func TestHandleListIssues_StripsBody(t *testing.T) {
 func TestHandleListIssues_MilestoneFilterUsesFilteredListing(t *testing.T) {
 	gh := newFakeFull("github")
 	gh.issues = []forge.Issue{{Number: 99, Title: "unfiltered"}}
-	gh.inMilestone = []forge.Issue{{Number: 7, Title: "in v1", Body: "secret body"}}
+	gh.inMilestone = []forge.Issue{{Number: 7, Title: "in v1", Body: "secret body", Milestone: "v1"}}
 	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
 
 	_, out, err := d.handleListIssues(context.Background(), nil,
@@ -735,6 +735,24 @@ func TestHandleListIssues_MilestoneFilterUsesFilteredListing(t *testing.T) {
 	}
 	if out.Issues[0].Body != "" {
 		t.Fatalf("bodies must be cleared on the filtered path, got %q", out.Issues[0].Body)
+	}
+}
+
+func TestHandleListIssues_MilestoneFilterDropsOtherMilestoneTitles(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.inMilestone = []forge.Issue{
+		{Number: 7, Title: "in v1", Milestone: "v1"},
+		{Number: 8, Title: "name-before-id collision", Milestone: "1"},
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "o", Repo: "r", Milestone: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Issues) != 1 || out.Issues[0].Number != 7 {
+		t.Fatalf("want only #7 (milestone v1), got %+v", out.Issues)
 	}
 }
 

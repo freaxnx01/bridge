@@ -32,7 +32,7 @@ func NewServer(deps Deps) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_issues",
-		Description: "List open issues for a single repository (live), optionally only those in one milestone (title or number).",
+		Description: "List open issues for a single repository (live), optionally only those in one milestone (title, or number given as a string).",
 	}, deps.handleListIssues)
 
 	mcp.AddTool(srv, &mcp.Tool{
@@ -73,7 +73,7 @@ func NewServer(deps Deps) *mcp.Server {
 	if !deps.ReadOnly {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "create_issue",
-			Description: "Create an issue, optionally in a milestone (title or number). Without confirm=true this returns a draft and creates nothing; the draft shows the resolved milestone.",
+			Description: "Create an issue, optionally in a milestone (title, or number given as a string). Without confirm=true this returns a draft and creates nothing; the draft shows the resolved milestone.",
 		}, deps.handleCreateIssue)
 
 		mcp.AddTool(srv, &mcp.Tool{
@@ -98,7 +98,7 @@ func NewServer(deps Deps) *mcp.Server {
 
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "set_milestone",
-			Description: "Assign, change or clear (clear=true) an issue's milestone, by milestone title or number. Without confirm=true this returns a draft showing the resolved milestone and changes nothing.",
+			Description: "Assign, change or clear (clear=true) an issue's milestone, by milestone title, or number given as a string. Without confirm=true this returns a draft showing the resolved milestone and changes nothing.",
 		}, deps.handleSetMilestone)
 
 		mcp.AddTool(srv, &mcp.Tool{

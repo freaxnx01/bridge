@@ -225,7 +225,7 @@ type listIssuesInput struct {
 	Forge     string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
 	Owner     string `json:"owner" jsonschema:"repository owner"`
 	Repo      string `json:"repo" jsonschema:"repository name"`
-	Milestone string `json:"milestone,omitempty" jsonschema:"only issues in this milestone (title or number)"`
+	Milestone string `json:"milestone,omitempty" jsonschema:"only issues in this milestone: its title, or its number as a string (e.g. \"3\")"`
 }
 
 type listIssuesOutput struct {
@@ -235,8 +235,9 @@ type listIssuesOutput struct {
 // handleListIssues returns the open issues of a single repo. Scope is
 // deliberately one repo rather than a fan-out across configured targets:
 // cross_forge_status already aggregates, and fanning out here would multiply
-// to repos × issues per call. Needs no capability assertion — ListOpenIssues
-// is part of ForgeReader.
+// to repos × issues per call. The unfiltered path needs no capability
+// assertion (ListOpenIssues is part of ForgeReader); filtering by milestone
+// requires the milestone capabilities.
 func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in listIssuesInput) (*mcp.CallToolResult, listIssuesOutput, error) {
 	issues, err := d.fetchOpenIssues(ctx, in)
 	if err != nil {
@@ -277,7 +278,20 @@ func (d Deps) fetchOpenIssues(ctx context.Context, in listIssuesInput) ([]forge.
 	if err != nil {
 		return nil, fmt.Errorf("list issues %s/%s in milestone %q: %w", in.Owner, in.Repo, m.Title, err)
 	}
-	return issues, nil
+	return keepMilestoneTitle(issues, m.Title), nil
+}
+
+// keepMilestoneTitle drops issues outside the named milestone. Forgejo's
+// milestones= filter resolves names before ids, so an id such as 12 can match
+// a milestone titled "12"; the title check makes the result exact.
+func keepMilestoneTitle(issues []forge.Issue, title string) []forge.Issue {
+	kept := make([]forge.Issue, 0, len(issues))
+	for _, is := range issues {
+		if is.Milestone == title {
+			kept = append(kept, is)
+		}
+	}
+	return kept
 }
 
 // maxIssueComments bounds get_issue's comment payload. When a thread exceeds

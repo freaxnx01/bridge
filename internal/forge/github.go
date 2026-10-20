@@ -278,7 +278,8 @@ func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, nam
 // CreateIssue creates an issue on owner/repo and returns the minimal Issue.
 // labels ride along on the create request rather than a follow-up AddLabels
 // call: a second call leaves a window in which the issue is live and
-// unlabeled, which is exactly what the dispatcher must never see.
+// unlabeled, which is exactly what the dispatcher must never see. milestone is
+// a milestone number; 0 means none.
 func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
 	if err := c.ensureLabels(ctx, owner, repo, labels); err != nil {
 		return Issue{}, err
