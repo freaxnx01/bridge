@@ -21,6 +21,7 @@ type fakeReader struct {
 	issues    []forge.Issue
 	listErr   error
 	issuesErr error
+	openCalls int
 }
 
 func (f *fakeReader) Name() string { return f.name }
@@ -33,6 +34,7 @@ func (f *fakeReader) ListRepos(_ context.Context, _ string) ([]forge.RepoRef, er
 }
 
 func (f *fakeReader) ListOpenIssues(_ context.Context, _, _ string) ([]forge.Issue, error) {
+	f.openCalls++
 	if f.issuesErr != nil {
 		return nil, f.issuesErr
 	}
@@ -118,9 +120,11 @@ type fakeIssues struct {
 	commentCalled *int
 	commentErr    error
 	gotLabels     []string
+	gotMilestone  int
 }
 
-func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string, labels []string, _ int) (forge.Issue, error) {
+func (f *fakeIssues) CreateIssue(_ context.Context, owner, repo, title, _ string, labels []string, milestone int) (forge.Issue, error) {
+	f.gotMilestone = milestone
 	if f.createCalled != nil {
 		*f.createCalled++
 	}
@@ -263,6 +267,20 @@ type fakeMilestones struct {
 	setCalls      int
 	setNumber     int
 	setTo         int
+
+	inMilestone      []forge.Issue
+	inMilestoneErr   error
+	inMilestoneCalls int
+	inMilestoneGot   int
+}
+
+func (f *fakeMilestones) ListOpenIssuesInMilestone(_ context.Context, _, _ string, milestone int) ([]forge.Issue, error) {
+	f.inMilestoneCalls++
+	f.inMilestoneGot = milestone
+	if f.inMilestoneErr != nil {
+		return nil, f.inMilestoneErr
+	}
+	return f.inMilestone, nil
 }
 
 func (f *fakeMilestones) ListMilestones(_ context.Context, _, _, state string) ([]forge.Milestone, error) {

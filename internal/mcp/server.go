@@ -73,7 +73,7 @@ func NewServer(deps Deps) *mcp.Server {
 	if !deps.ReadOnly {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "create_issue",
-			Description: "Create an issue. Without confirm=true this returns a draft and creates nothing.",
+			Description: "Create an issue, optionally in a milestone (title or number). Without confirm=true this returns a draft and creates nothing; the draft shows the resolved milestone.",
 		}, deps.handleCreateIssue)
 
 		mcp.AddTool(srv, &mcp.Tool{
