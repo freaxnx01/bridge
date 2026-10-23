@@ -58,6 +58,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Go toolchain raised from 1.25.0 to **1.26.10**: Go 1.25 is end of life and
+  has no fix for the 11 reachable `net/http` and other stdlib vulnerabilities
+  that failed the required `govulncheck` check. CI now reads the Go version from
+  `go.mod` (`go-version-file`) instead of a hard-coded `'1.25'`. (#352)
 - Repos with a `.` (or `:`) in their name, e.g. `freaxnx01.github.io`, launch
   and are detected again: slot ids now replace those characters with `_`, the
   same way tmux rewrites session names. Previously `bridge launch` reported
