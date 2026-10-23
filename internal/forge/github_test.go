@@ -686,12 +686,15 @@ func TestGithubCreateIssue(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", nil)
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := gotBody["labels"]; ok {
 		t.Errorf("no labels requested, but the create POST carried %+v", gotBody["labels"])
+	}
+	if _, ok := gotBody["milestone"]; ok {
+		t.Errorf("milestone 0 must be omitted, but the create POST carried %+v", gotBody["milestone"])
 	}
 	if gotBody["title"] != "flicker" || gotBody["body"] != "" {
 		t.Errorf("body sent: %+v", gotBody)
@@ -729,7 +732,7 @@ func TestGithubCreateIssue_PassesLabelsAndEnsuresTheyExist(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", []string{"needs-enrichment"})
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "flicker", "", []string{"needs-enrichment"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -770,7 +773,7 @@ func TestGithubCreateIssue_ExistingLabelIsNotRecreated(t *testing.T) {
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}); err != nil {
+	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if labelCreates != 0 {
@@ -1237,7 +1240,7 @@ func TestGithubCreateIssue_ExistingLabelPastTheFirstPageIsNotRecreated(t *testin
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}); err != nil {
+	if _, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	// A label sitting past page 1 must be found, not duplicated.
@@ -1269,11 +1272,117 @@ func TestGithubCreateIssue_LabelAlreadyExistsDoesNotFailTheCapture(t *testing.T)
 	defer srv.Close()
 
 	c := NewGithubClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"})
+	is, err := c.CreateIssue(context.Background(), "freaxnx01", "bridge", "t", "", []string{"needs-enrichment"}, 0)
 	if err != nil {
 		t.Fatalf("a duplicate label must not fail the capture, got %v", err)
 	}
 	if !issueCreated || is.Number != 8 {
 		t.Errorf("issue was not created: created=%v issue=%+v", issueCreated, is)
+	}
+}
+
+func TestGithubListMilestones_AllStates_PaginatesAndMapsCounts(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("state") != "all" || q.Get("per_page") != "100" {
+			t.Errorf("query: %v", q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if q.Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"number":7,"title":"old","state":"closed","open_issues":0,"closed_issues":4,"due_on":null}]`))
+			return
+		}
+		items := make([]string, 0, 100)
+		for i := 1; i <= 100; i++ {
+			items = append(items, fmt.Sprintf(`{"number":%d,"title":"m%d","state":"open"}`, 100+i, i))
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+	}))
+	defer srv.Close()
+
+	ms, err := NewGithubClient("token", srv.URL).ListMilestones(context.Background(), "o", "r", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 101 {
+		t.Fatalf("len = %d, want 101", len(ms))
+	}
+	last := ms[100]
+	if last.Number != 7 || last.State != "closed" || last.ClosedIssues != 4 || !last.DueOn.IsZero() {
+		t.Errorf("last: %+v", last)
+	}
+}
+
+func TestGithubCreateIssue_WithMilestone_SendsNumber(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":1,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewGithubClient("T", srv.URL).CreateIssue(context.Background(), "o", "r", "t", "", nil, 5); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["milestone"] != float64(5) {
+		t.Errorf("milestone sent: %+v", gotBody["milestone"])
+	}
+}
+
+func TestGithubSetMilestone(t *testing.T) {
+	tests := []struct {
+		name      string
+		milestone int
+		response  string
+		wantKey   any
+		wantTitle string
+	}{
+		{"assign", 5, `"milestone":{"number":5,"title":"v2"}`, float64(5), "v2"},
+		{"clear", 0, `"milestone":null`, nil, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "PATCH" || r.URL.Path != "/repos/o/r/issues/42" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				_, _ = w.Write([]byte(`{"number":42,"title":"t","state":"open","html_url":"u",` + tt.response + `}`))
+			}))
+			defer srv.Close()
+
+			is, err := NewGithubClient("T", srv.URL).SetMilestone(context.Background(), "o", "r", 42, tt.milestone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, ok := gotBody["milestone"]
+			if !ok || v != tt.wantKey {
+				t.Errorf("body: %+v, want milestone key = %v", gotBody, tt.wantKey)
+			}
+			if is.Milestone != tt.wantTitle || is.Number != 42 {
+				t.Errorf("issue: %+v", is)
+			}
+		})
+	}
+}
+
+func TestGithubListOpenIssuesInMilestone_SendsNumberFilter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("milestone") != "5" || q.Get("state") != "open" {
+			t.Errorf("query: %v", q)
+		}
+		_, _ = w.Write([]byte(`[{"number":1,"title":"a","milestone":{"number":5,"title":"v2"}}]`))
+	}))
+	defer srv.Close()
+
+	is, err := NewGithubClient("T", srv.URL).ListOpenIssuesInMilestone(context.Background(), "o", "r", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 1 || is[0].Number != 1 || is[0].Milestone != "v2" {
+		t.Errorf("issues: %+v", is)
 	}
 }

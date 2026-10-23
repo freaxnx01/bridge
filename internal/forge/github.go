@@ -278,14 +278,18 @@ func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, nam
 // CreateIssue creates an issue on owner/repo and returns the minimal Issue.
 // labels ride along on the create request rather than a follow-up AddLabels
 // call: a second call leaves a window in which the issue is live and
-// unlabeled, which is exactly what the dispatcher must never see.
-func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (Issue, error) {
+// unlabeled, which is exactly what the dispatcher must never see. milestone is
+// a milestone number; 0 means none.
+func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
 	if err := c.ensureLabels(ctx, owner, repo, labels); err != nil {
 		return Issue{}, err
 	}
 	req := map[string]any{"title": title, "body": body}
 	if len(labels) > 0 {
 		req["labels"] = labels
+	}
+	if milestone > 0 {
+		req["milestone"] = milestone
 	}
 	var raw struct {
 		Number    int       `json:"number"`
@@ -358,6 +362,23 @@ func (c *GithubClient) UpdateIssue(ctx context.Context, owner, repo string, numb
 		Number: raw.Number, Title: raw.Title, State: raw.State,
 		URL: raw.HTMLURL, Updated: raw.UpdatedAt,
 	}, nil
+}
+
+// SetMilestone assigns milestone (GitHub number) to owner/repo#number; 0
+// clears it. The returned Issue's Milestone is the title the forge reports
+// after the change ("" when cleared).
+func (c *GithubClient) SetMilestone(ctx context.Context, owner, repo string, number, milestone int) (Issue, error) {
+	// GitHub clears a milestone with JSON null, so the key is always sent.
+	req := map[string]any{"milestone": nil}
+	if milestone > 0 {
+		req["milestone"] = milestone
+	}
+	var raw milestonePatchResponse
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return raw.toIssue("github", owner+"/"+repo), nil
 }
 
 // AddLabels adds labels to owner/repo#number and returns the issue's full
@@ -595,8 +616,19 @@ func (c *GithubClient) ListProjectV2Items(ctx context.Context, owner string, num
 }
 
 func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, "")
+}
+
+// ListOpenIssuesInMilestone lists owner/repo's open issues in the milestone
+// with the given GitHub number, filtered server-side.
+func (c *GithubClient) ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, fmt.Sprintf("&milestone=%d", milestone))
+}
+
+// listOpenIssues lists open issues; extraQuery is appended to the query string.
+func (c *GithubClient) listOpenIssues(ctx context.Context, owner, repo, extraQuery string) ([]Issue, error) {
 	var raw []ghIssue
-	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/issues?state=open&per_page=100", &raw); err != nil {
+	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/issues?state=open&per_page=100"+extraQuery, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, 0, len(raw))
@@ -999,22 +1031,28 @@ func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, co
 	return out.Content.HTMLURL, nil
 }
 
+// ListOpenMilestones lists the repo's open milestones.
 func (c *GithubClient) ListOpenMilestones(ctx context.Context, owner, repo string) ([]Milestone, error) {
-	var raw []struct {
-		Number int        `json:"number"`
-		Title  string     `json:"title"`
-		DueOn  *time.Time `json:"due_on"`
-	}
-	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/milestones?state=open&per_page=100", &raw); err != nil {
-		return nil, err
-	}
-	out := make([]Milestone, 0, len(raw))
-	for _, m := range raw {
-		ms := Milestone{Number: m.Number, Title: m.Title}
-		if m.DueOn != nil {
-			ms.DueOn = *m.DueOn
+	return c.ListMilestones(ctx, owner, repo, "open")
+}
+
+// ListMilestones lists owner/repo's milestones in the given state (open,
+// closed or all, passed through verbatim), across pages.
+func (c *GithubClient) ListMilestones(ctx context.Context, owner, repo, state string) ([]Milestone, error) {
+	const pageSize = 100
+	out := make([]Milestone, 0)
+	for page := 1; page <= maxMilestonePages; page++ {
+		var raw []milestoneWire
+		path := fmt.Sprintf("/repos/%s/%s/milestones?state=%s&per_page=%d&page=%d", owner, repo, url.QueryEscape(state), pageSize, page)
+		if err := c.get(ctx, path, &raw); err != nil {
+			return nil, err
 		}
-		out = append(out, ms)
+		for _, m := range raw {
+			out = append(out, m.toMilestone(m.Number))
+		}
+		if len(raw) < pageSize {
+			break
+		}
 	}
 	return out, nil
 }

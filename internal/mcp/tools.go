@@ -55,7 +55,7 @@ type searchCoder interface {
 
 // issueCreator is asserted by create_issue.
 type issueCreator interface {
-	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (forge.Issue, error)
+	CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (forge.Issue, error)
 }
 
 // repoCreator is asserted by create_repo.
@@ -98,6 +98,21 @@ type issueCommenter interface {
 // issueReader is asserted by get_issue.
 type issueReader interface {
 	GetIssue(ctx context.Context, owner, repo string, number int) (forge.Issue, []forge.Comment, error)
+}
+
+// milestoneLister is asserted by list_milestones and by milestone resolution.
+type milestoneLister interface {
+	ListMilestones(ctx context.Context, owner, repo, state string) ([]forge.Milestone, error)
+}
+
+// milestoneSetter is asserted by set_milestone.
+type milestoneSetter interface {
+	SetMilestone(ctx context.Context, owner, repo string, number, milestone int) (forge.Issue, error)
+}
+
+// milestoneIssueLister lists a milestone's open issues.
+type milestoneIssueLister interface {
+	ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]forge.Issue, error)
 }
 
 // prLister is asserted by list_prs. GitHub-only: Forgejo does not implement
@@ -177,6 +192,12 @@ func Capabilities(r ForgeReader) []string {
 	}
 	if _, ok := r.(issueReader); ok {
 		capabilities = append(capabilities, "get_issue")
+	}
+	if _, ok := r.(milestoneLister); ok {
+		capabilities = append(capabilities, "list_milestones")
+	}
+	if _, ok := r.(milestoneSetter); ok {
+		capabilities = append(capabilities, "set_milestone")
 	}
 	if _, ok := r.(prLister); ok {
 		capabilities = append(capabilities, "list_prs")

@@ -147,7 +147,7 @@ type fakeIssueCreator struct {
 	err                                  error
 }
 
-func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string) (forge.Issue, error) {
+func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string, _ int) (forge.Issue, error) {
 	f.gotOwner, f.gotRepo, f.gotTitle, f.gotBody, f.gotLabels = owner, repo, title, body, labels
 	return f.ret, f.err
 }

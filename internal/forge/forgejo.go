@@ -260,8 +260,9 @@ func (c *ForgejoClient) ensureLabelIDs(ctx context.Context, owner, repo string, 
 
 // CreateIssue creates an issue on owner/repo via Forgejo/Gitea and returns the
 // minimal Issue. labels are names; they are resolved to ids (and created when
-// absent) before the create request, which carries them atomically.
-func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string) (Issue, error) {
+// absent) before the create request, which carries them atomically. milestone
+// is a milestone id; 0 means none.
+func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
 	ids, err := c.ensureLabelIDs(ctx, owner, repo, labels)
 	if err != nil {
 		return Issue{}, err
@@ -269,6 +270,9 @@ func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, bod
 	req := map[string]any{"title": title, "body": body}
 	if len(ids) > 0 {
 		req["labels"] = ids
+	}
+	if milestone > 0 {
+		req["milestone"] = milestone
 	}
 	var raw struct {
 		Number    int       `json:"number"`
@@ -338,6 +342,20 @@ func (c *ForgejoClient) UpdateIssue(ctx context.Context, owner, repo string, num
 		Number: raw.Number, Title: raw.Title, State: raw.State,
 		URL: raw.HTMLURL, Updated: raw.UpdatedAt,
 	}, nil
+}
+
+// SetMilestone assigns milestone (Forgejo milestone id) to owner/repo#number;
+// 0 clears it. The returned Issue's Milestone is the title the forge reports
+// after the change ("" when cleared).
+func (c *ForgejoClient) SetMilestone(ctx context.Context, owner, repo string, number, milestone int) (Issue, error) {
+	// Forgejo clears a milestone with 0, so the key is always sent.
+	req := map[string]any{"milestone": milestone}
+	var raw milestonePatchResponse
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return raw.toIssue("forgejo", owner+"/"+repo), nil
 }
 
 // AddLabels adds labels to owner/repo#number and returns the issue's full
@@ -592,6 +610,28 @@ func (c *ForgejoClient) listTreeRecursive(ctx context.Context, owner, repo, path
 	return entries, tree.Truncated, nil
 }
 
+// ListMilestones lists owner/repo's milestones in the given state (open,
+// closed or all, passed through verbatim), across pages. Number carries the
+// Forgejo milestone id, which is what the issues API takes.
+func (c *ForgejoClient) ListMilestones(ctx context.Context, owner, repo, state string) ([]Milestone, error) {
+	const pageSize = 50
+	out := make([]Milestone, 0)
+	for page := 1; page <= maxMilestonePages; page++ {
+		var raw []milestoneWire
+		path := fmt.Sprintf("/api/v1/repos/%s/%s/milestones?state=%s&limit=%d&page=%d", owner, repo, url.QueryEscape(state), pageSize, page)
+		if err := c.get(ctx, path, &raw); err != nil {
+			return nil, err
+		}
+		for _, m := range raw {
+			out = append(out, m.toMilestone(m.ID))
+		}
+		if len(raw) < pageSize {
+			break
+		}
+	}
+	return out, nil
+}
+
 type fjIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
@@ -600,13 +640,27 @@ type fjIssue struct {
 	Labels  []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	PullRequest any       `json:"pull_request"`
 }
 
 func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, "")
+}
+
+// ListOpenIssuesInMilestone lists owner/repo's open issues in the milestone
+// with the given Forgejo id, filtered server-side.
+func (c *ForgejoClient) ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, fmt.Sprintf("&milestones=%d", milestone))
+}
+
+// listOpenIssues lists open issues; extraQuery is appended to the query string.
+func (c *ForgejoClient) listOpenIssues(ctx context.Context, owner, repo, extraQuery string) ([]Issue, error) {
 	var raw []fjIssue
-	if err := c.get(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues?state=open&type=issues&limit=50", &raw); err != nil {
+	if err := c.get(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues?state=open&type=issues&limit=50"+extraQuery, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, 0, len(raw))
@@ -618,10 +672,14 @@ func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) 
 		for _, l := range i.Labels {
 			labels = append(labels, l.Name)
 		}
+		milestone := ""
+		if i.Milestone != nil {
+			milestone = i.Milestone.Title
+		}
 		out = append(out, Issue{
 			Forge: "forgejo", Repo: owner + "/" + repo,
 			Number: i.Number, Title: i.Title, Body: i.Body, URL: i.HTMLURL,
-			Labels: labels, Updated: i.UpdatedAt,
+			Labels: labels, Milestone: milestone, Updated: i.UpdatedAt,
 		})
 	}
 	return out, nil

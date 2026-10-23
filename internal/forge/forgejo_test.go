@@ -178,7 +178,7 @@ func TestForgejoCreateIssue(t *testing.T) {
 	defer srv.Close()
 
 	c := NewForgejoClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "", nil)
+	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "", nil, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -187,6 +187,9 @@ func TestForgejoCreateIssue(t *testing.T) {
 	}
 	if _, ok := gotBody["labels"]; ok {
 		t.Errorf("no labels requested, but the create POST carried %+v", gotBody["labels"])
+	}
+	if _, ok := gotBody["milestone"]; ok {
+		t.Errorf("milestone 0 must be omitted, but the create POST carried %+v", gotBody["milestone"])
 	}
 	if is.Forge != "forgejo" || is.Repo != "freax/notes" || is.Number != 7 || is.URL != "https://fj.example/freax/notes/issues/7" {
 		t.Errorf("issue: %+v", is)
@@ -218,7 +221,7 @@ func TestForgejoCreateIssue_SendsLabelIDsAndCreatesMissingLabel(t *testing.T) {
 	defer srv.Close()
 
 	c := NewForgejoClient("T", srv.URL)
-	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "", []string{"needs-enrichment"})
+	is, err := c.CreateIssue(context.Background(), "freax", "notes", "rough idea", "", []string{"needs-enrichment"}, 0)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -258,7 +261,7 @@ func TestForgejoCreateIssue_ExistingLabelIsNotRecreated(t *testing.T) {
 	defer srv.Close()
 
 	c := NewForgejoClient("T", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "freax", "notes", "t", "", []string{"needs-enrichment"}); err != nil {
+	if _, err := c.CreateIssue(context.Background(), "freax", "notes", "t", "", []string{"needs-enrichment"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	if labelCreates != 0 {
@@ -797,7 +800,7 @@ func TestForgejoCreateIssue_LabelLookupSendsLimitAndPages(t *testing.T) {
 	defer srv.Close()
 
 	c := NewForgejoClient("T", srv.URL)
-	if _, err := c.CreateIssue(context.Background(), "freax", "notes", "t", "", []string{"needs-enrichment"}); err != nil {
+	if _, err := c.CreateIssue(context.Background(), "freax", "notes", "t", "", []string{"needs-enrichment"}, 0); err != nil {
 		t.Fatal(err)
 	}
 	// Forgejo's server default page size (commonly 30) is smaller than ours, so
@@ -814,5 +817,126 @@ func TestForgejoCreateIssue_LabelLookupSendsLimitAndPages(t *testing.T) {
 	}
 	if labelCreates != 0 {
 		t.Errorf("label create calls = %d, want 0 — the label exists on page 2", labelCreates)
+	}
+}
+
+func TestForgejoListMilestones_AllStates_PaginatesAndMapsID(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if r.URL.Path != "/api/v1/repos/o/r/milestones" || q.Get("state") != "all" || q.Get("limit") != "50" {
+			t.Errorf("request: %s ?%v", r.URL.Path, q)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if q.Get("page") == "2" {
+			_, _ = w.Write([]byte(`[{"id":12,"title":"v1","state":"open","open_issues":3,"closed_issues":1,"due_on":"2026-11-01T00:00:00Z"}]`))
+			return
+		}
+		items := make([]string, 0, 50)
+		for i := 1; i <= 50; i++ {
+			items = append(items, fmt.Sprintf(`{"id":%d,"title":"m%d","state":"open"}`, 100+i, i))
+		}
+		_, _ = w.Write([]byte("[" + strings.Join(items, ",") + "]"))
+	}))
+	defer srv.Close()
+
+	ms, err := NewForgejoClient("T", srv.URL).ListMilestones(context.Background(), "o", "r", "all")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ms) != 51 {
+		t.Fatalf("len = %d, want 51", len(ms))
+	}
+	last := ms[50]
+	if last.Number != 12 || last.OpenIssues != 3 || last.DueOn.Format("2006-01-02") != "2026-11-01" {
+		t.Errorf("last: %+v", last)
+	}
+}
+
+func TestForgejoCreateIssue_WithMilestone_SendsID(t *testing.T) {
+	var gotBody map[string]any
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_ = json.NewDecoder(r.Body).Decode(&gotBody)
+		w.WriteHeader(http.StatusCreated)
+		_, _ = w.Write([]byte(`{"number":1,"title":"t","html_url":"u","updated_at":"2026-07-22T10:00:00Z"}`))
+	}))
+	defer srv.Close()
+
+	if _, err := NewForgejoClient("T", srv.URL).CreateIssue(context.Background(), "o", "r", "t", "", nil, 12); err != nil {
+		t.Fatal(err)
+	}
+	if gotBody["milestone"] != float64(12) {
+		t.Errorf("milestone sent: %+v", gotBody["milestone"])
+	}
+}
+
+func TestForgejoSetMilestone(t *testing.T) {
+	tests := []struct {
+		name      string
+		milestone int
+		response  string
+		wantKey   float64
+		wantTitle string
+	}{
+		{"assign", 12, `"milestone":{"id":12,"title":"v1"}`, 12, "v1"},
+		{"clear", 0, `"milestone":null`, 0, ""},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var gotBody map[string]any
+			srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.Method != "PATCH" || r.URL.Path != "/api/v1/repos/o/r/issues/42" {
+					t.Errorf("unexpected %s %s", r.Method, r.URL.Path)
+				}
+				_ = json.NewDecoder(r.Body).Decode(&gotBody)
+				_, _ = w.Write([]byte(`{"number":42,"title":"t","state":"open","html_url":"u",` + tt.response + `}`))
+			}))
+			defer srv.Close()
+
+			is, err := NewForgejoClient("T", srv.URL).SetMilestone(context.Background(), "o", "r", 42, tt.milestone)
+			if err != nil {
+				t.Fatal(err)
+			}
+			v, ok := gotBody["milestone"]
+			if !ok || v != tt.wantKey {
+				t.Errorf("body: %+v, want milestone key = %v", gotBody, tt.wantKey)
+			}
+			if is.Milestone != tt.wantTitle || is.Number != 42 {
+				t.Errorf("issue: %+v", is)
+			}
+		})
+	}
+}
+
+func TestForgejoListOpenIssuesInMilestone_SendsIDFilter(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		q := r.URL.Query()
+		if q.Get("milestones") != "12" || q.Get("type") != "issues" || q.Get("state") != "open" {
+			t.Errorf("query: %v", q)
+		}
+		_, _ = w.Write([]byte(`[{"number":3,"title":"a","milestone":{"id":12,"title":"v1"}}]`))
+	}))
+	defer srv.Close()
+
+	is, err := NewForgejoClient("T", srv.URL).ListOpenIssuesInMilestone(context.Background(), "o", "r", 12)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 1 || is[0].Number != 3 || is[0].Milestone != "v1" {
+		t.Errorf("issues: %+v", is)
+	}
+}
+
+func TestForgejoListOpenIssues_MapsMilestoneTitle(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`[{"number":1,"title":"a","milestone":{"id":1,"title":"v1"}},{"number":2,"title":"b","milestone":null}]`))
+	}))
+	defer srv.Close()
+
+	is, err := NewForgejoClient("T", srv.URL).ListOpenIssues(context.Background(), "o", "r")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(is) != 2 || is[0].Milestone != "v1" || is[1].Milestone != "" {
+		t.Errorf("issues: %+v", is)
 	}
 }

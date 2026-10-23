@@ -222,9 +222,10 @@ func (d Deps) handleCrossForgeStatus(ctx context.Context, _ *mcp.CallToolRequest
 }
 
 type listIssuesInput struct {
-	Forge string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
-	Owner string `json:"owner" jsonschema:"repository owner"`
-	Repo  string `json:"repo" jsonschema:"repository name"`
+	Forge     string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner     string `json:"owner" jsonschema:"repository owner"`
+	Repo      string `json:"repo" jsonschema:"repository name"`
+	Milestone string `json:"milestone,omitempty" jsonschema:"only issues in this milestone: its title, or its number as a string (e.g. \"3\")"`
 }
 
 type listIssuesOutput struct {
@@ -234,16 +235,13 @@ type listIssuesOutput struct {
 // handleListIssues returns the open issues of a single repo. Scope is
 // deliberately one repo rather than a fan-out across configured targets:
 // cross_forge_status already aggregates, and fanning out here would multiply
-// to repos × issues per call. Needs no capability assertion — ListOpenIssues
-// is part of ForgeReader.
+// to repos × issues per call. The unfiltered path needs no capability
+// assertion (ListOpenIssues is part of ForgeReader); filtering by milestone
+// requires the milestone capabilities.
 func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in listIssuesInput) (*mcp.CallToolResult, listIssuesOutput, error) {
-	client := d.ClientFor(in.Forge, in.Owner)
-	if client == nil {
-		return nil, listIssuesOutput{}, fmt.Errorf("forge %q not configured", in.Forge)
-	}
-	issues, err := client.ListOpenIssues(ctx, in.Owner, in.Repo)
+	issues, err := d.fetchOpenIssues(ctx, in)
 	if err != nil {
-		return nil, listIssuesOutput{}, fmt.Errorf("list issues %s/%s: %w", in.Owner, in.Repo, err)
+		return nil, listIssuesOutput{}, err
 	}
 	// Body is populated for internal consumers (the dispatcher's empty-body
 	// gate). This is a summary listing, so it is cleared here — in the shared
@@ -252,6 +250,48 @@ func (d Deps) handleListIssues(ctx context.Context, _ *mcp.CallToolRequest, in l
 		issues[i].Body = ""
 	}
 	return nil, listIssuesOutput{Issues: issues}, nil
+}
+
+// fetchOpenIssues lists the repo's open issues, restricted to one milestone
+// when the input names one.
+func (d Deps) fetchOpenIssues(ctx context.Context, in listIssuesInput) ([]forge.Issue, error) {
+	if in.Milestone == "" {
+		client := d.ClientFor(in.Forge, in.Owner)
+		if client == nil {
+			return nil, fmt.Errorf("forge %q not configured", in.Forge)
+		}
+		issues, err := client.ListOpenIssues(ctx, in.Owner, in.Repo)
+		if err != nil {
+			return nil, fmt.Errorf("list issues %s/%s: %w", in.Owner, in.Repo, err)
+		}
+		return issues, nil
+	}
+	lister, err := clientAs[milestoneIssueLister](d, in.Forge, in.Owner, "filtering issues by milestone")
+	if err != nil {
+		return nil, err
+	}
+	m, err := d.lookupMilestone(ctx, in.Forge, in.Owner, in.Repo, in.Milestone)
+	if err != nil {
+		return nil, err
+	}
+	issues, err := lister.ListOpenIssuesInMilestone(ctx, in.Owner, in.Repo, m.Number)
+	if err != nil {
+		return nil, fmt.Errorf("list issues %s/%s in milestone %q: %w", in.Owner, in.Repo, m.Title, err)
+	}
+	return keepMilestoneTitle(issues, m.Title), nil
+}
+
+// keepMilestoneTitle drops issues outside the named milestone. Forgejo's
+// milestones= filter resolves names before ids, so an id such as 12 can match
+// a milestone titled "12"; the title check makes the result exact.
+func keepMilestoneTitle(issues []forge.Issue, title string) []forge.Issue {
+	kept := make([]forge.Issue, 0, len(issues))
+	for _, is := range issues {
+		if is.Milestone == title {
+			kept = append(kept, is)
+		}
+	}
+	return kept
 }
 
 // maxIssueComments bounds get_issue's comment payload. When a thread exceeds
@@ -323,7 +363,7 @@ type listGitForgesOutput struct {
 // is no mutable global state.
 func isWriteTool(name string) bool {
 	switch name {
-	case "create_issue", "create_repo", "update_repo", "close_issue", "update_issue", "add_labels", "comment_issue", "put_file":
+	case "create_issue", "create_repo", "update_repo", "close_issue", "update_issue", "set_milestone", "add_labels", "comment_issue", "put_file":
 		return true
 	default:
 		return false

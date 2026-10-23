@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bridge mcp serve`: milestone support — new **`list_milestones`** and **`set_milestone`** tools (assign, change or clear, draft by default), a **`milestone`** input on `create_issue`, and a **`milestone`** filter on `list_issues`; milestones are referenced by title or number and resolve across open and closed ones, on GitHub and Forgejo. (#349)
 - `bridge mcp serve`: read-only **`list_prs`**, **`get_pr`** and **`list_runs`** tools, so an MCP client can verify a dispatched ai-implement run — its PR, the PR's check-runs and commit statuses on the head SHA, and which actor triggered its Actions runs. `list_prs closes=N` uses dispatch's own closing-keyword rule. GitHub-only; a Forgejo target returns a warning. Each call is bounded to 30 s. (#326)
 - `CreateIssue` accepts labels and creates any that the target repo does not
   define (#303)

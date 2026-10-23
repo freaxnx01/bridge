@@ -32,13 +32,18 @@ func NewServer(deps Deps) *mcp.Server {
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_issues",
-		Description: "List open issues for a single repository (live).",
+		Description: "List open issues for a single repository (live), optionally only those in one milestone (title, or number given as a string).",
 	}, deps.handleListIssues)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "get_issue",
 		Description: "Read a single issue's body and comment thread (author, body, created, in order). Comments are capped at the newest 20; comments_truncated + total_comments signal when more exist.",
 	}, deps.handleGetIssue)
+
+	mcp.AddTool(srv, &mcp.Tool{
+		Name:        "list_milestones",
+		Description: "List a repo's milestones: number (GitHub milestone number; Forgejo milestone id — the value the issues API takes), title, state, due date, open/closed issue counts. state: open (default), closed or all.",
+	}, deps.handleListMilestones)
 
 	mcp.AddTool(srv, &mcp.Tool{
 		Name:        "list_prs",
@@ -68,7 +73,7 @@ func NewServer(deps Deps) *mcp.Server {
 	if !deps.ReadOnly {
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "create_issue",
-			Description: "Create an issue. Without confirm=true this returns a draft and creates nothing.",
+			Description: "Create an issue, optionally in a milestone (title, or number given as a string). Without confirm=true this returns a draft and creates nothing; the draft shows the resolved milestone.",
 		}, deps.handleCreateIssue)
 
 		mcp.AddTool(srv, &mcp.Tool{
@@ -90,6 +95,11 @@ func NewServer(deps Deps) *mcp.Server {
 			Name:        "update_issue",
 			Description: "Update an issue's title and/or body. Without confirm=true this returns a draft and updates nothing.",
 		}, deps.handleUpdateIssue)
+
+		mcp.AddTool(srv, &mcp.Tool{
+			Name:        "set_milestone",
+			Description: "Assign, change or clear (clear=true) an issue's milestone, by milestone title, or number given as a string. Without confirm=true this returns a draft showing the resolved milestone and changes nothing.",
+		}, deps.handleSetMilestone)
 
 		mcp.AddTool(srv, &mcp.Tool{
 			Name:        "add_labels",

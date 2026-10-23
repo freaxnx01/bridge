@@ -31,7 +31,7 @@ func (fakeResolvedClient) ListOpenIssues(context.Context, string, string) ([]for
 func (fakeResolvedClient) GetFile(context.Context, string, string, string) ([]byte, string, bool, error) {
 	return nil, "", false, nil
 }
-func (fakeResolvedClient) CreateIssue(context.Context, string, string, string, string) (forge.Issue, error) {
+func (fakeResolvedClient) CreateIssue(context.Context, string, string, string, string, []string, int) (forge.Issue, error) {
 	return forge.Issue{}, nil
 }
 
@@ -245,8 +245,8 @@ func TestBuildMCPHandler_ValidBearerListsTools(t *testing.T) {
 	if err != nil {
 		t.Fatalf("list tools: %v", err)
 	}
-	if len(res.Tools) != 11 {
-		t.Fatalf("read-only server: want 11 tools over HTTP, got %d", len(res.Tools))
+	if len(res.Tools) != 12 {
+		t.Fatalf("read-only server: want 12 tools over HTTP, got %d", len(res.Tools))
 	}
 }
 

@@ -484,8 +484,8 @@ func TestHandleListGitForges_ReportsConfiguredAndUnconfiguredTargets(t *testing.
 	if configured.Reason != "" {
 		t.Errorf("a configured target must carry no reason, got %q", configured.Reason)
 	}
-	if len(configured.Capabilities) != 13 {
-		t.Errorf("a fully capable client must report 13 tools, got %v", configured.Capabilities)
+	if len(configured.Capabilities) != 15 {
+		t.Errorf("a fully capable client must report 15 tools, got %v", configured.Capabilities)
 	}
 
 	unconfigured := out.Forges[1]
@@ -542,8 +542,8 @@ func TestHandleListGitForges_ReadOnlyDropsWriteCapabilities(t *testing.T) {
 			t.Errorf("read-only must not advertise write tools, got %v", out.Forges[0].Capabilities)
 		}
 	}
-	if len(out.Forges[0].Capabilities) != 5 {
-		t.Errorf("want the 5 read tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 6 {
+		t.Errorf("want the 6 read tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 
@@ -561,8 +561,8 @@ func TestHandleListGitForges_ReadOnlyFalseKeepsWriteCapabilities(t *testing.T) {
 	if out.ReadOnly {
 		t.Error("read_only must be false when Deps.ReadOnly is false")
 	}
-	if len(out.Forges[0].Capabilities) != 13 {
-		t.Errorf("want all 13 tools, got %v", out.Forges[0].Capabilities)
+	if len(out.Forges[0].Capabilities) != 15 {
+		t.Errorf("want all 15 tools, got %v", out.Forges[0].Capabilities)
 	}
 }
 
@@ -710,5 +710,91 @@ func TestHandleListIssues_StripsBody(t *testing.T) {
 	}
 	if out.Issues[0].Title != "t" {
 		t.Errorf("Title = %q, want the title preserved", out.Issues[0].Title)
+	}
+}
+
+func TestHandleListIssues_MilestoneFilterUsesFilteredListing(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.issues = []forge.Issue{{Number: 99, Title: "unfiltered"}}
+	gh.inMilestone = []forge.Issue{{Number: 7, Title: "in v1", Body: "secret body", Milestone: "v1"}}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "o", Repo: "r", Milestone: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.inMilestoneCalls != 1 || gh.inMilestoneGot != 1 {
+		t.Fatalf("want one filtered call with milestone 1, got calls=%d milestone=%d", gh.inMilestoneCalls, gh.inMilestoneGot)
+	}
+	if gh.openCalls != 0 {
+		t.Fatalf("unfiltered ListOpenIssues must not be called, got %d", gh.openCalls)
+	}
+	if len(out.Issues) != 1 || out.Issues[0].Number != 7 {
+		t.Fatalf("unexpected issues: %+v", out.Issues)
+	}
+	if out.Issues[0].Body != "" {
+		t.Fatalf("bodies must be cleared on the filtered path, got %q", out.Issues[0].Body)
+	}
+}
+
+func TestHandleListIssues_MilestoneFilterDropsOtherMilestoneTitles(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.inMilestone = []forge.Issue{
+		{Number: 7, Title: "in v1", Milestone: "v1"},
+		{Number: 8, Title: "name-before-id collision", Milestone: "1"},
+	}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "o", Repo: "r", Milestone: "v1"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Issues) != 1 || out.Issues[0].Number != 7 {
+		t.Fatalf("want only #7 (milestone v1), got %+v", out.Issues)
+	}
+}
+
+func TestHandleListIssues_UnknownMilestoneErrors(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "o", Repo: "r", Milestone: "nope"})
+	if !errors.Is(err, ErrMilestoneNotFound) {
+		t.Fatalf("want ErrMilestoneNotFound, got %v", err)
+	}
+	if gh.inMilestoneCalls != 0 {
+		t.Fatalf("filtered listing must not run for an unknown milestone")
+	}
+}
+
+func TestHandleListIssues_MilestoneFilterUnsupportedForge(t *testing.T) {
+	reader := &fakeReader{name: "gitlab"}
+	d := Deps{ClientFor: func(string, string) ForgeReader { return reader }}
+
+	_, _, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "gitlab", Owner: "o", Repo: "r", Milestone: "v1"})
+	if err == nil {
+		t.Fatal("want an error for a forge without milestone support")
+	}
+}
+
+func TestHandleListIssues_NoMilestoneKeepsUnfilteredPath(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.issues = []forge.Issue{{Number: 1, Body: "b"}}
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleListIssues(context.Background(), nil,
+		listIssuesInput{Forge: "github", Owner: "o", Repo: "r"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.openCalls != 1 || gh.inMilestoneCalls != 0 || gh.listCalls != 0 {
+		t.Fatalf("calls: open=%d filtered=%d milestones=%d", gh.openCalls, gh.inMilestoneCalls, gh.listCalls)
+	}
+	if len(out.Issues) != 1 || out.Issues[0].Body != "" {
+		t.Fatalf("unexpected: %+v", out.Issues)
 	}
 }
