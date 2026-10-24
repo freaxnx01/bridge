@@ -48,8 +48,7 @@ The user named three. Each is a design constraint, not a nice-to-have:
 - **REST only.** The page talks to `/api/*` and the SSE stream `/api/events`
   (already exists, `internal/web/hub.go`). It never shells out or talks to a
   forge itself.
-- **Runs as** `bridge-serve.service` on agent-dev (default bind
-  `127.0.0.1:7777`). Reaching it from other machines goes through Traefik,
+- **Runs as** `bridge-serve.service` on agent-dev (bound to `0.0.0.0:7777`). Reaching it from other machines goes through Traefik,
   as already planned in TODO.md.
 - **agent-dev memory cap** (12 GB, no swap, see user CLAUDE.md): collectors
   must stay light. No full clones, no per-request process storms.
@@ -84,8 +83,9 @@ things:
 
 - **Access (decided):** the cockpit is reachable on the LAN through a Traefik
   route (`*.home.freaxnx01.ch`, see the `homelab-service-routing` skill)
-  **behind Authentik forward-auth**. `bridge serve` itself keeps binding
-  `127.0.0.1`.
+  **behind Authentik forward-auth**. Note: `bridge-serve.service` already binds
+  `0.0.0.0:7777` because FlowHub needs `/api/capture` over the LAN, so reads
+  are also reachable directly on the LAN without Authentik, as today.
 - **Writes** additionally go through endpoints behind the existing
   `requireBearer` (`BRIDGE_API_TOKEN`), like `/api/capture/` and `/api/tools/`
   already do, and the server rejects write requests whose `Origin` isn't the
