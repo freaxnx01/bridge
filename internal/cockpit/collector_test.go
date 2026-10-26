@@ -277,3 +277,32 @@ func TestCollector_Run_StopsOnContextCancel(t *testing.T) {
 		t.Errorf("initial collect issue calls = %d, want 1", w.issueCalls["o/a"])
 	}
 }
+
+func TestCollector_Run_SlowSessionsDoNotHoldUpIssues(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	release := make(chan struct{})
+	src := w.sources()
+	src.Sessions = func(context.Context) ([]agentview.Session, error) { <-release; return nil, nil }
+	c := NewCollector(src, Intervals{Issues: time.Hour, Runs: time.Hour, Sessions: time.Hour}, fixedNow, nil)
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	go func() { c.Run(ctx); close(done) }()
+	defer func() { close(release); cancel(); <-done }()
+
+	deadline := time.Now().Add(5 * time.Second)
+	for {
+		b := c.Board()
+		_, hasIssues := b.CollectedAt["issues"]
+		_, hasRuns := b.CollectedAt["runs"]
+		if hasIssues && hasRuns {
+			if _, hasSessions := b.CollectedAt["sessions"]; hasSessions {
+				t.Fatal("sessions must still be blocked")
+			}
+			return
+		}
+		if time.Now().After(deadline) {
+			t.Fatalf("issues/runs held up by slow sessions: %v", b.CollectedAt)
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+}

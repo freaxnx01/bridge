@@ -3,6 +3,8 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -189,5 +191,63 @@ func TestPipelineHandler_UnknownPath_404(t *testing.T) {
 	h, _ := newPipelineFixture(LaunchResult{})
 	if w := doReq(h, http.MethodGet, "/api/pipeline/nope", ""); w.Code != http.StatusNotFound {
 		t.Errorf("status = %d, want 404", w.Code)
+	}
+}
+
+func TestPipelineHandler_EmptyBoard_SerializesEmptyArrays(t *testing.T) {
+	h := &PipelineHandler{Board: func() cockpit.Board { return cockpit.Board{} }}
+	w := doReq(h, http.MethodGet, "/api/pipeline", "")
+	for _, k := range []string{`"running":[]`, `"ready":[]`, `"held":[]`, `"needsEnrichment":[]`, `"errors":[]`} {
+		if !strings.Contains(w.Body.String(), k) {
+			t.Errorf("%s missing in %s", k, w.Body)
+		}
+	}
+}
+
+func TestPipelineHandler_UnknownRepo_409NotOnBoard(t *testing.T) {
+	h, _ := newPipelineFixture(LaunchResult{})
+	h.Dispatch = func(context.Context, LaunchRequest) (LaunchResult, error) {
+		return LaunchResult{}, fmt.Errorf("%w: o/r", ErrUnknownRepo)
+	}
+	w := doReq(h, http.MethodPost, "/api/pipeline/dispatch", `{"repo":"o/r","number":5}`)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "not on the board") {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+}
+
+func TestPipelineHandler_LaunchFails_500GenericBody(t *testing.T) {
+	h, _ := newPipelineFixture(LaunchResult{})
+	h.Dispatch = func(context.Context, LaunchRequest) (LaunchResult, error) {
+		return LaunchResult{}, errors.New("bridge launch: exit 1: secret stderr /home/x")
+	}
+	w := doReq(h, http.MethodPost, "/api/pipeline/dispatch", `{"repo":"o/r","number":5}`)
+	if w.Code != http.StatusInternalServerError || strings.Contains(w.Body.String(), "secret") || !strings.Contains(w.Body.String(), "launch failed") {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+}
+
+func TestPipelineHandler_ConcurrentSameIssue_SecondGets409(t *testing.T) {
+	h, _ := newPipelineFixture(LaunchResult{})
+	started, release := make(chan struct{}), make(chan struct{})
+	h.Dispatch = func(context.Context, LaunchRequest) (LaunchResult, error) {
+		close(started)
+		<-release
+		return LaunchResult{Slot: "s"}, nil
+	}
+	first := make(chan int)
+	go func() { first <- doReq(h, http.MethodPost, "/api/pipeline/dispatch", `{"repo":"o/r","number":5}`).Code }()
+	<-started
+	w := doReq(h, http.MethodPost, "/api/pipeline/dispatch", `{"repo":"o/r","number":5}`)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "launch already in progress") {
+		t.Fatalf("second: %d %s", w.Code, w.Body)
+	}
+	close(release)
+	if code := <-first; code != http.StatusOK {
+		t.Errorf("first = %d, want 200", code)
+	}
+	// Guard released: a later request goes through again.
+	h.Dispatch = func(context.Context, LaunchRequest) (LaunchResult, error) { return LaunchResult{Slot: "s"}, nil }
+	if w := doReq(h, http.MethodPost, "/api/pipeline/dispatch", `{"repo":"o/r","number":5}`); w.Code != http.StatusOK {
+		t.Errorf("after release: %d", w.Code)
 	}
 }

@@ -78,9 +78,20 @@ func NewCollector(src Sources, iv Intervals, now func() time.Time, onChange func
 
 // Run collects every source once, then on each interval, until ctx is done.
 func (c *Collector) Run(ctx context.Context) {
-	c.CollectIssues(ctx)
-	c.CollectRuns(ctx)
-	c.CollectSessions(ctx)
+	// Runs depends on the issues snapshot, so those two stay ordered; the slow
+	// sessions listing runs alongside them instead of holding them up.
+	var initial sync.WaitGroup
+	initial.Add(2)
+	go func() {
+		defer initial.Done()
+		c.CollectIssues(ctx)
+		c.CollectRuns(ctx)
+	}()
+	go func() {
+		defer initial.Done()
+		c.CollectSessions(ctx)
+	}()
+	initial.Wait()
 
 	issues := newTicker(c.iv.Issues)
 	runs := newTicker(c.iv.Runs)

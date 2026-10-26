@@ -23,8 +23,8 @@ func TestResolveLaunchName_Cases(t *testing.T) {
 	}{
 		{name: "unique", repo: "a/bridge", want: "bridge"},
 		{name: "shared basename", repo: "a/dup", wantErr: api.ErrAmbiguousRepo},
-		{name: "unknown", repo: "a/nope", anyErr: true},
-		{name: "owner mismatch", repo: "z/bridge", anyErr: true},
+		{name: "unknown", repo: "a/nope", wantErr: api.ErrUnknownRepo},
+		{name: "owner mismatch", repo: "z/bridge", wantErr: api.ErrUnknownRepo},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			got, err := resolveLaunchName(repos, tc.repo)

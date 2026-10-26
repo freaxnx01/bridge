@@ -3,6 +3,7 @@ package main
 import (
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
@@ -112,36 +113,71 @@ func TestRestDeps_ExistingReadOnlySettingWins(t *testing.T) {
 	}
 }
 
-func sameOriginReq(origin string) *http.Request {
-	req := httptest.NewRequest(http.MethodPost, "http://bridge.local:7777/api/pipeline/enrich", nil)
+func sameOriginReq(host, origin string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "http://"+host+"/api/pipeline/enrich", nil)
 	if origin != "" {
 		req.Header.Set("Origin", origin)
 	}
 	return req
 }
 
+func testAllowlist() originAllowlist {
+	return newOriginAllowlist(7777, "bridge.home.example, https://other.example:8443/")
+}
+
 func TestRequireSameOrigin_MissingOrigin_403(t *testing.T) {
 	w := httptest.NewRecorder()
-	requireSameOrigin(okHandler()).ServeHTTP(w, sameOriginReq(""))
+	requireSameOrigin(testAllowlist(), okHandler()).ServeHTTP(w, sameOriginReq("localhost:7777", ""))
 	if w.Code != http.StatusForbidden {
 		t.Fatalf("status = %d, want 403", w.Code)
 	}
 }
 
 func TestRequireSameOrigin_ForeignOrigin_403(t *testing.T) {
-	for _, origin := range []string{"http://evil.example", "http://bridge.local:9999", "null", "::bad"} {
+	for _, origin := range []string{"http://evil.example", "http://localhost:9999", "null", "::bad"} {
 		w := httptest.NewRecorder()
-		requireSameOrigin(okHandler()).ServeHTTP(w, sameOriginReq(origin))
+		requireSameOrigin(testAllowlist(), okHandler()).ServeHTTP(w, sameOriginReq("localhost:7777", origin))
 		if w.Code != http.StatusForbidden {
 			t.Errorf("origin %q: status = %d, want 403", origin, w.Code)
 		}
 	}
 }
 
-func TestRequireSameOrigin_SameHost_PassesThrough(t *testing.T) {
+func TestRequireSameOrigin_DNSRebinding_OriginEqualsHost_403(t *testing.T) {
 	w := httptest.NewRecorder()
-	requireSameOrigin(okHandler()).ServeHTTP(w, sameOriginReq("http://bridge.local:7777"))
+	requireSameOrigin(testAllowlist(), okHandler()).ServeHTTP(w, sameOriginReq("evil.example:7777", "http://evil.example:7777"))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403 (Origin == Host must not suffice)", w.Code)
+	}
+}
+
+func TestRequireSameOrigin_Allowed_PassesThrough(t *testing.T) {
+	for _, origin := range []string{
+		"http://localhost:7777", "http://127.0.0.1:7777",
+		"https://bridge.home.example", "https://other.example:8443",
+	} {
+		w := httptest.NewRecorder()
+		requireSameOrigin(testAllowlist(), okHandler()).ServeHTTP(w, sameOriginReq("whatever:1", origin))
+		if w.Code != http.StatusOK {
+			t.Errorf("origin %q: status = %d, want 200", origin, w.Code)
+		}
+	}
+}
+
+func TestRequireTokenConfigured_Empty_503AndNoCall(t *testing.T) {
+	called := false
+	next := http.HandlerFunc(func(http.ResponseWriter, *http.Request) { called = true })
+	w := httptest.NewRecorder()
+	requireTokenConfigured("", next).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/api/pipeline/enrich", nil))
+	if w.Code != http.StatusServiceUnavailable || !strings.Contains(w.Body.String(), "BRIDGE_API_TOKEN not set") || called {
+		t.Fatalf("got %d %s called=%v", w.Code, w.Body, called)
+	}
+}
+
+func TestRequireTokenConfigured_Set_PassesThrough(t *testing.T) {
+	w := httptest.NewRecorder()
+	requireTokenConfigured("x", okHandler()).ServeHTTP(w, httptest.NewRequest(http.MethodPost, "/", nil))
 	if w.Code != http.StatusOK {
-		t.Fatalf("status = %d, want 200", w.Code)
+		t.Fatalf("status = %d", w.Code)
 	}
 }
