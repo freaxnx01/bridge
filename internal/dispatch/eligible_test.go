@@ -69,7 +69,7 @@ func TestClosesIssue(t *testing.T) {
 }
 
 func TestEligible(t *testing.T) {
-	base := forge.Issue{Number: 41, Body: "a real description", Labels: []string{"feat"}, Milestone: "v2 search"}
+	base := forge.Issue{Number: 41, Body: "a real description\n## Implementation Plan\n- step", Labels: []string{"feat"}, Milestone: "v2 search"}
 
 	cases := []struct {
 		name       string
@@ -81,7 +81,7 @@ func TestEligible(t *testing.T) {
 	}{
 		{"happy path", base, "v2 search", nil, true, ""},
 		{"no active milestone dispatches anyway",
-			forge.Issue{Number: 41, Body: "d", Milestone: ""}, "", nil, true, ""},
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Milestone: ""}, "", nil, true, ""},
 		{"empty body",
 			forge.Issue{Number: 41, Body: "", Labels: []string{"feat"}}, "", nil,
 			false, "empty body"},
@@ -92,22 +92,22 @@ func TestEligible(t *testing.T) {
 			forge.Issue{Number: 31, Body: ""}, "", nil,
 			false, "empty body"},
 		{"not enriched",
-			forge.Issue{Number: 41, Body: "d", Labels: []string{"needs-enrichment"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"needs-enrichment"}}, "", nil,
 			false, "needs-enrichment"},
 		{"parked",
-			forge.Issue{Number: 41, Body: "d", Labels: []string{"🧊 parked"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"🧊 parked"}}, "", nil,
 			false, "parked"},
 		{"attempt budget spent",
-			forge.Issue{Number: 41, Body: "d", Labels: []string{"attempt:2"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"attempt:2"}}, "", nil,
 			false, "attempts exhausted"},
 		{"has open PR", base, "v2 search",
 			[]forge.PullRequest{{Number: 90, Body: "Closes #41"}},
 			false, "open PR"},
 		{"already dispatched, no open PR",
-			forge.Issue{Number: 41, Body: "d", Labels: []string{"ai-implement"}}, "", nil,
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"ai-implement"}}, "", nil,
 			false, "already dispatched"},
 		{"outside active milestone",
-			forge.Issue{Number: 41, Body: "d", Milestone: "backlog"}, "v2 search", nil,
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Milestone: "backlog"}, "v2 search", nil,
 			false, "outside active milestone"},
 	}
 	for _, c := range cases {
@@ -117,5 +117,28 @@ func TestEligible(t *testing.T) {
 				t.Errorf("got (%v, %q), want (%v, %q)", ok, reason, c.wantOK, c.wantReason)
 			}
 		})
+	}
+}
+
+func TestEligible_ToBeDefinedLabel_NotEligible(t *testing.T) {
+	i := forge.Issue{Number: 7, Body: "x\n## Implementation Plan\n- a", Labels: []string{"❓ to-be-defined"}}
+	if ok, why := Eligible(i, "", nil); ok || why != "to-be-defined" {
+		t.Fatalf("got %v %q", ok, why)
+	}
+}
+
+func TestEligible_BodyWithoutImplementationPlan_NotEligible(t *testing.T) {
+	i := forge.Issue{Number: 7, Body: "## Acceptance criteria\n- a"}
+	if ok, why := Eligible(i, "", nil); ok || why != "no implementation plan" {
+		t.Fatalf("got %v %q", ok, why)
+	}
+}
+
+func TestEligible_PlanHeadingAnyLevelCaseInsensitive_Eligible(t *testing.T) {
+	for _, h := range []string{"## Implementation Plan", "### implementation plan"} {
+		i := forge.Issue{Number: 7, Body: "x\n" + h + "\n- a"}
+		if ok, why := Eligible(i, "", nil); !ok {
+			t.Errorf("%q: got %v %q", h, ok, why)
+		}
 	}
 }

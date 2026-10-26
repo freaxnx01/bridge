@@ -55,12 +55,12 @@ func TestCollectCandidatesSkipsNonGithubAndIneligible(t *testing.T) {
 	repos := []repoInput{
 		{Forge: "github", Owner: "o", Name: "quotes",
 			Issues: []forge.Issue{
-				{Number: 41, Body: "a real description", Labels: []string{"feat"}},
+				{Number: 41, Body: "a real description\n## Implementation Plan\n- step", Labels: []string{"feat"}},
 				{Number: 42, Body: "d", Labels: []string{"needs-enrichment"}},
 				{Number: 31, Body: ""}, // capture-created, no body, no labels
 			}},
 		{Forge: "forgejo", Owner: "f", Name: "notes",
-			Issues: []forge.Issue{{Number: 1, Body: "d", Labels: []string{"feat"}}}},
+			Issues: []forge.Issue{{Number: 1, Body: "d\n## Implementation Plan\n- step", Labels: []string{"feat"}}}},
 	}
 
 	got := collectCandidates(repos)
@@ -233,7 +233,7 @@ func TestRunDispatch_FullPipeline_AppliesOnlyEligibleLabel(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[
-				{"number":41,"title":"eligible issue","body":"a real description","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"},
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"},
 				{"number":42,"title":"already dispatched","body":"a real description","html_url":"u42","labels":[{"name":"ai-implement"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
 			]`))
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
@@ -658,7 +658,7 @@ func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[
-				{"number":41,"title":"eligible issue","body":"a real description","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
 			]`))
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
 			w.Write([]byte(`[]`))
@@ -857,7 +857,7 @@ func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[
-				{"number":41,"title":"eligible issue","body":"a real description","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
 			]`))
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
 			w.Write([]byte(`[]`))
