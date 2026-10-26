@@ -186,18 +186,28 @@ func GitHubToken(roots []string, owner string) (string, bool) {
 // internally. Returns ok=false when no git-forgejo dir is found or the token
 // is empty.
 func ForgejoToken(roots []string) (string, bool) {
+	tok, _, ok := ForgejoAuth(roots)
+	return tok, ok
+}
+
+// ForgejoAuth resolves the Forgejo token and its API base from the same
+// git-forgejo .envrc scope (the API base via apiBase: the .envrc value, else
+// the process env). api may be "" — callers must then not build a client,
+// since forge.NewForgejoClient would default to the public codeberg.org.
+// Returns ok=false when no git-forgejo dir is found or the token is empty.
+func ForgejoAuth(roots []string) (token, api string, ok bool) {
 	for _, root := range roots {
 		for _, t := range discoverRemoteTargets(root) {
 			if t.Forge != "forgejo" {
 				continue
 			}
-			tok := envFromDirenv(t.Dir, []string{"FORGEJO_TOKEN"})["FORGEJO_TOKEN"]
-			if tok != "" {
-				return tok, true
+			env := envFromDirenv(t.Dir, []string{"FORGEJO_TOKEN", "BRIDGE_FORGEJO_API"})
+			if tok := env["FORGEJO_TOKEN"]; tok != "" {
+				return tok, apiBase(env, "BRIDGE_FORGEJO_API"), true
 			}
 		}
 	}
-	return "", false
+	return "", "", false
 }
 
 // apiBase resolves a BRIDGE_*_API base URL: the per-forge .envrc value (direnv
