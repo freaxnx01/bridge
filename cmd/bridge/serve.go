@@ -10,6 +10,7 @@ import (
 	"net/url"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -82,16 +83,38 @@ func requireBearer(token string, next http.Handler) http.Handler {
 	})
 }
 
-// requireSameOrigin rejects state-changing browser requests that did not come
-// from this server's own page: the Origin header must be present and its host
-// must equal the request Host. It is the CSRF half of the write guard; the
-// bearer token is the other.
-func requireSameOrigin(next http.Handler) http.Handler {
+// originAllowlist is the set of Origin hosts (host[:port]) allowed to call the
+// state-changing endpoints. It is an explicit allowlist, never derived from the
+// request's own Host header: a DNS-rebinding page makes Origin and Host equal.
+type originAllowlist map[string]bool
+
+// newOriginAllowlist allows localhost and 127.0.0.1 on the serve port plus every
+// entry of extra (comma-separated host[:port]; a scheme prefix is ignored).
+func newOriginAllowlist(port int, extra string) originAllowlist {
+	al := originAllowlist{
+		fmt.Sprintf("localhost:%d", port): true,
+		fmt.Sprintf("127.0.0.1:%d", port): true,
+	}
+	for _, e := range strings.Split(extra, ",") {
+		e = strings.TrimSpace(e)
+		if _, rest, ok := strings.Cut(e, "://"); ok {
+			e = rest
+		}
+		if e = strings.TrimSuffix(e, "/"); e != "" {
+			al[e] = true
+		}
+	}
+	return al
+}
+
+// requireSameOrigin rejects state-changing browser requests whose Origin header
+// is missing or not in the allowlist. It is the CSRF half of the write guard;
+// the bearer token is the other.
+func requireSameOrigin(allowed originAllowlist, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		u, err := url.Parse(origin)
-		if origin == "" || err != nil || u.Host != r.Host {
-			http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
+		u, err := url.Parse(r.Header.Get("Origin"))
+		if err != nil || u.Host == "" || !allowed[u.Host] {
+			http.Error(w, "forbidden: origin not allowed", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -217,7 +240,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	})
 	go collector.Run(ctx)
 	pipelineH := pipelineHandler(ctx, collector, reposWithMeta)
-	guarded := requireBearer(apiToken, requireSameOrigin(pipelineH))
+	origins := newOriginAllowlist(servePort, os.Getenv("BRIDGE_COCKPIT_ORIGINS"))
+	guarded := requireTokenConfigured(apiToken, requireBearer(apiToken, requireSameOrigin(origins, pipelineH)))
 	apiMux.Handle("/api/pipeline", pipelineH) // GET only; the handler answers other methods with 405
 	apiMux.Handle("/api/pipeline/refresh", guarded)
 	apiMux.Handle("/api/pipeline/enrich", guarded)

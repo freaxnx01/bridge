@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
+	"net/http"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -111,9 +113,11 @@ func pipelineHandler(ctx context.Context, col *cockpit.Collector, repos func() (
 			col.CollectSessions(ctx)
 		}()
 	}
-	launch := func(c context.Context, req api.LaunchRequest, worktreePrefix, prompt string) (api.LaunchResult, error) {
-		res, err := launchSession(c, repos, req, worktreePrefix, prompt)
+	launch := func(_ context.Context, req api.LaunchRequest, worktreePrefix, prompt string) (api.LaunchResult, error) {
+		// The child runs on the server ctx: a client disconnect must not kill a half-started launch.
+		res, err := launchSession(ctx, repos, req, worktreePrefix, prompt)
 		if err != nil {
+			slog.Error("pipeline launch failed", "repo", req.Repo, "number", req.Number, "error", err)
 			return res, err
 		}
 		owner, name, _ := strings.Cut(req.Repo, "/")
@@ -159,7 +163,7 @@ func resolveLaunchName(repos []core.Repo, repo string) (string, error) {
 	case len(matches) > 1:
 		return "", api.ErrAmbiguousRepo
 	case len(matches) == 0 || matches[0].Owner != owner:
-		return "", fmt.Errorf("unknown repo %s", repo)
+		return "", fmt.Errorf("%w: %s", api.ErrUnknownRepo, repo)
 	}
 	return name, nil
 }
@@ -204,4 +208,17 @@ func parseLaunchResult(out []byte) (api.LaunchResult, error) {
 		return api.LaunchResult{}, errors.New("launch output has no slot")
 	}
 	return api.LaunchResult{Slot: lr.Slot, AlreadyRunning: lr.AlreadyRunning, RCURL: lr.RCURL}, nil
+}
+
+// requireTokenConfigured fails closed: the pipeline write endpoints start paid,
+// unattended sessions, so without a BRIDGE_API_TOKEN they refuse to run at all.
+func requireTokenConfigured(token string, next http.Handler) http.Handler {
+	if token != "" {
+		return next
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusServiceUnavailable)
+		_, _ = w.Write([]byte(`{"error":"BRIDGE_API_TOKEN not set"}` + "\n"))
+	})
 }
