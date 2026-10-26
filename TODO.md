@@ -86,7 +86,7 @@ Plan 2 covers the actual Svelte pages and components.
 
 **Required gates before writing any component code:**
 
-- [ ] Run `/ui-brainstorm` → get ASCII wireframes approved for:
+- [x] Superseded by `docs/design/cockpit/` (wireframe + flow approved; cockpit shell and Pipeline board shipped, see `docs/cockpit.md`). Remaining panels: spec section "Roadmap: the other panels" in `docs/superpowers/specs/2026-10-24-bridge-cockpit-design.md`. Original gates, now superseded:
   - Overview page (`/`): Radar + Word Cloud viz panel, Tier list, Capture bar
   - Repo dashboard (`/repos/:owner/:name`): Sessions, Worktrees, Branches, Git status, Issues, ArchViz stub
 - [ ] Run `/ui-flow` → get Mermaid state diagrams approved (Svelte store states + transitions)
