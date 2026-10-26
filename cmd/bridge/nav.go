@@ -57,13 +57,7 @@ var navCmd = &cobra.Command{
 				repo, _, err := createAndClone(context.Background(), name, forgeName, private)
 				return repo, err
 			},
-			FetchIssues: func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
-				c := clientFor(forgeName)
-				if c == nil {
-					return nil, nil
-				}
-				return c.ListOpenIssues(ctx, owner, repo)
-			},
+			FetchIssues: fetchOpenIssues,
 			FetchRemote: func(ctx context.Context) ([]forge.RepoRef, error) {
 				return remote.Refresh(ctx, reposRoots(), filepath.Join(cacheRoot(), "remote.list"))
 			},
@@ -89,6 +83,16 @@ var navCmd = &cobra.Command{
 func init() {
 	navCmd.Flags().BoolVar(&navOnce, "once", false, "render one frame to stdout and exit (smoke test, no TTY)")
 	rootCmd.AddCommand(navCmd)
+}
+
+// fetchOpenIssues lists a repo's open issues via the per-forge client; a forge
+// without a configured client yields none. Shared by nav and `bridge bot`.
+func fetchOpenIssues(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
+	c := clientFor(forgeName)
+	if c == nil {
+		return nil, nil
+	}
+	return c.ListOpenIssues(ctx, owner, repo)
 }
 
 // navDebugPath resolves BRIDGE_NAV_DEBUG into a key-log file path. "1"/"true"/
