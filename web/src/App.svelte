@@ -1,51 +1,37 @@
 <script>
-  import { onMount } from 'svelte';
-  import { loadRepos, repos } from './lib/stores/repos.js';
-  import { loadAgents, agents } from './lib/stores/agents.js';
+  import './app.css';
+  import Header from './lib/components/Header.svelte';
+  import TokenDialog from './lib/components/TokenDialog.svelte';
+  import Pipeline from './routes/Pipeline.svelte';
+  import { pipeline } from './lib/stores/pipeline.js';
+  import { now } from './lib/stores/now.js';
+  import { requestToken } from './lib/stores/tokenPrompt.js';
+  import { staleSourceCount } from './lib/freshness.js';
   import architectureSvg from './lib/architecture.svg?raw';
 
-  onMount(() => { loadRepos(); loadAgents(); });
+  let area = $state('pipeline');
 
-  function shortRepo(cwd) {
-    if (!cwd) return '';
-    const parts = cwd.split('/').filter(Boolean);
-    return parts.slice(-2).join('/');
-  }
-
-  function shortAge(startedAt) {
-    if (!startedAt) return '';
-    const ms = Date.now() - new Date(startedAt).getTime();
-    if (!(ms >= 0)) return '';
-    const mins = Math.floor(ms / 60000);
-    if (mins < 60) return `${mins}m`;
-    const hours = Math.floor(mins / 60);
-    if (hours < 24) return `${hours}h`;
-    return `${Math.floor(hours / 24)}d`;
-  }
+  const staleCount = $derived(staleSourceCount($pipeline, $now));
 </script>
 
+<Header
+  {area}
+  onnavigate={(next) => (area = next)}
+  {staleCount}
+  dispatchPaused={$pipeline?.dispatchPaused ?? false}
+  onToken={() => requestToken()}
+/>
+
 <main>
-  <h1>Bridge WebUI</h1>
-  <p>{$repos.length} repos loaded.</p>
-
-  <section>
-    <h2>Agents · {$agents.length}</h2>
-    {#if $agents.length === 0}
-      <p>No live Claude sessions.</p>
-    {:else}
-      <ul>
-        {#each $agents as a (a.sessionId)}
-          <li>
-            <strong>{a.name}</strong> · {a.status} · {a.kind} · {shortRepo(a.cwd)} · {shortAge(a.startedAt)}
-          </li>
-        {/each}
-      </ul>
-    {/if}
-  </section>
-
-  <section>
-    <h2>Architecture</h2>
-    <p>How ai-instructions, bridge, and agent-pipeline fit together:</p>
-    {@html architectureSvg}
-  </section>
+  {#if area === 'pipeline'}
+    <Pipeline />
+  {:else}
+    <section class="arch">
+      <h2>Architecture</h2>
+      <p>How ai-instructions, bridge, and agent-pipeline fit together:</p>
+      {@html architectureSvg}
+    </section>
+  {/if}
 </main>
+
+<TokenDialog />
