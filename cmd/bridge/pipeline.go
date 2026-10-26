@@ -13,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -40,51 +41,95 @@ func repoWired(r core.Repo) bool {
 	return false
 }
 
-// githubOnly resolves the GitHub client of r, or nil for any other forge.
-func githubOnly(r core.Repo) *forge.GithubClient {
+// errNoForgeClient means no token resolves for a repo's forge and owner. The
+// collector records it as a source error, so a missing token shows on the
+// board instead of reading as "no issues".
+var errNoForgeClient = errors.New("no forge client")
+
+// clientResolver returns the forge client for one forge and owner, or nil when
+// no token is configured for it.
+type clientResolver func(forgeName, owner string) forge.Client
+
+// cachedClients resolves each (forge, owner) once: token resolution walks the
+// repos tree and spawns direnv, too slow to repeat on every collect.
+func cachedClients(resolve clientResolver) clientResolver {
+	var (
+		mu    sync.Mutex
+		cache = map[string]forge.Client{}
+	)
+	return func(forgeName, owner string) forge.Client {
+		key := forgeName + ":" + owner
+		mu.Lock()
+		defer mu.Unlock()
+		if c, ok := cache[key]; ok {
+			return c
+		}
+		c := resolve(forgeName, owner)
+		cache[key] = c
+		return c
+	}
+}
+
+// repoClient resolves r's client, or errNoForgeClient when none is configured.
+func repoClient(resolve clientResolver, r core.Repo) (forge.Client, error) {
+	if c := resolve(r.Forge, r.Owner); c != nil {
+		return c, nil
+	}
+	return nil, fmt.Errorf("%w: %s owner %s", errNoForgeClient, r.Forge, r.Owner)
+}
+
+// githubOnly resolves r's GitHub client. Other forges have no PRs, milestones
+// or runs on the board, so they yield nil without an error.
+func githubOnly(resolve clientResolver, r core.Repo) (*forge.GithubClient, error) {
 	if r.Forge != "github" {
-		return nil
+		return nil, nil
 	}
-	gh, ok := clientFor(r.Forge).(*forge.GithubClient)
+	c, err := repoClient(resolve, r)
+	if err != nil {
+		return nil, err
+	}
+	gh, ok := c.(*forge.GithubClient)
 	if !ok {
-		return nil
+		return nil, fmt.Errorf("%w: github client has type %T", errNoForgeClient, c)
 	}
-	return gh
+	return gh, nil
 }
 
 // runsPerRepo is how many recent workflow runs the board reads per repo.
 const runsPerRepo = 30
 
-// cockpitSources wires the collector to the real forges, sessions and dispatch state.
-func cockpitSources() cockpit.Sources {
+// cockpitSources wires the collector to the real forges, sessions and dispatch
+// state. Clients are resolved per owner, like the MCP server does, because the
+// service gets its tokens from each forge directory's .envrc, not GH_TOKEN.
+func cockpitSources(resolve clientResolver) cockpit.Sources {
 	return cockpit.Sources{
 		Repos: reposWithMeta,
 		Wired: repoWired,
 		Issues: func(ctx context.Context, r core.Repo) ([]forge.Issue, error) {
-			cl := clientFor(r.Forge)
-			if cl == nil {
-				return nil, nil
+			cl, err := repoClient(resolve, r)
+			if err != nil {
+				return nil, err
 			}
 			return cl.ListOpenIssues(ctx, r.Owner, r.Name)
 		},
 		PRs: func(ctx context.Context, r core.Repo) ([]forge.PullRequest, error) {
-			gh := githubOnly(r)
+			gh, err := githubOnly(resolve, r)
 			if gh == nil {
-				return nil, nil
+				return nil, err
 			}
 			return gh.ListOpenPullRequests(ctx, r.Owner, r.Name)
 		},
 		Milestones: func(ctx context.Context, r core.Repo) ([]forge.Milestone, error) {
-			gh := githubOnly(r)
+			gh, err := githubOnly(resolve, r)
 			if gh == nil {
-				return nil, nil
+				return nil, err
 			}
 			return gh.ListOpenMilestones(ctx, r.Owner, r.Name)
 		},
 		Runs: func(ctx context.Context, r core.Repo) ([]forge.WorkflowRun, error) {
-			gh := githubOnly(r)
+			gh, err := githubOnly(resolve, r)
 			if gh == nil {
-				return nil, nil
+				return nil, err
 			}
 			return gh.ListWorkflowRuns(ctx, r.Owner, r.Name, "", "", runsPerRepo)
 		},
