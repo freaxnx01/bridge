@@ -5,7 +5,7 @@
   import IssueCard from '../lib/components/IssueCard.svelte';
   import { authedPost, ensureToken } from '../lib/auth.js';
   import { oldestSource, ageSeconds, formatAge } from '../lib/freshness.js';
-  import { loadPipeline, pipeline, pipelineError } from '../lib/stores/pipeline.js';
+  import { loadPipeline, startPipelinePolling, pipeline, pipelineError } from '../lib/stores/pipeline.js';
   import { now } from '../lib/stores/now.js';
 
   const VISIBLE_ENRICH = 10;
@@ -15,7 +15,10 @@
   let refreshError = $state(null);
   let dismissed = $state.raw([]);
 
-  onMount(loadPipeline);
+  onMount(() => {
+    loadPipeline();
+    return startPipelinePolling();
+  });
 
   // Dismissed errors are remembered by object identity; every board update
   // brings fresh objects, so a still-failing source shows again.
@@ -113,12 +116,12 @@
         {#if board.held.length > 0}
           <div class="held">
             <button type="button" class="collapse" aria-expanded={heldOpen} onclick={() => (heldOpen = !heldOpen)}>
-              {heldOpen ? '▾' : '▸'} Held · {board.held.length} <span class="muted">(milestone, open PR, parked)</span>
+              {heldOpen ? '▾' : '▸'} Held · {board.held.length} <span class="muted">(milestone, open PR, attempts)</span>
             </button>
             {#if heldOpen}
               <ul class="cards">
                 {#each board.held as card (issueKey(card))}
-                  <IssueCard {card} showReason={true} />
+                  <IssueCard {card} />
                 {/each}
               </ul>
             {/if}

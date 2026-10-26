@@ -23,6 +23,7 @@
       return c.sessionId?.startsWith('session_') ? { href: `https://claude.ai/code/${c.sessionId}`, text: 'Open RC ↗' } : null;
     }
     if (c.kind === 'enrichment') {
+      if (c.url) return { href: c.url, text: 'Open ↗' };
       return c.issue && c.repo?.includes('/')
         ? { href: `https://github.com/${c.repo}/issues/${c.issue}`, text: 'Open ↗' }
         : null;

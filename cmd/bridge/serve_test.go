@@ -181,3 +181,14 @@ func TestRequireTokenConfigured_Set_PassesThrough(t *testing.T) {
 		t.Fatalf("status = %d", w.Code)
 	}
 }
+
+func TestRequireSameOrigin_CaseInsensitive_Allowed(t *testing.T) {
+	al := newOriginAllowlist(7777, "Bridge.Home.Example")
+	for _, origin := range []string{"http://BRIDGE.home.example", "http://LocalHost:7777"} {
+		w := httptest.NewRecorder()
+		requireSameOrigin(al, okHandler()).ServeHTTP(w, sameOriginReq("localhost:7777", origin))
+		if w.Code != http.StatusOK {
+			t.Errorf("origin %q: status = %d, want 200", origin, w.Code)
+		}
+	}
+}

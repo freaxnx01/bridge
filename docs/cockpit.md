@@ -28,7 +28,7 @@ Classification is first match wins:
 2. `enrichment-ongoing`: Running (kind `enrichment`).
 3. `needs-enrichment` or `❓ to-be-defined`: Needs enrichment.
 4. `ai-implement`: already dispatched, not a candidate (its workflow run shows under Running).
-5. Otherwise, on a wired GitHub repo: `dispatch.Eligible` decides Ready / Held.
+5. Otherwise, on a wired GitHub repo: `dispatch.Eligible` decides. Eligible: Ready. Rejected with `outside active milestone`, `attempts exhausted` or `open PR`: Held. Rejected with `no implementation plan` or `empty body`: Needs enrichment, with that reason shown as a badge on the card (these can be enriched; Enrich accepts them). Any other rejection is dropped. On unwired or non-GitHub repos such issues are dropped.
 
 ## Refresh intervals and rate limits
 
@@ -93,6 +93,12 @@ enrich, in Ready for dispatch.
 
 `GET /api/events` emits `pipeline-updated` whenever a source changes; the page
 then re-fetches `/api/pipeline`.
+
+SSE fires only on content changes, so on a quiet board it goes silent. The page
+therefore also re-fetches `/api/pipeline` on a timer every `intervalsSeconds.sessions`
+seconds (at least 5 s, 5 s before the first load) to keep `collectedAt` current
+and avoid false stale warnings. Overlapping collects on the server (ticker vs.
+manual refresh) coalesce: a second call while one is running returns at once.
 
 ## What the buttons run
 

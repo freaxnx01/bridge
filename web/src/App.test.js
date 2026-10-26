@@ -7,6 +7,7 @@ vi.mock('./lib/stores/pipeline.js', async () => {
     pipeline: writable(null),
     pipelineError: writable(null),
     loadPipeline: vi.fn(),
+    startPipelinePolling: vi.fn(() => () => {}),
     refreshPipeline: vi.fn(),
   }
 })

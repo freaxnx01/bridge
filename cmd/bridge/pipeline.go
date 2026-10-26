@@ -219,6 +219,9 @@ func requireTokenConfigured(token string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusServiceUnavailable)
-		_, _ = w.Write([]byte(`{"error":"BRIDGE_API_TOKEN not set"}` + "\n"))
+		if _, err := w.Write([]byte(`{"error":"BRIDGE_API_TOKEN not set"}` + "\n")); err != nil {
+			// The client went away mid-response; nothing else to send, so just record it.
+			slog.Warn("pipeline: write token-not-set response", "error", err)
+		}
 	})
 }
