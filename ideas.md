@@ -11,14 +11,14 @@ Loose backlog of bridge feature ideas. Promote to `docs/specs/<date>-<slug>-desi
 ## Agent / Assistant / Bot integration (2026-06-24)
 
 **Capture & Triage**
-- `/ask <question>` in bridge-bot — ask about repos/open issues, get a summary
+- `/ask <question>` in the Telegram bot (`bridge bot`, Go) — ask about repos/open issues, get a summary
 - Auto-label on `/issue` capture — background call adds `value/N` + `effort/N` labels based on title analysis
 - `/plan <text>` — capture idea → AI expands to mini-spec draft → creates GitHub issue with structured body
 
 **Status & Report**
 - `bridge agents` nav screen / WebUI panel — wraps `claude agents --json`, shows all background Claude sessions across repos (status + last output line)
-- bridge-bot `/status` improvement — pull from `claude agents --json` for richer report (what each agent is doing, not just tmux session names)
-- Session summary on exit — when a tmux slot closes, bridge-bot sends Telegram summary (last N output lines, files changed)
+- Telegram bot (`bridge bot`) status screen — pull from `claude agents --json` for richer report (what each agent is doing, not just tmux session names)
+- Session summary on exit — when a tmux slot closes, the Telegram bot (`bridge bot`) sends a summary (last N output lines, files changed)
 - "What next?" button (WebUI Overview) — sends current Snapshot to Claude, returns ranked recommendation with reasoning
 - Stale issue detector — highlight issues untouched >30 days with AI-generated "still relevant?" nudge
 - Agent ping in Radar viz wired to real `claude agents` data (already mocked in bridge-poc2.html)
