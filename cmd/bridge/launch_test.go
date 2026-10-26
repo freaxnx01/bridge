@@ -257,3 +257,41 @@ func TestLaunchRejectsBeforeSideEffects(t *testing.T) {
 		}
 	}
 }
+
+func TestLaunch_PromptFlag_AppendedToClaudeArgs(t *testing.T) {
+	bin, logPath := fakeTmux(t)
+	cmd := bridgeCmd("launch", "bridge", "--agent", "claude", "--json", "--prompt", "/enrich 7 --headless")
+	cmd.Env = launchEnv(t, bin)
+	if out, err := cmd.Output(); err != nil {
+		t.Fatalf("run: %v\n%s", err, out)
+	}
+	log, _ := os.ReadFile(logPath)
+	line := ""
+	for _, l := range strings.Split(string(log), "\n") {
+		if strings.Contains(l, "new-session") {
+			line = l
+		}
+	}
+	if !strings.HasSuffix(strings.TrimSpace(line), "/enrich 7 --headless") {
+		t.Errorf("prompt must be the last claude arg; new-session line: %q", line)
+	}
+}
+
+func TestLaunch_PromptWithNonClaudeAgent_Exit2(t *testing.T) {
+	bin, logPath := fakeTmux(t)
+	cmd := bridgeCmd("launch", "bridge", "--agent", "code", "--prompt", "hi")
+	cmd.Env = launchEnv(t, bin)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	_, err := cmd.Output()
+	var ee *exec.ExitError
+	if !errors.As(err, &ee) || ee.ExitCode() != 2 {
+		t.Fatalf("want exit 2, got %v", err)
+	}
+	if !strings.Contains(stderr.String(), "--prompt") {
+		t.Errorf("stderr %q lacks --prompt", stderr.String())
+	}
+	if log, _ := os.ReadFile(logPath); strings.Contains(string(log), "new-session") {
+		t.Errorf("must not launch; log:\n%s", log)
+	}
+}

@@ -111,3 +111,37 @@ func TestRestDeps_ExistingReadOnlySettingWins(t *testing.T) {
 		t.Fatal("an explicit read-only setting must win over --allow-writes")
 	}
 }
+
+func sameOriginReq(origin string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "http://bridge.local:7777/api/pipeline/enrich", nil)
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	return req
+}
+
+func TestRequireSameOrigin_MissingOrigin_403(t *testing.T) {
+	w := httptest.NewRecorder()
+	requireSameOrigin(okHandler()).ServeHTTP(w, sameOriginReq(""))
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("status = %d, want 403", w.Code)
+	}
+}
+
+func TestRequireSameOrigin_ForeignOrigin_403(t *testing.T) {
+	for _, origin := range []string{"http://evil.example", "http://bridge.local:9999", "null", "::bad"} {
+		w := httptest.NewRecorder()
+		requireSameOrigin(okHandler()).ServeHTTP(w, sameOriginReq(origin))
+		if w.Code != http.StatusForbidden {
+			t.Errorf("origin %q: status = %d, want 403", origin, w.Code)
+		}
+	}
+}
+
+func TestRequireSameOrigin_SameHost_PassesThrough(t *testing.T) {
+	w := httptest.NewRecorder()
+	requireSameOrigin(okHandler()).ServeHTTP(w, sameOriginReq("http://bridge.local:7777"))
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", w.Code)
+	}
+}
