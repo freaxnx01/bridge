@@ -155,7 +155,7 @@ func (e botEnv) exec(ctx context.Context, a bot.Action) bot.Event {
 			l, rm, m, lerr := e.loadRepos(ctx, a.Refresh)
 			return repos{l, rm, m}, lerr
 		})
-		return bot.ReposLoaded{Local: r.local, Remote: r.remote, MRU: r.mru, Err: err}
+		return bot.ReposLoaded{Local: r.local, Remote: r.remote, MRU: r.mru, Refresh: a.Refresh, Err: err}
 	case bot.LoadDash:
 		rows, _ := within(ctx, func() ([]navdata.DashRow, error) { return e.dashRows(ctx, a.Repo), nil })
 		if rows == nil {

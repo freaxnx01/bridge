@@ -277,6 +277,8 @@ func (r *botRunner) handle(ctx context.Context, ce chatEvent) {
 			newMsg = true
 		case bot.SendLink:
 			r.send(ctx, ce.chatID, a.Text)
+		case bot.Reply:
+			r.send(ctx, ce.chatID, a.Text)
 		default:
 			r.dispatch(ctx, ce.chatID, a)
 		}

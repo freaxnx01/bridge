@@ -27,9 +27,11 @@ type Tap struct {
 type MessageSent struct{ MessageID int }
 
 // ReposLoaded is LoadRepos' result. Err is shown, the lists are still used.
+// Refresh echoes LoadRepos.Refresh: only a refresh's result ends the refresh.
 type ReposLoaded struct {
 	Local, Remote []navdata.RepoEntry
 	MRU           []string
+	Refresh       bool
 	Err           error
 }
 
@@ -109,6 +111,10 @@ type Toast struct{ Text string }
 // Drop: ignore the update (sender not allowlisted); log one line.
 type Drop struct{ UserID, ChatID int64 }
 
+// Reply: send Text as a new plain message — the "/nav" hint when the chat has
+// no bot message to show a notice on (e.g. after a restart).
+type Reply struct{ Text string }
+
 // SendLink: send Text as a separate new message (an RC link → phone notification).
 type SendLink struct{ Text string }
 
@@ -157,6 +163,7 @@ func (NewMessage) isAction() {}
 func (Toast) isAction()      {}
 func (Drop) isAction()       {}
 func (SendLink) isAction()   {}
+func (Reply) isAction()      {}
 func (LoadRepos) isAction()  {}
 func (LoadDash) isAction()   {}
 func (LoadStatus) isAction() {}

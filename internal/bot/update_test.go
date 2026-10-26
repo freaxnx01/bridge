@@ -415,7 +415,7 @@ func TestRefreshRepos(t *testing.T) {
 	if !reflect.DeepEqual(acts, []Action{LoadRepos{Refresh: true}}) || s.Busy != busyRefreshRepos {
 		t.Fatalf("refresh: %+v %#v", s, acts)
 	}
-	s, _ = Update(cfg, s, ReposLoaded{Err: errors.New("github: 401")})
+	s, _ = Update(cfg, s, ReposLoaded{Refresh: true, Err: errors.New("github: 401")})
 	if s.Busy != "" || s.Notice != "⚠ github: 401" {
 		t.Errorf("after refresh: %+v", s)
 	}
@@ -447,5 +447,85 @@ func TestValidName(t *testing.T) {
 		if ValidName(bad) {
 			t.Errorf("ValidName(%q) = true", bad)
 		}
+	}
+}
+
+// A reload that leaves the picker list unchanged keeps the epoch, so a tap
+// made right after /nav or ◀ Repos is not "outdated".
+func TestReposLoaded_UnchangedListKeepsEpoch(t *testing.T) {
+	repos := []navdata.RepoEntry{local("github", "o", "a"), local("github", "o", "b")}
+	s := picker(repos, nil)
+	s, _ = text(s, "/nav")
+	s, _ = Update(cfg, s, MessageSent{MessageID: 11})
+	before := s.Epoch
+	s, _ = Update(cfg, s, ReposLoaded{Local: repos})
+	if s.Epoch != before {
+		t.Fatalf("epoch %d → %d on an unchanged reload", before, s.Epoch)
+	}
+	if _, acts := tap(t, s, "r", "1"); only[LoadDash](t, acts).Repo.Name != "b" {
+		t.Errorf("tap after reload: %#v", acts)
+	}
+	s, _ = Update(cfg, s, ReposLoaded{Local: repos[:1]})
+	if s.Epoch == before {
+		t.Error("epoch kept although the list changed")
+	}
+}
+
+// Only the refresh's own result clears the refresh Busy: a plain reload
+// (e.g. from /nav) arriving first must not.
+func TestRefreshRepos_BusyClearedOnlyByRefreshResult(t *testing.T) {
+	s := picker(nil, nil)
+	s, _ = tap(t, s, "rf")
+	s, _ = Update(cfg, s, ReposLoaded{})
+	if s.Busy != busyRefreshRepos {
+		t.Fatalf("busy = %q after a non-refresh reload, want %q", s.Busy, busyRefreshRepos)
+	}
+	s, _ = Update(cfg, s, ReposLoaded{Refresh: true})
+	if s.Busy != "" {
+		t.Errorf("busy = %q after the refresh result", s.Busy)
+	}
+}
+
+// 🔄 on the dashboard while that repo's git fetch runs only toasts; it never
+// piles up another fetch.
+func TestDashRefresh_NoPileUpWhileFetching(t *testing.T) {
+	s := dash(t, baseRow) // DashLoaded issued Fetch
+	got, acts := tap(t, s, "rf")
+	if toast := only[Toast](t, acts); !strings.HasPrefix(toast.Text, "⏳ still working") {
+		t.Errorf("toast = %q", toast.Text)
+	}
+	if !reflect.DeepEqual(got, s) {
+		t.Error("state changed by a refused refresh")
+	}
+	s, _ = Update(cfg, s, FetchDone{Repo: s.Repo})
+	s, acts = tap(t, s, "rf")
+	if only[LoadDash](t, acts).Repo.Path != s.Repo.Path {
+		t.Fatalf("refresh after fetch: %#v", acts)
+	}
+	_, acts = Update(cfg, s, DashLoaded{Repo: s.Repo, Rows: []navdata.DashRow{baseRow}})
+	fetches := 0
+	for _, a := range acts {
+		if _, ok := a.(Fetch); ok {
+			fetches++
+		}
+	}
+	if fetches != 1 {
+		t.Errorf("fetches after refresh = %d, want 1: %#v", fetches, acts)
+	}
+}
+
+// Plain text in a chat without a bot message (e.g. after a restart) gets the
+// hint as a new message instead of silence.
+func TestText_WithoutMessageRepliesHint(t *testing.T) {
+	for _, msg := range []string{"hello", "/foo"} {
+		s, acts := Update(cfg, State{}, Text{UserID: me, ChatID: chat, Text: msg})
+		r := only[Reply](t, acts)
+		if !strings.Contains(r.Text, "/nav") || s.Notice != "" {
+			t.Errorf("%q: reply %q, notice %q", msg, r.Text, s.Notice)
+		}
+	}
+	s := picker(nil, nil)
+	if got, acts := text(s, "hello"); len(acts) != 0 || got.Notice == "" {
+		t.Errorf("with a message: notice %q acts %#v", got.Notice, acts)
 	}
 }

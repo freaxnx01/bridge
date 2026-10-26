@@ -2,6 +2,7 @@ package bot
 
 import (
 	"fmt"
+	"reflect"
 	"strings"
 
 	"github.com/freaxnx01/bridge/internal/core"
@@ -13,6 +14,8 @@ const (
 	invalidNameText  = "⚠ invalid name — use A-Z a-z 0-9 . _ - (max 40)"
 	busyRefreshRepos = "⏳ refreshing repos…"
 	noticeRefreshing = "⏳ refreshing…"
+	hintNav          = "send /nav to open the picker"
+	unknownCommand   = "⚠ unknown command — /nav"
 )
 
 // Config is the bot's static configuration.
@@ -85,12 +88,11 @@ func onText(s State, e Text) (State, []Action) {
 	case "/nav", "/start":
 		// A fresh picker in a new message; repo lists and a running action survive.
 		return State{
-			Epoch: s.Epoch + 1, Busy: s.Busy,
+			Epoch: s.Epoch + 1, Busy: s.Busy, Fetching: s.Fetching,
 			Local: s.Local, Remote: s.Remote, MRU: s.MRU, ReposLoaded: s.ReposLoaded,
 		}, []Action{NewMessage{}, LoadRepos{}}
 	default:
-		s.Notice = "⚠ unknown command — /nav"
-		return s, nil
+		return hint(s, unknownCommand)
 	}
 	switch s.Prompt {
 	case PromptFilter:
@@ -120,7 +122,16 @@ func onText(s State, e Text) (State, []Action) {
 		s.Epoch++
 		return s, []Action{Start{Repo: s.Repo, Worktree: txt, Create: true}}
 	}
-	s.Notice = "send /nav to open the picker"
+	return hint(s, hintNav)
+}
+
+// hint shows msg as the screen's notice, or — when the chat has no bot
+// message yet (e.g. after a restart) — sends it as a new message.
+func hint(s State, msg string) (State, []Action) {
+	if s.MessageID == 0 {
+		return s, []Action{Reply{Text: msg}}
+	}
+	s.Notice = msg
 	return s, nil
 }
 
@@ -261,6 +272,10 @@ func onDashTap(s State, d tapData) (State, []Action) {
 		s.Epoch++
 		return s, nil
 	case "rf":
+		if s.Fetching[s.Repo.Path] {
+			// The last refresh's git fetch still runs; don't pile up another.
+			return s, []Action{Toast{Text: "⏳ still working: fetching " + s.Repo.Name + "…"}}
+		}
 		s.Notice = noticeRefreshing
 		return s, []Action{LoadDash{Repo: s.Repo}}
 	case "bk":
@@ -343,9 +358,14 @@ func onConfirm(s State, d tapData) (State, []Action) {
 }
 
 func onReposLoaded(s State, e ReposLoaded) State {
-	if s.Busy == busyRefreshRepos {
+	if e.Refresh && s.Busy == busyRefreshRepos {
 		s.Busy = ""
 	}
+	var before []PickerItem
+	if s.ReposLoaded {
+		before = s.PickerItems()
+	}
+	wasLoaded := s.ReposLoaded
 	if e.Err != nil {
 		s.Notice = "⚠ " + shortErr(e.Err)
 	}
@@ -358,7 +378,7 @@ func onReposLoaded(s State, e ReposLoaded) State {
 		s.Forge = ""
 	}
 	s.Page = clamp(s.Page, 0, pageCount(len(s.PickerItems()), PageSize)-1)
-	if s.Screen == ScreenPicker {
+	if s.Screen == ScreenPicker && (!wasLoaded || !reflect.DeepEqual(before, s.PickerItems())) {
 		// Indexes moved: a pending clone confirm may now point elsewhere.
 		if s.Confirm != nil && s.Confirm.Kind == ConfirmClone {
 			s.Confirm = nil
@@ -395,7 +415,11 @@ func onDashLoaded(s State, e DashLoaded) (State, []Action) {
 		}
 		s.Epoch++
 	}
-	acts := []Action{LoadStatus{Repo: s.Repo, Paths: rowPaths(e.Rows)}, Fetch{Repo: s.Repo}}
+	acts := []Action{LoadStatus{Repo: s.Repo, Paths: rowPaths(e.Rows)}}
+	if !s.Fetching[s.Repo.Path] {
+		s.Fetching = withFetching(s.Fetching, s.Repo.Path, true)
+		acts = append(acts, Fetch{Repo: s.Repo})
+	}
 	if !s.IssuesLoaded && hasForgeIDs(s.Repo) {
 		acts = append(acts, LoadIssues{Repo: s.Repo})
 	}
@@ -417,7 +441,24 @@ func onStatusLoaded(s State, e StatusLoaded) State {
 	return s
 }
 
+// withFetching returns a copy of m with path marked (or unmarked) in flight.
+func withFetching(m map[string]bool, path string, on bool) map[string]bool {
+	out := make(map[string]bool, len(m)+1)
+	for k, v := range m {
+		out[k] = v
+	}
+	if on {
+		out[path] = true
+	} else {
+		delete(out, path)
+	}
+	return out
+}
+
 func onFetchDone(s State, e FetchDone) (State, []Action) {
+	if s.Fetching[e.Repo.Path] {
+		s.Fetching = withFetching(s.Fetching, e.Repo.Path, false)
+	}
 	if !s.current(e.Repo) || e.Err != nil || s.Rows == nil {
 		return s, nil // offline / failed fetch: keep last-known status
 	}

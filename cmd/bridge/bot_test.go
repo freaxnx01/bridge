@@ -305,3 +305,17 @@ func TestBotE2E_RefusesWorldReadableConfig(t *testing.T) {
 		t.Errorf("stderr = %q", stderr.String())
 	}
 }
+
+// Plain text before any /nav (e.g. after a restart) gets the hint as a new
+// message instead of silence.
+func TestBotE2E_TextWithoutMessageGetsHint(t *testing.T) {
+	bin, _ := fakeTmux(t)
+	tg := newFakeTelegram(t)
+	startBot(t, writeBotEnv(t, tg.srv.URL, "111"), launchEnv(t, bin))
+
+	tg.text(111, -5, "hello")
+	c, _ := tg.waitFor(0, func(c tgCall) bool { return c.Method == "sendMessage" })
+	if c.ChatID != -5 || !strings.Contains(c.Text, "/nav") {
+		t.Errorf("reply = chat %d %q, want the /nav hint", c.ChatID, c.Text)
+	}
+}

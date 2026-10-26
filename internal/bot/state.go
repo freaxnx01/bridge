@@ -97,8 +97,9 @@ type State struct {
 	Prompt      Prompt
 	NewRepoName string
 	Confirm     *Confirm
-	Busy        string // non-empty while a slow action runs; taps are refused
-	Notice      string // one-line result or "⚠ …" error
+	Busy        string          // non-empty while a slow action runs; taps are refused
+	Fetching    map[string]bool // repo paths whose git fetch is in flight
+	Notice      string          // one-line result or "⚠ …" error
 }
 
 // PickerItem is one picker button: an entry and whether it is in the ⭐ block.
