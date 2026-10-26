@@ -37,6 +37,7 @@ bridge <name> -w <wt>           # open the <wt> worktree (resolves existing via 
 bridge <name> --agent <name>    # launch via tmux + named agent (claude|copilot|opencode|code)
 bridge <name> --rc              # pass --remote-control to claude
 bridge launch <name> [-w <wt>] [--agent <name>] [--rc] [--rc-wait <dur>] [--no-sync] [--json]   # start a session detached (no attach) — scripts / Telegram admin; --rc reports the Remote Control URL (unix only)
+bridge serve                    # WebUI cockpit + Pipeline board on :7777 — see docs/cockpit.md
 bridge --version
 
 # Composed read commands (each supports --json):

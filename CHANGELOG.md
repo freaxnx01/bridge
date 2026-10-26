@@ -10,6 +10,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `bridge mcp serve`: milestone support — new **`list_milestones`** and **`set_milestone`** tools (assign, change or clear, draft by default), a **`milestone`** input on `create_issue`, and a **`milestone`** filter on `list_issues`; milestones are referenced by title or number and resolve across open and closed ones, on GitHub and Forgejo. (#349)
+- WebUI cockpit: shell with a **Pipeline board** (Running / Ready / Held / Needs enrichment) served by `bridge serve`, with token-guarded Enrich and Dispatch buttons. See `docs/cockpit.md`.
+- Pipeline API: `GET /api/pipeline`, `POST /api/pipeline/{refresh,enrich,dispatch}` and the SSE event `pipeline-updated`.
+- `bridge launch --prompt`: pass an initial prompt to the claude agent.
 - `bridge mcp serve`: read-only **`list_prs`**, **`get_pr`** and **`list_runs`** tools, so an MCP client can verify a dispatched ai-implement run — its PR, the PR's check-runs and commit statuses on the head SHA, and which actor triggered its Actions runs. `list_prs closes=N` uses dispatch's own closing-keyword rule. GitHub-only; a Forgejo target returns a warning. Each call is bounded to 30 s. (#326)
 - `CreateIssue` accepts labels and creates any that the target repo does not
   define (#303)
@@ -37,6 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `bridge dispatch` requires an `## Implementation Plan` heading in the issue body and treats `❓ to-be-defined` as unenriched, so previously dispatchable issues without a plan are now skipped.
 - `bridge dispatch`: the nightly cap now applies only while the covering window
   has `budget_rung: false`, and its counter resets at that window's own start
   instead of a hardcoded 12:00 pivot. Previously a spent night blocked the whole
@@ -55,6 +59,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   bearer token to guess, the session handshake was the only thing stopping a page
   in the user's browser from reaching a mutating tool on `127.0.0.1`, and a
   stateless transport executes the tool on the first POST. (#313)
+
+### Security
+
+- The pipeline write endpoints (`refresh`, `enrich`, `dispatch`) require an Origin from an explicit allowlist (`localhost`/`127.0.0.1` on the serve port plus `BRIDGE_COCKPIT_ORIGINS`) as well as the bearer token, defending against DNS rebinding and CSRF. They fail closed with `503` when `BRIDGE_API_TOKEN` is unset.
 
 ### Fixed
 
