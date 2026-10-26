@@ -188,8 +188,6 @@ func rowForgeKey(r repoRow) (key, forgeName, owner, name string, ok bool) {
 		r.repo.Forge, r.repo.Owner, r.repo.Name, true
 }
 
-const issueCacheTTL = 10 * time.Minute
-
 // fetchIssuesCached returns a repo's open issues, reading the per-repo cache
 // first and refreshing via FetchIssues only when the cache is missing or stale.
 // Degrades gracefully: a cache miss with no FetchIssues yields the (empty)
