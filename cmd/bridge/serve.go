@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"syscall"
@@ -17,6 +18,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/agentview"
 	"github.com/freaxnx01/bridge/internal/api"
 	"github.com/freaxnx01/bridge/internal/capture"
+	"github.com/freaxnx01/bridge/internal/cockpit"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
@@ -74,6 +76,22 @@ func requireBearer(token string, next http.Handler) http.Handler {
 		got := []byte(r.Header.Get("Authorization"))
 		if len(got) != len(want) || subtle.ConstantTimeCompare(got, want) != 1 {
 			http.Error(w, "unauthorized", http.StatusUnauthorized)
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
+}
+
+// requireSameOrigin rejects state-changing browser requests that did not come
+// from this server's own page: the Origin header must be present and its host
+// must equal the request Host. It is the CSRF half of the write guard; the
+// bearer token is the other.
+func requireSameOrigin(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		origin := r.Header.Get("Origin")
+		u, err := url.Parse(origin)
+		if origin == "" || err != nil || u.Host != r.Host {
+			http.Error(w, "forbidden: cross-origin request", http.StatusForbidden)
 			return
 		}
 		next.ServeHTTP(w, r)
@@ -193,6 +211,17 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	}
 	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(restDeps(toolDeps, serveAllowWrites))))
 	apiMux.Handle("/api/agents", agentsH)
+
+	collector := cockpit.NewCollector(cockpitSources(), cockpit.DefaultIntervals(), time.Now, func() {
+		hub.Broadcast(web.Event{Type: "pipeline-updated"})
+	})
+	go collector.Run(ctx)
+	pipelineH := pipelineHandler(ctx, collector, reposWithMeta)
+	guarded := requireBearer(apiToken, requireSameOrigin(pipelineH))
+	apiMux.Handle("/api/pipeline", pipelineH) // GET only; the handler answers other methods with 405
+	apiMux.Handle("/api/pipeline/refresh", guarded)
+	apiMux.Handle("/api/pipeline/enrich", guarded)
+	apiMux.Handle("/api/pipeline/dispatch", guarded)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.
 	go func() {

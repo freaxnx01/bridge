@@ -23,6 +23,7 @@ var (
 	launchRCWait   time.Duration
 	launchNoSync   bool
 	launchJSON     bool
+	launchPrompt   string
 )
 
 // launchResult is `bridge launch --json` output.
@@ -56,6 +57,7 @@ func init() {
 	launchCmd.Flags().DurationVar(&launchRCWait, "rc-wait", 20*time.Second, "how long to wait for the Remote Control URL")
 	launchCmd.Flags().BoolVar(&launchNoSync, "no-sync", false, "skip the pre-launch git pull")
 	launchCmd.Flags().BoolVar(&launchJSON, "json", false, "machine-readable output")
+	launchCmd.Flags().StringVar(&launchPrompt, "prompt", "", "initial prompt passed to the agent as its last argument (claude only)")
 	rootCmd.AddCommand(launchCmd)
 }
 
@@ -72,6 +74,9 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 	// Validate before resolveLaunchTarget: it creates worktrees and touches the MRU.
 	if launchRC && launchAgent != "" && launchAgent != "claude" {
 		return fail("bridge: --rc needs the claude agent (got %s)", launchAgent)
+	}
+	if launchPrompt != "" && launchAgent != "" && launchAgent != "claude" {
+		return fail("bridge: --prompt needs the claude agent (got %s)", launchAgent)
 	}
 	if launchAgent == "" && os.Getenv("BRIDGE_DEFAULT_AGENT") == "" {
 		return fail("bridge: no agent — pass --agent or set BRIDGE_DEFAULT_AGENT")
@@ -95,6 +100,13 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 		if !slices.Contains(t.Spec.Args, "--remote-control") {
 			t.Spec.Args = append(slices.Clone(t.Spec.Args), "--remote-control")
 		}
+	}
+
+	if launchPrompt != "" {
+		if t.Spec.Name != "claude" {
+			return fail("bridge: --prompt needs the claude agent (got %s)", t.Spec.Name)
+		}
+		t.Spec.Args = append(slices.Clone(t.Spec.Args), launchPrompt)
 	}
 
 	running := sessionLive(t.Slot)
