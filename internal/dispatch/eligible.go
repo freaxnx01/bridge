@@ -11,6 +11,7 @@ import (
 
 const (
 	LabelNeedsEnrichment = "needs-enrichment"
+	LabelToBeDefined     = "❓ to-be-defined"
 	LabelParked          = "🧊 parked"
 	LabelAIImplement     = "ai-implement"
 	LabelAIReviewAIMerge = "ai-review-ai-merge"
@@ -61,6 +62,8 @@ func ActiveMilestone(ms []forge.Milestone) string {
 	return active
 }
 
+var planHeadingRE = regexp.MustCompile(`(?im)^#{2,6}\s*implementation plan\s*$`)
+
 var closesRE = regexp.MustCompile(`(?i)\b(clos(?:e|es|ed)|fix(?:e|es|ed)?|resolv(?:e|es|ed))\s+#(\d+)\b`)
 
 // ClosesIssue reports whether prBody contains a GitHub closing keyword for
@@ -98,6 +101,9 @@ func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (b
 	if hasLabel(i.Labels, LabelNeedsEnrichment) {
 		return false, "needs-enrichment"
 	}
+	if hasLabel(i.Labels, LabelToBeDefined) {
+		return false, "to-be-defined"
+	}
 	if hasLabel(i.Labels, LabelParked) {
 		return false, "parked"
 	}
@@ -106,6 +112,9 @@ func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (b
 	}
 	if Attempts(i.Labels) >= 2 {
 		return false, "attempts exhausted"
+	}
+	if !planHeadingRE.MatchString(i.Body) {
+		return false, "no implementation plan"
 	}
 	if HasOpenPR(prs, i.Number) {
 		return false, "open PR"
