@@ -57,6 +57,10 @@ just bot-install  # links + enables + starts bridge-bot.service
 journalctl --user -u bridge-bot -f
 ```
 
+The unit uses `KillMode=process`: stopping or restarting the bot never kills
+the tmux server (a session the bot starts may have spawned it, putting it in
+the unit's cgroup), so running sessions survive a bot restart.
+
 Send `/nav` to the bot. A `getUpdates failed … 409` / "another process polls
 this token" warning means a second process (an old bot?) uses the same token.
 
