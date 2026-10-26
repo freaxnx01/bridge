@@ -55,10 +55,13 @@ bridge dispatch status          # caps, in-flight, last tick
 bridge watch                    # long-running watcher of ~/repos/
 bridge tui                      # Bubbletea dashboard (repos / cached issues / live sessions; Enter to act)
 bridge nav                      # interactive navigator: pick a repo → dashboard of its sessions & worktrees
+bridge bot                      # Telegram nav bot: nav's picker + dashboard as phone buttons (unix only; docs/telegram-bot.md)
 bridge --dashboard              # alias for `bridge tui` (legacy spelling)
 ```
 
 Telegram admin session (steer bridge from your phone): see [docs/admin-session.md](docs/admin-session.md).
+
+Telegram nav bot (nav's buttons on your phone, no Claude in the loop): see [docs/telegram-bot.md](docs/telegram-bot.md).
 
 Legacy flag spellings (`-r`, `--refresh`, `-D`, `-a`/`--attach`, `--status`, `--dashboard`, `away`/`back`/`auto`) are silently rewritten to the modern subcommand form so bash-bridge muscle memory keeps working. See `cmd/bridge/legacy.go`.
 
@@ -95,6 +98,10 @@ All under `~/.cache/bridge/` (override with `XDG_CACHE_HOME`):
 | `internal/store` | atomic write, flock primitive, cache path helpers |
 | `internal/shellbridge` | the `cd:` / `exec:` / `noop` directive protocol the shim parses |
 | `internal/agents` | agent spec (binary + args) for claude/copilot/opencode/code |
+| `internal/navdata` | nav's data loaders + mutations as plain functions, shared by `bridge nav` and `bridge bot` |
+| `internal/launch` | repo/worktree/agent resolution + detached tmux start, shared by `bridge <repo>`, `bridge launch`, `bridge bot` |
+| `internal/telegram` | minimal Telegram Bot API client (stdlib) |
+| `internal/bot` | `bridge bot`'s pure screen state machine + rendering |
 
 ## Shim — how `bridge` becomes a `cd`-capable command
 
@@ -165,10 +172,8 @@ Most bash-era behavior was ported during cutover; the remaining subsystems were 
 
 - **Startup sync** (`git fetch && git pull --ff-only` before each launch).
 - **Session-exit autosync** (commit + push uncommitted changes when a bridge session closes).
-- **Presence-aware Telegram pages** (idle / elicitation / usage-limit notifications). Replaced operationally by Remote Control for live-session interaction. Telegram bootstrap via the slot-0 admin bot survives through `bridge-bot/` (Python).
+- **Presence-aware Telegram pages** (idle / elicitation / usage-limit notifications). Replaced operationally by Remote Control for live-session interaction; phone-side navigation is `bridge bot` ([docs/telegram-bot.md](docs/telegram-bot.md)).
 - **`--install-admin-commands`** (installed claude slash commands like `/status`, `/issues`).
-
-`bridge-bot/` (the Python Telegram spawner) is unaffected and remains in the tree.
 
 ## Editing
 
