@@ -181,3 +181,10 @@ session summaries, auto-labeling, WebUI panels — see issue tracker for these).
 ### bridge-bot (Telegram admin session, `@agent_dev_ctl_bot`)
 
 - [ ] How to call `/usage` + `/clear`, or other slash cmds from the chat so they are executed in the CC CLI session?
+
+### Forgejo token hygiene (found 2026-10-26 during the `bridge bot` review, pre-existing on main)
+
+- [ ] `internal/remote` `fetchTargetRepos` (forgejo): no "no API base → no client" guard. With a token but no `BRIDGE_FORGEJO_API` in env or the git-forgejo `.envrc`, `bridge list` / nav remote refresh / bot repo refresh send the token to the `codeberg.org` default. Normal config (`.envrc` sets the base) is safe.
+- [ ] `cmd/bridge/capture.go` `issueCreatorFor` (forgejo): ignores the `.envrc` API base and falls back to `codeberg.org` when the env lacks `BRIDGE_FORGEJO_API` (`bridge serve` `/api/capture/issue`, `bridge capture issue`). Fix: `remote.ForgejoAuth` + nil guard.
+- [ ] Consider dropping `forge.NewForgejoClient`'s `codeberg.org` default entirely (two `internal/mcp` tests construct it with `""`).
+- [ ] MCP `newCachingClientResolver` still memoizes nil/stale clients for the process lifetime (PAT rotation → restart `bridge-mcp`).
