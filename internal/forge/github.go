@@ -49,7 +49,7 @@ func (c *GithubClient) get(ctx context.Context, path string, out any) error {
 	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		body, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("github %s: %s: %s", path, resp.Status, string(body))
+		return &HTTPError{Forge: "github", Path: path, Status: resp.Status, StatusCode: resp.StatusCode, Body: string(body)}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }
