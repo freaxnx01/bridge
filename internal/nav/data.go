@@ -12,7 +12,6 @@ import (
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/navdata"
-	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
 func loadLocalReposCmd(roots []string) tea.Cmd {
@@ -94,11 +93,11 @@ func gitDirtyCmd(path string) tea.Cmd {
 // (issue launches pass "#123 [<title>]"); "" keeps the default "<repo> [<wt>]".
 func createWorktreeCmd(repo core.Repo, name, label string) tea.Cmd {
 	return func() tea.Msg {
-		dir, _, err := worktree.Resolve(worktree.ExecRunner{}, repo.Path, name)
+		row, err := navdata.CreateWorktree(context.Background(), repo, name, label)
 		if err != nil {
 			return wtCreatedMsg{err: err}
 		}
-		return wtCreatedMsg{row: dashRow{worktree: name, branch: "worktree-" + name, path: dir, displayLabel: label, dirtyState: loadPending}}
+		return wtCreatedMsg{row: fromDashRow(row)}
 	}
 }
 
@@ -240,7 +239,7 @@ func (m Model) createRepoCmd() tea.Cmd {
 	ch := repoForgeChoices[m.repoModal.sel]
 	name := strings.TrimSpace(m.repoModal.name)
 	return func() tea.Msg {
-		repo, err := create(name, ch.forge, ch.private)
+		repo, err := create(name, ch.Forge, ch.Private)
 		return repoCreatedMsg{repo: repo, err: err}
 	}
 }

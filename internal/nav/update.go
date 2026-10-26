@@ -2,7 +2,6 @@ package nav
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -15,7 +14,6 @@ import (
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/navdata"
-	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -1130,10 +1128,4 @@ func logKey(path string, k tea.KeyMsg) {
 // worktreeErrMessage maps a worktree.Resolve error to the modal's error line: a
 // friendly, actionable message for the "target dir already exists" case, and the
 // raw error string for everything else.
-func worktreeErrMessage(err error) string {
-	var wex *worktree.WorktreeExistsError
-	if errors.As(err, &wex) {
-		return fmt.Sprintf("worktree %q already exists — pick a different name, or remove .worktrees/%s", wex.Name, wex.Name)
-	}
-	return err.Error()
-}
+func worktreeErrMessage(err error) string { return navdata.WorktreeErrMessage(err) }
