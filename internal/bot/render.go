@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/navdata"
@@ -36,18 +37,21 @@ func Render(s State) (string, Keyboard) {
 	default:
 		text, kb = renderPicker(s)
 	}
+	// The overlay and notices go last and must survive: cut the body, not them.
+	var tail string
 	if q, okb := renderOverlay(s); q != "" {
-		text, kb = text+"\n\n"+q, okb
+		tail, kb = "\n\n"+q, okb
 	}
 	for _, line := range []string{s.Notice, s.Busy} {
 		if line != "" {
-			text += "\n" + line
+			tail += "\n" + line
 		}
 	}
 	if kb == nil {
 		kb = Keyboard{}
 	}
-	return navdata.TruncRunes(text, maxTextRunes), kb
+	room := max(maxTextRunes-utf8.RuneCountInString(tail), 1)
+	return navdata.TruncRunes(navdata.TruncRunes(text, room)+tail, maxTextRunes), kb
 }
 
 func btn(text string, epoch int, verb string, args ...string) Button {

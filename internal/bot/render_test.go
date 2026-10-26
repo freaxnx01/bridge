@@ -152,11 +152,21 @@ func TestRender_CallbackDataFitsAndTextIsValidUTF8(t *testing.T) {
 		{Epoch: 1 << 30, Screen: ScreenIssues, Repo: bridgeRepo, Issues: issues, IssuesLoaded: true, IssuePage: 62},
 		{Epoch: 1 << 30, Screen: ScreenIssues, Repo: bridgeRepo, Issues: issues, IssuesLoaded: true, Confirm: &Confirm{ConfirmIssue, 499}},
 		{Epoch: 1 << 30, Screen: ScreenDash, Repo: bridgeRepo, Rows: rows, Confirm: &Confirm{ConfirmStop, 299}},
+		{Epoch: 1 << 30, Screen: ScreenDash, Repo: bridgeRepo, Rows: rows, Prompt: PromptNewWorktree, Notice: "⚠ invalid name", Busy: "⏳ starting x…"},
 	}
 	for i, s := range states {
 		text, kb := Render(s)
 		if !utf8.ValidString(text) || utf8.RuneCountInString(text) > maxTextRunes {
 			t.Errorf("state %d: text invalid or too long (%d runes)", i, utf8.RuneCountInString(text))
+		}
+		// The body is cut, never the overlay or the notices after it.
+		if q, _ := renderOverlay(s); q != "" && !strings.Contains(text, q) {
+			t.Errorf("state %d: overlay %q lost", i, q)
+		}
+		for _, line := range []string{s.Notice, s.Busy} {
+			if line != "" && !strings.Contains(text, "\n"+line) {
+				t.Errorf("state %d: %q lost", i, line)
+			}
 		}
 		for _, row := range kb {
 			for _, b := range row {
