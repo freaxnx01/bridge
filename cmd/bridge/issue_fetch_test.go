@@ -75,3 +75,59 @@ func TestIssueClientResolver_EnvFirstThenDirenvMemoized(t *testing.T) {
 		t.Errorf("direnv resolver calls = %d, want 1 (memoized)", calls)
 	}
 }
+
+// authFailClient fails ListOpenIssues with err.
+type authFailClient struct{ err error }
+
+func (authFailClient) Name() string { return "fail" }
+func (authFailClient) ListRepos(context.Context, string) ([]forge.RepoRef, error) {
+	return nil, nil
+}
+func (c authFailClient) ListOpenIssues(context.Context, string, string) ([]forge.Issue, error) {
+	return nil, c.err
+}
+
+// A nil (no token yet, or a transient direnv/Passbolt failure) is not
+// memoized: the next call resolves again.
+func TestIssueClientResolver_NilNotMemoized(t *testing.T) {
+	calls := 0
+	r := issueClientResolver(func(string) forge.Client { return nil },
+		func(string, string) forge.Client { calls++; return nil })
+	r("forgejo", "o")
+	r("forgejo", "o")
+	if calls != 2 {
+		t.Errorf("direnv resolver calls = %d, want 2 (nil must not be cached)", calls)
+	}
+}
+
+// A 401/403 drops the cached client so the next fetch re-resolves (rotated
+// PAT); other errors keep it.
+func TestIssueClientResolver_AuthErrorDropsCachedClient(t *testing.T) {
+	calls := 0
+	var next error
+	r := issueClientResolver(func(string) forge.Client { return nil },
+		func(string, string) forge.Client { calls++; return authFailClient{err: next} })
+	fetch := newIssueFetcher(r)
+
+	next = errors.New("offline")
+	_, _ = fetch(context.Background(), "github", "o", "r")
+	_, _ = fetch(context.Background(), "github", "o", "r")
+	if calls != 1 {
+		t.Fatalf("calls = %d after a non-auth error, want 1 (kept)", calls)
+	}
+
+	r2calls := 0
+	r2 := issueClientResolver(func(string) forge.Client { return nil },
+		func(string, string) forge.Client {
+			r2calls++
+			return authFailClient{err: &forge.HTTPError{Forge: "github", StatusCode: 401, Status: "401 Unauthorized"}}
+		})
+	fetch2 := newIssueFetcher(r2)
+	if _, err := fetch2(context.Background(), "github", "o", "r"); !forge.IsAuthError(err) {
+		t.Fatalf("err = %v, want the 401", err)
+	}
+	_, _ = fetch2(context.Background(), "github", "o", "r")
+	if r2calls != 2 {
+		t.Errorf("calls = %d after a 401, want 2 (dropped and re-resolved)", r2calls)
+	}
+}

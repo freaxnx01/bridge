@@ -106,8 +106,10 @@ func newIssueFetcher(resolve func(forgeName, owner string) forge.Client) func(ct
 // (clientFor: GH_TOKEN/FORGEJO_TOKEN/… in the process env) wins; otherwise
 // fromDirenv (clientForMCP: the token from the forge's direnv scope, like the
 // MCP server), so a service without tokens in its env still finds them. The
-// direnv lookup walks the roots and spawns direnv, so its result — nil
-// included — is memoized per forge:owner for the resolver's lifetime.
+// direnv lookup walks the roots and spawns direnv, so a found client is
+// memoized per forge:owner — until its ListOpenIssues gets a 401/403 (rotated
+// or revoked token), which drops it so the next call re-resolves. nil is never
+// memoized: a missing token or a transient direnv failure is retried.
 func issueClientResolver(fromEnv func(forgeName string) forge.Client, fromDirenv func(forgeName, owner string) forge.Client) func(forgeName, owner string) forge.Client {
 	var (
 		mu    sync.Mutex
@@ -124,9 +126,34 @@ func issueClientResolver(fromEnv func(forgeName string) forge.Client, fromDirenv
 			return c
 		}
 		c := fromDirenv(forgeName, owner)
-		cache[key] = c
-		return c
+		if c == nil {
+			return nil
+		}
+		w := &dropOnAuthError{Client: c}
+		w.drop = func() {
+			mu.Lock()
+			defer mu.Unlock()
+			if cache[key] == forge.Client(w) {
+				delete(cache, key)
+			}
+		}
+		cache[key] = w
+		return w
 	}
+}
+
+// dropOnAuthError calls drop when ListOpenIssues fails with a 401/403.
+type dropOnAuthError struct {
+	forge.Client
+	drop func()
+}
+
+func (d *dropOnAuthError) ListOpenIssues(ctx context.Context, owner, repo string) ([]forge.Issue, error) {
+	is, err := d.Client.ListOpenIssues(ctx, owner, repo)
+	if forge.IsAuthError(err) {
+		d.drop()
+	}
+	return is, err
 }
 
 // navDebugPath resolves BRIDGE_NAV_DEBUG into a key-log file path. "1"/"true"/
