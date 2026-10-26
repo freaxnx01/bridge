@@ -2,9 +2,7 @@ package nav
 
 import (
 	"context"
-	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -12,30 +10,14 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
-	"github.com/freaxnx01/bridge/internal/gitauth"
 	"github.com/freaxnx01/bridge/internal/launcher"
+	"github.com/freaxnx01/bridge/internal/navdata"
 	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
 func loadLocalReposCmd(roots []string) tea.Cmd {
 	return func() tea.Msg {
-		var rows []repoRow
-		seen := map[string]bool{}
-		for _, root := range roots {
-			repos, err := core.DiscoverRepos(root)
-			if err != nil {
-				continue
-			}
-			for _, r := range repos {
-				if seen[r.Path] {
-					continue
-				}
-				seen[r.Path] = true
-				rows = append(rows, repoRow{label: repoLabel(r), repo: r})
-			}
-		}
-		sortRepoRows(rows)
-		return reposMsg{rows: rows}
+		return reposMsg{rows: toRepoRows(navdata.LocalRepos(context.Background(), roots))}
 	}
 }
 
@@ -44,8 +26,7 @@ func loadLocalReposCmd(roots []string) tea.Cmd {
 // best-effort loaders.
 func loadRecentCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		paths, _ := core.LoadMRU(path)
-		return recentMsg{paths: paths}
+		return recentMsg{paths: navdata.RecentPaths(path)}
 	}
 }
 
@@ -62,48 +43,22 @@ func loadSessionsCmd(b launcher.Backend, slotsPath string) tea.Cmd {
 // slot, so the name column falls back to the tmux session name (slotID) to keep
 // every row identifiable rather than blank.
 func buildSessionRows(live []core.Session, slots []core.Slot, now time.Time) []sessionRow {
-	bySlot := make(map[string]core.Slot, len(slots))
-	for _, s := range slots {
-		bySlot[s.ID] = s
-	}
-	rows := make([]sessionRow, 0, len(live))
-	for _, s := range live {
-		row := sessionRow{
-			slotID:       s.SlotID,
-			state:        s.State,
-			lastAccessed: lastAccessedFor(s, now),
-		}
-		if sl, ok := bySlot[s.SlotID]; ok {
-			row.repoLabel = sl.Repo
-			row.worktree = sl.Worktree
-			row.agent = sl.Agent
-		} else {
-			row.repoLabel = s.SlotID
-		}
-		rows = append(rows, row)
-	}
-	return rows
+	return fromSessionRows(navdata.SessionRows(live, slots, now))
 }
 
 func loadRemoteCmd(cachePath string) tea.Cmd {
 	return func() tea.Msg {
-		c, err := forge.ReadRepoCache(cachePath)
+		es, err := navdata.RemoteRepos(cachePath)
 		if err != nil {
 			return remoteErrMsg{err: err}
 		}
-		return remoteMsg{rows: remoteRows(c.Repos)}
+		return remoteMsg{rows: toRepoRows(es)}
 	}
 }
 
 // remoteRows builds sorted, ↓-prefixed picker rows from forge repo refs.
 func remoteRows(refs []forge.RepoRef) []repoRow {
-	rows := make([]repoRow, 0, len(refs))
-	for i := range refs {
-		ref := refs[i]
-		rows = append(rows, repoRow{label: "↓ " + remoteLabel(ref), remote: &ref})
-	}
-	sortRepoRows(rows)
-	return rows
+	return toRepoRows(navdata.RemoteEntries(refs))
 }
 
 // registerSlotCmd records a launched session in the slot registry so the
@@ -118,11 +73,7 @@ func registerSlotCmd(slotsPath string, slot core.Slot) tea.Cmd {
 
 func loadDashRowsCmd(b launcher.Backend, repo core.Repo, slotsPath string) tea.Cmd {
 	return func() tea.Msg {
-		wts, _ := worktree.List(worktree.ExecRunner{}, repo.Path)
-		primary, _ := worktree.Primary(worktree.ExecRunner{}, repo.Path)
-		slots, _ := core.LoadSlots(slotsPath)
-		live, _ := b.Live()
-		return dashRowsMsg{rows: buildDashRows(repo, primary.Branch, wts, slots, live, time.Now())}
+		return dashRowsMsg{rows: fromDashRows(navdata.DashRows(context.Background(), b.Live, repo, slotsPath))}
 	}
 }
 
@@ -130,11 +81,11 @@ func loadDashRowsCmd(b launcher.Backend, repo core.Repo, slotsPath string) tea.C
 // a single `git status --porcelain=v1 --branch` call.
 func gitDirtyCmd(path string) tea.Cmd {
 	return func() tea.Msg {
-		out, err := exec.Command("git", "-C", path, "status", "--porcelain=v1", "--branch").Output()
+		d, err := navdata.GitDirty(context.Background(), path)
 		if err != nil {
 			return dirtyMsg{path: path, err: err}
 		}
-		return dirtyMsg{path: path, info: parseDirtyStatus(string(out))}
+		return dirtyMsg{path: path, info: toDirtyInfo(d)}
 	}
 }
 
@@ -204,8 +155,7 @@ func gitStatusCmd(path string) tea.Cmd {
 // last-known state.
 func gitFetchCmd(path, forgeName string) tea.Cmd {
 	return func() tea.Msg {
-		err := buildFetchCmd(path, forgeName, haveDirenv()).Run()
-		return fetchDoneMsg{err: err}
+		return fetchDoneMsg{err: navdata.GitFetch(context.Background(), path, forgeName)}
 	}
 }
 
@@ -218,55 +168,7 @@ func gitFetchCmd(path, forgeName string) tea.Cmd {
 // GIT_TERMINAL_PROMPT=0 so a missing or invalid credential fails fast instead of
 // leaking an interactive password prompt into the Bubble Tea UI.
 func buildFetchCmd(path, forgeName string, direnvAvailable bool) *exec.Cmd {
-	credArgs := gitauth.CredentialArgs(forgeName)
-	gitArgs := append(credArgs, "-C", path, "fetch", "--quiet")
-	var cmd *exec.Cmd
-	if credArgs != nil && direnvAvailable {
-		cmd = exec.Command("direnv", append([]string{"exec", path, "git"}, gitArgs...)...)
-	} else {
-		cmd = exec.Command("git", gitArgs...)
-	}
-	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
-	return cmd
-}
-
-// haveDirenv reports whether direnv is on PATH (required to load the per-repo
-// .envrc that carries the forge token).
-func haveDirenv() bool {
-	_, err := exec.LookPath("direnv")
-	return err == nil
-}
-
-func repoLabel(r core.Repo) string {
-	switch r.Forge {
-	case "github":
-		vis := r.Visibility
-		if vis == "" {
-			vis = "-"
-		}
-		return "github/" + vis + "/" + r.Name
-	case "forgejo":
-		return "forgejo/" + r.Name
-	default:
-		if r.Owner != "" {
-			return r.Forge + "/" + r.Owner + "/" + r.Name
-		}
-		return r.Forge + "/" + r.Name
-	}
-}
-
-func remoteLabel(r forge.RepoRef) string {
-	if r.Forge == "github" {
-		vis := r.Visibility
-		if vis == "" {
-			vis = "-"
-		}
-		return "github/" + vis + "/" + r.Name
-	}
-	if r.Owner != "" {
-		return r.Forge + "/" + r.Owner + "/" + r.Name
-	}
-	return r.Forge + "/" + r.Name
+	return navdata.BuildFetchCmd(context.Background(), path, forgeName, direnvAvailable)
 }
 
 // rowForgeKey returns a stable key and forge/owner/name for a picker row.
@@ -288,41 +190,14 @@ func rowForgeKey(r repoRow) (key, forgeName, owner, name string, ok bool) {
 
 const issueCacheTTL = 10 * time.Minute
 
-// issueCacheFile is the per-repo cache path for forge/owner/repo, or "" when
-// caching is disabled.
-func issueCacheFile(cfg Config, forgeName, owner, repo string) string {
-	if cfg.IssueCacheDir == "" {
-		return ""
-	}
-	return filepath.Join(cfg.IssueCacheDir, forgeName+"_"+owner+"_"+repo+".json")
-}
-
 // fetchIssuesCached returns a repo's open issues, reading the per-repo cache
 // first and refreshing via FetchIssues only when the cache is missing or stale.
 // Degrades gracefully: a cache miss with no FetchIssues yields the (empty)
 // cached slice; a fetch error falls back to the last cached slice.
 func fetchIssuesCached(cfg Config, forgeName, owner, repo string) []forge.Issue {
-	cacheFile := issueCacheFile(cfg, forgeName, owner, repo)
-	var cached forge.IssueCache
-	if cacheFile != "" {
-		cached, _ = forge.ReadIssueCache(cacheFile)
-		if !cached.UpdatedAt.IsZero() && !cached.IsStale(issueCacheTTL) {
-			return cached.Issues
-		}
-	}
-	if cfg.FetchIssues == nil {
-		return cached.Issues
-	}
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	issues, err := cfg.FetchIssues(ctx, forgeName, owner, repo)
-	if err != nil {
-		return cached.Issues
-	}
-	if cacheFile != "" {
-		_ = forge.WriteIssueCache(cacheFile, forge.IssueCache{UpdatedAt: time.Now(), Issues: issues})
-	}
-	return issues
+	return navdata.IssuesCached(ctx, navdata.IssueSource{CacheDir: cfg.IssueCacheDir, Fetch: cfg.FetchIssues}, forgeName, owner, repo)
 }
 
 // loadIssueCountCmd loads a repo's open-issue count for a picker row.

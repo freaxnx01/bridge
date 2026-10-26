@@ -14,6 +14,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/launcher"
+	"github.com/freaxnx01/bridge/internal/navdata"
 	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
@@ -311,10 +312,11 @@ func (m Model) presentForges() []forgeOpt {
 	}
 	mark(m.localRepos)
 	mark(m.remoteRepos)
-	out := make([]forgeOpt, 0, len(forgeOptOrder))
-	for _, o := range forgeOptOrder {
-		if present[o.key] {
-			out = append(out, o)
+	opts := navdata.ForgeOptions()
+	out := make([]forgeOpt, 0, len(opts))
+	for _, o := range opts {
+		if present[o.Key] {
+			out = append(out, forgeOpt{key: o.Key, label: o.Label})
 		}
 	}
 	return out
