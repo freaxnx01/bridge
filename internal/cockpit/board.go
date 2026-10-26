@@ -259,3 +259,10 @@ func hasAny(labels []string, wanted ...string) bool {
 	}
 	return false
 }
+
+// isGateCandidate reports whether an issue's labels pass classification rules
+// 1-4, i.e. it reaches the dispatch gate (a Ready or Held candidate).
+func isGateCandidate(labels []string) bool {
+	return !hasAny(labels, dispatch.LabelParked, LabelRoadmap, LabelEnrichmentOngoing,
+		dispatch.LabelNeedsEnrichment, dispatch.LabelToBeDefined, dispatch.LabelAIImplement)
+}
