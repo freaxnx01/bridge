@@ -12,6 +12,7 @@
     emptyText = 'Nothing here.',
     startCollapsed = false,
     onrefresh,
+    refreshError = null,
     onretry,
     children,
     extra,
@@ -35,6 +36,7 @@
       <FreshnessBadge collectedAt={source.collectedAt} intervalSeconds={source.intervalSeconds} {now} />
     {/if}
     <button type="button" class="refresh" aria-label="Refresh" title="Refresh the board" onclick={onrefresh}>⟳</button>
+    {#if refreshError}<span class="refresh-error" role="alert">{refreshError}</span>{/if}
   </header>
   <div class="body">
     {#if error}

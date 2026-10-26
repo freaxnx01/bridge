@@ -12,6 +12,7 @@
 
   let heldOpen = $state(false);
   let enrichExpanded = $state(false);
+  let refreshError = $state(null);
   let dismissed = $state.raw([]);
 
   onMount(loadPipeline);
@@ -33,14 +34,31 @@
 
   const errors = $derived((board?.errors ?? []).filter((e) => !dismissed.includes(e)));
 
+  function runningKey(card, index) {
+    return (card.kind === 'session' ? card.sessionId : card.url) || `idx:${index}`;
+  }
+
+  function issueKey(card) {
+    return `${card.forge}:${card.repo}#${card.number}`;
+  }
+
+  function refreshFailure(err) {
+    if (err.status === 403) return 'Blocked: wrong origin';
+    if (err.status === 503) return 'API token not configured on the server';
+    if (err.status === 500) return 'Refresh failed';
+    return err.message || 'Refresh failed';
+  }
+
   async function refresh() {
     const token = await ensureToken();
     if (!token) return;
+    refreshError = null;
     try {
       await authedPost('/api/pipeline/refresh', {}, token);
       await loadPipeline();
-    } catch {
-      // a rejected token already reopened the dialog; other failures show as stale data
+    } catch (err) {
+      // a 401 already reopened the token dialog
+      if (err.status !== 401) refreshError = refreshFailure(err);
     }
   }
 
@@ -64,10 +82,11 @@
       error={loadError}
       emptyText="Nothing running."
       onrefresh={refresh}
+      {refreshError}
       onretry={loadPipeline}
     >
       <ul class="cards">
-        {#each board.running as card (`${card.kind}:${card.repo}:${card.issue ?? ''}:${card.sessionId ?? card.title}`)}
+        {#each board.running as card, index (runningKey(card, index))}
           <RunningCard {card} now={$now} />
         {/each}
       </ul>
@@ -82,10 +101,11 @@
       error={loadError}
       emptyText="Nothing ready."
       onrefresh={refresh}
+      {refreshError}
       onretry={loadPipeline}
     >
       <ul class="cards">
-        {#each board.ready as card (`${card.repo}#${card.number}`)}
+        {#each board.ready as card (issueKey(card))}
           <IssueCard {card} action="dispatch" />
         {/each}
       </ul>
@@ -97,7 +117,7 @@
             </button>
             {#if heldOpen}
               <ul class="cards">
-                {#each board.held as card (`${card.repo}#${card.number}`)}
+                {#each board.held as card (issueKey(card))}
                   <IssueCard {card} showReason={true} />
                 {/each}
               </ul>
@@ -117,10 +137,11 @@
       emptyText="Nothing to enrich."
       startCollapsed={true}
       onrefresh={refresh}
+      {refreshError}
       onretry={loadPipeline}
     >
       <ul class="cards">
-        {#each shownEnrichment as card (`${card.repo}#${card.number}`)}
+        {#each shownEnrichment as card (issueKey(card))}
           <IssueCard {card} action="enrich" />
         {/each}
       </ul>
