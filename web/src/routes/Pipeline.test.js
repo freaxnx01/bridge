@@ -175,4 +175,30 @@ describe('Pipeline', () => {
       expect(post[1].headers.Authorization).toBe('Bearer t0k')
     })
   })
+
+  it('renders two unlinked pipeline runs in the same repo without throwing', () => {
+    const run = { kind: 'pipeline', repo: 'o/r', title: 'ci', status: 'queued', since: iso(5) }
+    pipeline.set(board({ running: [run, { ...run }] }))
+    render(Pipeline)
+    expect(screen.getByText(/RUNNING NOW · 2/)).toBeTruthy()
+  })
+
+  it('keeps cards with the same repo and number on different forges apart', () => {
+    const a = { forge: 'github', repo: 'o/r', number: 5, title: 'feat: a', url: 'u1', labels: [] }
+    pipeline.set(board({ needsEnrichment: [a, { ...a, forge: 'forgejo', url: 'u2' }] }))
+    render(Pipeline)
+    expect(screen.getByText(/NEEDS ENRICHMENT · 2/)).toBeTruthy()
+  })
+
+  it.each([
+    [403, /wrong origin/i],
+    [503, /token not configured/i],
+    [500, /refresh failed/i],
+  ])('Refresh shows an inline error on %i', async (status, text) => {
+    localStorage.setItem('bridge.apiToken', 't0k')
+    stubFetch(() => ({ status, body: { error: 'x' } }))
+    render(Pipeline)
+    await fireEvent.click(screen.getAllByRole('button', { name: 'Refresh' })[0])
+    expect((await screen.findAllByText(text)).length).toBeGreaterThan(0)
+  })
 })

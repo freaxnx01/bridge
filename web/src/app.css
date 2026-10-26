@@ -112,3 +112,4 @@ main { padding: 1rem; }
   .column .chevron { display: inline; }
   .column.collapsed .body { display: none; }
 }
+.refresh-error { color: var(--error); font-size: 0.85em; }
