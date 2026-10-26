@@ -40,6 +40,8 @@ type botEnv struct {
 func newBotEnv() botEnv {
 	cache := cacheRoot()
 	remotePath := filepath.Join(cache, "remote.list")
+	// The service has no forge tokens in its env: resolve them via direnv.
+	fetchIssues := newIssueFetcher(issueClientResolver(clientFor, clientForMCP(reposRoots())))
 	return botEnv{
 		loadRepos: func(ctx context.Context, refresh bool) ([]navdata.RepoEntry, []navdata.RepoEntry, []string, error) {
 			roots := reposRoots()
@@ -65,7 +67,7 @@ func newBotEnv() botEnv {
 			return navdata.GitFetch(ctx, repo.Path, repo.Forge)
 		},
 		issues: func(ctx context.Context, repo core.Repo) []forge.Issue {
-			src := navdata.IssueSource{CacheDir: filepath.Join(cache, "issues"), Fetch: fetchOpenIssues}
+			src := navdata.IssueSource{CacheDir: filepath.Join(cache, "issues"), Fetch: fetchIssues}
 			return navdata.IssuesCached(ctx, src, repo.Forge, repo.Owner, repo.Name)
 		},
 		start: startForBot,

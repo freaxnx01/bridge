@@ -2,10 +2,12 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/spf13/cobra"
 
@@ -13,6 +15,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/nav"
+	"github.com/freaxnx01/bridge/internal/navdata"
 	"github.com/freaxnx01/bridge/internal/overview"
 	"github.com/freaxnx01/bridge/internal/remote"
 )
@@ -57,7 +60,7 @@ var navCmd = &cobra.Command{
 				repo, _, err := createAndClone(context.Background(), name, forgeName, private)
 				return repo, err
 			},
-			FetchIssues: fetchOpenIssues,
+			FetchIssues: newIssueFetcher(issueClientResolver(clientFor, clientForMCP(reposRoots()))),
 			FetchRemote: func(ctx context.Context) ([]forge.RepoRef, error) {
 				return remote.Refresh(ctx, reposRoots(), filepath.Join(cacheRoot(), "remote.list"))
 			},
@@ -85,14 +88,45 @@ func init() {
 	rootCmd.AddCommand(navCmd)
 }
 
-// fetchOpenIssues lists a repo's open issues via the per-forge client; a forge
-// without a configured client yields none. Shared by nav and `bridge bot`.
-func fetchOpenIssues(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
-	c := clientFor(forgeName)
-	if c == nil {
-		return nil, nil
+// newIssueFetcher returns the navdata.IssueSource fetcher nav and `bridge
+// bot` share: it lists a repo's open issues with the client resolve picks for
+// (forge, owner). No client is navdata.ErrNoForgeClient — never "no issues",
+// which would be cached as fresh and hide the repo's issues for the TTL.
+func newIssueFetcher(resolve func(forgeName, owner string) forge.Client) func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
+	return func(ctx context.Context, forgeName, owner, repo string) ([]forge.Issue, error) {
+		c := resolve(forgeName, owner)
+		if c == nil {
+			return nil, fmt.Errorf("%s/%s: %w", forgeName, owner, navdata.ErrNoForgeClient)
+		}
+		return c.ListOpenIssues(ctx, owner, repo)
 	}
-	return c.ListOpenIssues(ctx, owner, repo)
+}
+
+// issueClientResolver picks the issue client for (forge, owner): fromEnv
+// (clientFor: GH_TOKEN/FORGEJO_TOKEN/… in the process env) wins; otherwise
+// fromDirenv (clientForMCP: the token from the forge's direnv scope, like the
+// MCP server), so a service without tokens in its env still finds them. The
+// direnv lookup walks the roots and spawns direnv, so its result — nil
+// included — is memoized per forge:owner for the resolver's lifetime.
+func issueClientResolver(fromEnv func(forgeName string) forge.Client, fromDirenv func(forgeName, owner string) forge.Client) func(forgeName, owner string) forge.Client {
+	var (
+		mu    sync.Mutex
+		cache = map[string]forge.Client{}
+	)
+	return func(forgeName, owner string) forge.Client {
+		if c := fromEnv(forgeName); c != nil {
+			return c
+		}
+		key := forgeName + ":" + owner
+		mu.Lock()
+		defer mu.Unlock()
+		if c, ok := cache[key]; ok {
+			return c
+		}
+		c := fromDirenv(forgeName, owner)
+		cache[key] = c
+		return c
+	}
 }
 
 // navDebugPath resolves BRIDGE_NAV_DEBUG into a key-log file path. "1"/"true"/

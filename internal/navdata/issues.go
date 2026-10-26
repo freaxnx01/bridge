@@ -2,6 +2,7 @@ package navdata
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"time"
 
@@ -10,6 +11,11 @@ import (
 
 // IssueCacheTTL is how long a per-repo issue cache is served without a refetch.
 const IssueCacheTTL = 10 * time.Minute
+
+// ErrNoForgeClient is what a fetcher returns when no client (no token) is
+// configured for the forge. Like any fetch error it is never cached, so a
+// missing token cannot hide a repo's issues behind a fresh empty cache.
+var ErrNoForgeClient = errors.New("no forge client configured")
 
 // IssueSource configures issue loading. CacheDir "" disables the cache; Fetch
 // nil disables live fetching (cache only).
@@ -27,8 +33,8 @@ func IssueCacheFile(dir, forgeName, owner, repo string) string {
 }
 
 // IssuesCached returns a repo's open issues: a fresh cache wins; otherwise it
-// fetches and rewrites the cache. A fetch error (or no fetcher) falls back to
-// the last cached slice.
+// fetches and rewrites the cache. A fetch error — ErrNoForgeClient included —
+// (or no fetcher) falls back to the last cached slice and writes nothing.
 func IssuesCached(ctx context.Context, src IssueSource, forgeName, owner, repo string) []forge.Issue {
 	cacheFile := IssueCacheFile(src.CacheDir, forgeName, owner, repo)
 	var cached forge.IssueCache

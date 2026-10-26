@@ -3,6 +3,7 @@ package navdata
 import (
 	"context"
 	"errors"
+	"os"
 	"testing"
 	"time"
 
@@ -49,5 +50,18 @@ func TestIssuesCached_FetchRewritesCache(t *testing.T) {
 	c, err := forge.ReadIssueCache(IssueCacheFile(dir, "github", "o", "r"))
 	if err != nil || len(c.Issues) != 1 || c.Issues[0].Number != 9 {
 		t.Errorf("cache = %+v, %v; want #9", c, err)
+	}
+}
+
+func TestIssuesCached_NoForgeClientKeepsCacheUntouched(t *testing.T) {
+	dir := t.TempDir()
+	src := IssueSource{CacheDir: dir, Fetch: func(context.Context, string, string, string) ([]forge.Issue, error) {
+		return nil, ErrNoForgeClient
+	}}
+	if got := IssuesCached(context.Background(), src, "github", "o", "r"); len(got) != 0 {
+		t.Errorf("got %+v, want none", got)
+	}
+	if _, err := os.Stat(IssueCacheFile(dir, "github", "o", "r")); !os.IsNotExist(err) {
+		t.Errorf("cache written for a no-client fetch (stat err = %v)", err)
 	}
 }
