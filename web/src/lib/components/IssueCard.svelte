@@ -3,7 +3,7 @@
   import { loadPipeline } from '../stores/pipeline.js';
   import ConfirmDialog from './ConfirmDialog.svelte';
 
-  let { card, action, showReason = false } = $props();
+  let { card, action } = $props();
 
   // idle | confirm | launching | launched | alreadyRunning | failed
   let state = $state('idle');
@@ -51,7 +51,7 @@
       <span class="title">{card.title}</span>
     </div>
     <div class="line2">
-      {meta}{#if showReason && card.reason}{meta ? ' · ' : ''}<span class="reason">{card.reason}</span>{/if}
+      {meta}{#if card.reason}{meta ? ' · ' : ''}<span class="reason">{card.reason}</span>{/if}
     </div>
     {#if state === 'launched'}
       <div class="result ok">✓ Started · {result.slot}{#if result.rcUrl} · <a href={result.rcUrl} target="_blank" rel="noopener noreferrer">Open RC ↗</a>{/if}</div>

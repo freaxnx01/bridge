@@ -100,7 +100,7 @@ func newOriginAllowlist(port int, extra string) originAllowlist {
 		if _, rest, ok := strings.Cut(e, "://"); ok {
 			e = rest
 		}
-		if e = strings.TrimSuffix(e, "/"); e != "" {
+		if e = strings.ToLower(strings.TrimSuffix(e, "/")); e != "" {
 			al[e] = true
 		}
 	}
@@ -113,7 +113,7 @@ func newOriginAllowlist(port int, extra string) originAllowlist {
 func requireSameOrigin(allowed originAllowlist, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		u, err := url.Parse(r.Header.Get("Origin"))
-		if err != nil || u.Host == "" || !allowed[u.Host] {
+		if err != nil || u.Host == "" || !allowed[strings.ToLower(u.Host)] {
 			http.Error(w, "forbidden: origin not allowed", http.StatusForbidden)
 			return
 		}

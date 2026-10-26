@@ -163,7 +163,7 @@ func classifyIssues(b *columns, rd RepoData) []dispatch.Candidate {
 }
 
 // gate asks dispatch.Eligible; eligible issues come back as candidates,
-// held ones are appended to b.held, anything else is dropped.
+// held ones are appended to b.held, unplanned/empty ones to b.needs, anything else is dropped.
 func gate(b *columns, rd RepoData, i forge.Issue, active string) []dispatch.Candidate {
 	ok, reason := dispatch.Eligible(i, active, rd.PRs)
 	if ok {
@@ -172,6 +172,9 @@ func gate(b *columns, rd RepoData, i forge.Issue, active string) []dispatch.Cand
 	switch reason {
 	case "outside active milestone", "attempts exhausted", "open PR":
 		b.held = append(b.held, dated{card(i, repoName(rd), reason), i.Created})
+	case "no implementation plan", "empty body":
+		// Not ready, but fixable by enriching: surface it with the reason.
+		b.needs = append(b.needs, dated{card(i, repoName(rd), reason), i.Created})
 	}
 	return nil
 }

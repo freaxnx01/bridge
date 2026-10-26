@@ -175,3 +175,38 @@ func TestBuildBoard_EmptyInput_SlicesNotNil(t *testing.T) {
 		}
 	}
 }
+
+func TestBuildBoard_NoPlanOrEmptyBody_WiredRepo_InNeedsEnrichmentWithReason(t *testing.T) {
+	noPlan := issue(1)
+	noPlan.Body = "just a description"
+	empty := issue(2)
+	empty.Body = "  \n"
+	b := build(repo(noPlan, empty))
+	if len(b.NeedsEnrichment) != 2 || len(b.Ready)+len(b.Held) != 0 {
+		t.Fatalf("%+v", b)
+	}
+	if b.NeedsEnrichment[0].Reason != "no implementation plan" || b.NeedsEnrichment[1].Reason != "empty body" {
+		t.Errorf("reasons = %q, %q", b.NeedsEnrichment[0].Reason, b.NeedsEnrichment[1].Reason)
+	}
+}
+
+func TestBuildBoard_NoPlanOrEmptyBody_UnwiredRepo_Dropped(t *testing.T) {
+	noPlan := issue(1)
+	noPlan.Body = "just a description"
+	empty := issue(2)
+	empty.Body = ""
+	rd := repo(noPlan, empty)
+	rd.Wired = false
+	if b := build(rd); len(b.NeedsEnrichment)+len(b.Ready)+len(b.Held) != 0 {
+		t.Errorf("%+v", b)
+	}
+}
+
+func TestBuildBoard_EnrichmentOngoing_CardCarriesIssueURL(t *testing.T) {
+	i := issue(1, LabelEnrichmentOngoing)
+	i.URL = "https://github.com/o/r/issues/1"
+	b := build(repo(i))
+	if len(b.Running) != 1 || b.Running[0].URL != i.URL {
+		t.Errorf("%+v", b.Running)
+	}
+}

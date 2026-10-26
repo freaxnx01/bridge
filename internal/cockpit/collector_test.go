@@ -306,3 +306,66 @@ func TestCollector_Run_SlowSessionsDoNotHoldUpIssues(t *testing.T) {
 		time.Sleep(10 * time.Millisecond)
 	}
 }
+
+func TestCollector_ConcurrentCollectIssues_Coalesce(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	src := w.sources()
+	src.Issues = func(_ context.Context, _ core.Repo) ([]forge.Issue, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return nil, nil
+	}
+	c := NewCollector(src, DefaultIntervals(), fixedNow, nil)
+
+	done := make(chan struct{})
+	go func() {
+		c.CollectIssues(context.Background())
+		close(done)
+	}()
+	<-entered
+	c.CollectIssues(context.Background()) // returns at once: one is running
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("fetches while one is running = %d, want 1", n)
+	}
+	close(release)
+	<-done
+
+	c.CollectIssues(context.Background()) // the guard is released afterwards
+	if n := calls.Load(); n != 2 {
+		t.Errorf("fetches after release = %d, want 2", n)
+	}
+}
+
+func TestCollector_ConcurrentCollectRuns_Coalesce(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.issues["o/a"] = []forge.Issue{gh(1, dispatch.LabelAIImplement)}
+	entered := make(chan struct{}, 8)
+	release := make(chan struct{})
+	var calls atomic.Int32
+	src := w.sources()
+	src.Runs = func(_ context.Context, _ core.Repo) ([]forge.WorkflowRun, error) {
+		calls.Add(1)
+		entered <- struct{}{}
+		<-release
+		return nil, nil
+	}
+	c := NewCollector(src, DefaultIntervals(), fixedNow, nil)
+	c.CollectIssues(context.Background())
+
+	done := make(chan struct{})
+	go func() {
+		c.CollectRuns(context.Background())
+		close(done)
+	}()
+	<-entered
+	c.CollectRuns(context.Background()) // returns at once: one is running
+	if n := calls.Load(); n != 1 {
+		t.Fatalf("fetches while one is running = %d, want 1", n)
+	}
+	close(release)
+	<-done
+}

@@ -9,6 +9,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/freaxnx01/bridge/internal/agentview"
@@ -54,6 +55,11 @@ type Collector struct {
 	iv       Intervals
 	now      func() time.Time
 	onChange func()
+
+	// issuesBusy / runsBusy coalesce overlapping CollectIssues / CollectRuns
+	// calls (ticker vs. refresh): a second call while one runs returns at once.
+	issuesBusy atomic.Bool
+	runsBusy   atomic.Bool
 
 	mu          sync.Mutex
 	repos       []RepoData
@@ -154,6 +160,10 @@ func (c *Collector) Board() Board {
 // CollectIssues refreshes issues for every repo, plus PRs and milestones for
 // wired GitHub repos that have a Ready/Held candidate.
 func (c *Collector) CollectIssues(ctx context.Context) {
+	if !c.issuesBusy.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.issuesBusy.Store(false)
 	repos, ok := c.listRepos()
 	if !ok {
 		return
@@ -190,6 +200,10 @@ func (c *Collector) CollectIssues(ctx context.Context) {
 // CollectRuns refreshes workflow runs for repos that have an open
 // ai-implement issue in the last issues snapshot.
 func (c *Collector) CollectRuns(ctx context.Context) {
+	if !c.runsBusy.CompareAndSwap(false, true) {
+		return
+	}
+	defer c.runsBusy.Store(false)
 	repos, ok := c.listRepos()
 	if !ok {
 		return

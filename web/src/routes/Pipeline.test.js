@@ -56,6 +56,11 @@ describe('Pipeline', () => {
   })
   afterEach(() => vi.unstubAllGlobals())
 
+  it('labels the Held toggle with the real hold reasons', () => {
+    render(Pipeline)
+    expect(screen.getByText('(milestone, open PR, attempts)')).toBeTruthy()
+  })
+
   it('renders the three columns from the store', () => {
     render(Pipeline)
     expect(screen.getByText(/RUNNING NOW · 2/)).toBeTruthy()
