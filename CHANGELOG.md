@@ -66,6 +66,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cockpit: has its own favicon instead of keeping Authentik's from the login redirect.
 - Cockpit: long issue titles no longer push the Ready column's buttons over Needs enrichment and its Enrich buttons off-screen.
 - Cockpit: Running counts only active work; idle sessions and `enrichment-ongoing` labels unchanged for 6 h+ fold into their own collapsed rows.
 - Go toolchain raised from 1.25.0 to **1.26.10**: Go 1.25 is end of life and
