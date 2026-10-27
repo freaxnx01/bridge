@@ -79,6 +79,28 @@ describe('Pipeline', () => {
     expect(screen.getByText('open PR')).toBeTruthy()
   })
 
+  it('counts only active work and folds idle sessions and stuck labels away', async () => {
+    const idle = { kind: 'session', repo: 'o/quiet', title: 'quiet-tab', status: 'idle', since: iso(86400), sessionId: 's-idle', cwd: '/w/quiet' }
+    const stuck = { kind: 'enrichment', repo: 'o/r', issue: 253, title: 't', url: 'https://github.com/o/r/issues/253', status: 'enriching', since: iso(54 * 86400) }
+    pipeline.set(board({ running: [...board().running, idle, stuck] }))
+    render(Pipeline)
+    expect(screen.getByText(/RUNNING NOW · 2/)).toBeTruthy()
+    expect(screen.queryByText(/quiet-tab/)).toBeNull()
+    expect(screen.queryByText(/#253/)).toBeNull()
+    await fireEvent.click(screen.getByRole('button', { name: /Idle sessions · 1/ }))
+    expect(screen.getByText(/quiet-tab/)).toBeTruthy()
+    await fireEvent.click(screen.getByRole('button', { name: /Stuck enriching · 1/ }))
+    expect(screen.getByText(/#253/)).toBeTruthy()
+  })
+
+  it('shows Nothing running with the idle toggle when every session is idle', () => {
+    const idle = { kind: 'session', repo: 'o/quiet', title: 'quiet', status: 'idle', since: iso(60), sessionId: 's-idle', cwd: '/w/quiet' }
+    pipeline.set(board({ running: [idle] }))
+    render(Pipeline)
+    expect(screen.getByText('Nothing running.')).toBeTruthy()
+    expect(screen.getByRole('button', { name: /Idle sessions · 1/ })).toBeTruthy()
+  })
+
   it('shows loading, not error, when a column source has no collectedAt yet', () => {
     pipeline.set(board({ collectedAt: { issues: iso(3) }, running: [] }))
     render(Pipeline)
