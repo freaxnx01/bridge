@@ -7,10 +7,13 @@
   import { oldestSource, ageSeconds, formatAge } from '../lib/freshness.js';
   import { loadPipeline, startPipelinePolling, pipeline, pipelineError } from '../lib/stores/pipeline.js';
   import { now } from '../lib/stores/now.js';
+  import { splitRunning } from '../lib/running.js';
 
   const VISIBLE_ENRICH = 10;
 
   let heldOpen = $state(false);
+  let idleOpen = $state(false);
+  let stuckOpen = $state(false);
   let enrichExpanded = $state(false);
   let refreshError = $state(null);
   let dismissed = $state.raw([]);
@@ -30,6 +33,8 @@
   const issuesSource = $derived(oldestSource(board, ['issues']));
   const runningLoading = $derived(!board || !runningSource);
   const issuesLoading = $derived(!board || !issuesSource);
+
+  const running = $derived(splitRunning(board?.running, $now));
 
   const needsEnrichment = $derived(board?.needsEnrichment ?? []);
   const shownEnrichment = $derived(enrichExpanded ? needsEnrichment : needsEnrichment.slice(0, VISIBLE_ENRICH));
@@ -78,7 +83,7 @@
   <div class="columns">
     <Column
       title="RUNNING NOW"
-      count={board?.running.length ?? null}
+      count={board ? running.active.length : null}
       source={runningSource}
       now={$now}
       loading={runningLoading}
@@ -89,10 +94,41 @@
       onretry={loadPipeline}
     >
       <ul class="cards">
-        {#each board.running as card, index (runningKey(card, index))}
+        {#each running.active as card, index (runningKey(card, index))}
           <RunningCard {card} now={$now} />
         {/each}
       </ul>
+      {#snippet extra()}
+        {#if running.idle.length > 0}
+          <div class="held">
+            <button type="button" class="collapse" aria-expanded={idleOpen} onclick={() => (idleOpen = !idleOpen)}>
+              {idleOpen ? '▾' : '▸'} Idle sessions · {running.idle.length}
+            </button>
+            {#if idleOpen}
+              <ul class="cards">
+                {#each running.idle as card, index (runningKey(card, index))}
+                  <RunningCard {card} now={$now} />
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        {/if}
+        {#if running.stuck.length > 0}
+          <div class="held">
+            <button type="button" class="collapse" aria-expanded={stuckOpen} onclick={() => (stuckOpen = !stuckOpen)}>
+              {stuckOpen ? '▾' : '▸'} <span class="warn">Stuck enriching · {running.stuck.length}</span>
+              <span class="muted">(label left on, no change for 6h+)</span>
+            </button>
+            {#if stuckOpen}
+              <ul class="cards">
+                {#each running.stuck as card, index (runningKey(card, index))}
+                  <RunningCard {card} now={$now} />
+                {/each}
+              </ul>
+            {/if}
+          </div>
+        {/if}
+      {/snippet}
     </Column>
 
     <Column
