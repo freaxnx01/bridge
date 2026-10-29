@@ -3,7 +3,6 @@ package forge
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"io"
 	"net/http"
 	"net/url"
@@ -40,7 +39,7 @@ func (c *GitlabClient) get(ctx context.Context, path string, out any) error {
 	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("gitlab %s: %s: %s", path, resp.Status, string(b))
+		return &HTTPError{Forge: "gitlab", Path: path, Status: resp.Status, StatusCode: resp.StatusCode, Body: string(b)}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

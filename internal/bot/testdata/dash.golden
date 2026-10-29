@@ -1,0 +1,53 @@
+📁 bridge · github/freaxnx01
+main  ● attached  ✓
+tg-admin  ○  ✎3 ↑2
+reorg  ● detached  ↓1
+Issues: #312 fix nav esc · #305 bot: paging (+2)
+launched bridge-wt-reorg
+--- keyboard ---
+[
+  [
+    {
+      "text": "main ▶",
+      "callback_data": "5:w:0"
+    },
+    {
+      "text": "tg-admin ▶",
+      "callback_data": "5:w:1"
+    },
+    {
+      "text": "reorg ▶",
+      "callback_data": "5:w:2"
+    }
+  ],
+  [
+    {
+      "text": "main ⏹",
+      "callback_data": "5:x:0"
+    },
+    {
+      "text": "reorg ⏹",
+      "callback_data": "5:x:2"
+    }
+  ],
+  [
+    {
+      "text": "➕ Worktree",
+      "callback_data": "5:nw"
+    },
+    {
+      "text": "🐞 Issues",
+      "callback_data": "5:is"
+    }
+  ],
+  [
+    {
+      "text": "🔄",
+      "callback_data": "5:rf"
+    },
+    {
+      "text": "◀ Repos",
+      "callback_data": "5:bk"
+    }
+  ]
+]

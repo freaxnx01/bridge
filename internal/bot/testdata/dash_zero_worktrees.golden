@@ -1,0 +1,32 @@
+📁 notes · /r/notes
+main  ○  …
+Issues: —
+--- keyboard ---
+[
+  [
+    {
+      "text": "main ▶",
+      "callback_data": "2:w:0"
+    }
+  ],
+  [
+    {
+      "text": "➕ Worktree",
+      "callback_data": "2:nw"
+    },
+    {
+      "text": "🐞 Issues",
+      "callback_data": "2:is"
+    }
+  ],
+  [
+    {
+      "text": "🔄",
+      "callback_data": "2:rf"
+    },
+    {
+      "text": "◀ Repos",
+      "callback_data": "2:bk"
+    }
+  ]
+]

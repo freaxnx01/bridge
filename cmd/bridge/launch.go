@@ -3,17 +3,16 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"os"
-	"os/exec"
-	"regexp"
 	"slices"
 	"time"
 
 	"github.com/spf13/cobra"
 
-	"github.com/freaxnx01/bridge/internal/launcher"
+	"github.com/freaxnx01/bridge/internal/launch"
 )
 
 var (
@@ -61,9 +60,6 @@ func init() {
 	rootCmd.AddCommand(launchCmd)
 }
 
-// rcURLPattern matches the Remote Control link claude prints in its pane.
-var rcURLPattern = regexp.MustCompile(`https://claude\.ai/code/session_[A-Za-z0-9]+`)
-
 func runLaunch(cmd *cobra.Command, args []string) error {
 	cmd.SilenceUsage = true
 	fail := func(format string, a ...any) error {
@@ -93,15 +89,10 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 	if !t.HasAgent {
 		return fail("bridge: no agent — pass --agent or set BRIDGE_DEFAULT_AGENT")
 	}
-	if launchRC {
-		if t.Spec.Name != "claude" {
-			return fail("bridge: --rc needs the claude agent (got %s)", t.Spec.Name)
-		}
-		if !slices.Contains(t.Spec.Args, "--remote-control") {
-			t.Spec.Args = append(slices.Clone(t.Spec.Args), "--remote-control")
-		}
+	if launchRC && t.Spec.Name == "claude" && !slices.Contains(t.Spec.Args, "--remote-control") {
+		// Before --prompt, so the prompt stays the agent's last argument.
+		t.Spec.Args = append(slices.Clone(t.Spec.Args), "--remote-control")
 	}
-
 	if launchPrompt != "" {
 		if t.Spec.Name != "claude" {
 			return fail("bridge: --prompt needs the claude agent (got %s)", t.Spec.Name)
@@ -109,16 +100,15 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 		t.Spec.Args = append(slices.Clone(t.Spec.Args), launchPrompt)
 	}
 
-	running := sessionLive(t.Slot)
-	if !running {
-		finalizeLaunch(&t, launchNoSync)
-		argv, err := launcher.Tmux{}.LaunchArgvDetached(t.Slot, t.WorkDir, t.Spec)
-		if err != nil {
-			return err
+	ctx := context.Background()
+	d := launchDeps()
+	running, err := launch.StartDetached(ctx, d, &t, launchRC, launchNoSync)
+	if err != nil {
+		var rcErr launch.RCAgentError
+		if errors.As(err, &rcErr) {
+			return fail("%v", err)
 		}
-		if out, err := exec.Command(argv[0], argv[1:]...).CombinedOutput(); err != nil {
-			return fmt.Errorf("tmux: %w: %s", err, out)
-		}
+		return err
 	}
 
 	res := launchResult{
@@ -126,9 +116,9 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 		Agent: t.AgentName, WorktreeCreated: t.WorktreeCreated, AlreadyRunning: running,
 	}
 	if launchRC {
-		res.RCURL = waitRCURL(t.Slot, launchRCWait)
+		res.RCURL = launch.WaitRCURL(ctx, d, t.Slot, launchRCWait)
 		if res.RCURL == "" {
-			if !sessionLive(t.Slot) {
+			if !launch.SessionLive(d, t.Slot) {
 				fmt.Fprintf(cmd.ErrOrStderr(), "bridge: session %s exited during startup\n", t.Slot)
 				os.Exit(1)
 			}
@@ -147,25 +137,4 @@ func runLaunch(cmd *cobra.Command, args []string) error {
 		fmt.Fprintf(cmd.OutOrStdout(), "remote control: %s\n", res.RCURL)
 	}
 	return nil
-}
-
-// waitRCURL polls the slot's pane for the Remote Control link. Best effort:
-// returns "" on timeout, or early once the session is gone. The last match
-// wins: scrollback may hold links from an earlier run.
-func waitRCURL(slot string, wait time.Duration) string {
-	deadline := time.Now().Add(wait)
-	for {
-		out, err := exec.Command("tmux", "capture-pane", "-p", "-J", "-t", slot, "-S", "-200").Output()
-		if err != nil {
-			if !sessionLive(slot) {
-				return ""
-			}
-		} else if ms := rcURLPattern.FindAllString(string(out), -1); len(ms) > 0 {
-			return ms[len(ms)-1]
-		}
-		if time.Now().After(deadline) {
-			return ""
-		}
-		time.Sleep(500 * time.Millisecond)
-	}
 }

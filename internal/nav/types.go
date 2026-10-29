@@ -9,6 +9,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/launcher"
+	"github.com/freaxnx01/bridge/internal/navdata"
 	"github.com/freaxnx01/bridge/internal/overview"
 )
 
@@ -174,31 +175,15 @@ type newRepoModal struct {
 	err      string
 }
 
-// repoForgeChoices are the forge×visibility options in display order.
-var repoForgeChoices = []struct {
-	label, forge string
-	private      bool
-}{
-	{"Forgejo · Private", "forgejo", true},
-	{"Forgejo · Public", "forgejo", false},
-	{"GitHub · Private", "github", true},
-	{"GitHub · Public", "github", false},
-}
+// repoForgeChoices are the forge×visibility options in display order (shared
+// with `bridge bot` via navdata). Read-only.
+var repoForgeChoices = navdata.RepoChoices()
 
 // forgeOpt is one forge subfilter option: the canonical forge key (matched
 // against a row's forge) and its display label. Kept next to repoForgeChoices so
 // the forge->label mapping lives in one place.
 type forgeOpt struct {
 	key, label string
-}
-
-// forgeOptOrder is the canonical display order of the forge subfilter options.
-// presentForges filters it to the forges actually present in the current rows.
-var forgeOptOrder = []forgeOpt{
-	{"github", "GitHub"},
-	{"gitlab", "GitLab"},
-	{"forgejo", "Forgejo"},
-	{"ado", "ADO"},
 }
 
 // Config is everything nav needs, injected by cmd/bridge so internal/nav

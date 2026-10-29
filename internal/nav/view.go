@@ -468,9 +468,9 @@ func (m Model) viewRepoModal() string {
 	var b strings.Builder
 	for i, ch := range repoForgeChoices {
 		if i == mo.sel {
-			b.WriteString(stSel.Render(stAccent.Render("▸ ")+ch.label) + "\n")
+			b.WriteString(stSel.Render(stAccent.Render("▸ ")+ch.Label) + "\n")
 		} else {
-			b.WriteString("  " + stText.Render(ch.label) + "\n")
+			b.WriteString("  " + stText.Render(ch.Label) + "\n")
 		}
 	}
 	if mo.creating {

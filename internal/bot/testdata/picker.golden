@@ -1,0 +1,45 @@
+🗂 bridge · repos · All
+4 repos · page 1/1
+--- keyboard ---
+[
+  [
+    {
+      "text": "All ▸",
+      "callback_data": "3:fg"
+    }
+  ],
+  [
+    {
+      "text": "⭐ bridge",
+      "callback_data": "3:r:0"
+    },
+    {
+      "text": "agent-workflow",
+      "callback_data": "3:r:1"
+    }
+  ],
+  [
+    {
+      "text": "config",
+      "callback_data": "3:r:2"
+    },
+    {
+      "text": "↓ obsidian-it",
+      "callback_data": "3:r:3"
+    }
+  ],
+  [
+    {
+      "text": "🔍 Filter",
+      "callback_data": "3:f"
+    },
+    {
+      "text": "➕ New repo",
+      "callback_data": "3:nr"
+    },
+    {
+      "text": "🔄",
+      "callback_data": "3:rf"
+    }
+  ]
+]

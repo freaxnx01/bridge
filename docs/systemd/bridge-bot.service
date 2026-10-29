@@ -1,0 +1,22 @@
+# Telegram nav bot (`bridge bot`): nav's repo picker + dashboard as inline
+# buttons. Install: `just bot-install`. Logs: journalctl --user -u bridge-bot
+# The token is read from ~/.config/bridge/bot.env (mode 0600) by the binary
+# itself — never via EnvironmentFile, so it is not inherited by launched sessions.
+[Unit]
+Description=bridge Telegram nav bot (bridge bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/.local/bin/bridge bot
+Restart=always
+RestartSec=10
+# Only stop the bot itself: a session it starts may spawn the tmux server,
+# which then lives in this unit's cgroup and hosts other sessions too.
+KillMode=process
+WorkingDirectory=%h
+
+[Install]
+WantedBy=default.target
