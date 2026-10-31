@@ -2,7 +2,6 @@ package nav
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -14,7 +13,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/launcher"
-	"github.com/freaxnx01/bridge/internal/worktree"
+	"github.com/freaxnx01/bridge/internal/navdata"
 )
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -311,10 +310,11 @@ func (m Model) presentForges() []forgeOpt {
 	}
 	mark(m.localRepos)
 	mark(m.remoteRepos)
-	out := make([]forgeOpt, 0, len(forgeOptOrder))
-	for _, o := range forgeOptOrder {
-		if present[o.key] {
-			out = append(out, o)
+	opts := navdata.ForgeOptions()
+	out := make([]forgeOpt, 0, len(opts))
+	for _, o := range opts {
+		if present[o.Key] {
+			out = append(out, forgeOpt{key: o.Key, label: o.Label})
 		}
 	}
 	return out
@@ -1128,10 +1128,4 @@ func logKey(path string, k tea.KeyMsg) {
 // worktreeErrMessage maps a worktree.Resolve error to the modal's error line: a
 // friendly, actionable message for the "target dir already exists" case, and the
 // raw error string for everything else.
-func worktreeErrMessage(err error) string {
-	var wex *worktree.WorktreeExistsError
-	if errors.As(err, &wex) {
-		return fmt.Sprintf("worktree %q already exists — pick a different name, or remove .worktrees/%s", wex.Name, wex.Name)
-	}
-	return err.Error()
-}
+func worktreeErrMessage(err error) string { return navdata.WorktreeErrMessage(err) }

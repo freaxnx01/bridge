@@ -24,3 +24,33 @@ The `/api/capture/idea` closure in cmd/bridge/serve.go unconditionally builds a 
 - id: 2026-08-18-mux-wiring-integration-test · captured: 2026-08-18 · status: filed (#245, https://github.com/freaxnx01/bridge/issues/245)
 - value: Locks the auth boundary (capture gated, read endpoints open) against regression — currently proven only by code inspection
 `requireBearer` is unit-tested in isolation (4 states), but nothing asserts that `runServe` actually wraps `/api/capture/` while leaving `/api/repos`/`/api/overview`/`/api/agents` open. Adding this needs a small refactor to extract the mux-building from `runServe` so a test can build the same mux and hit `/api/repos` (200, no token) + `/api/capture/issue` (401, no token). Recommended by the 2026-08-18 alias-capture-routing final review; deferred because it touches production structure beyond that plan.
+
+## bridge bot: Overview and Agents screens
+- id: 2026-10-26-bot-overview-agents · captured: 2026-10-26 · status: raw
+- value: Phone access to nav's cross-repo Overview (ranked issues/roadmap/captures) and the Agents screen
+Out of v1 of the Telegram nav bot (spec docs/superpowers/specs/2026-10-11-bridge-telegram-nav-bot-design.md). Would add screens to internal/bot reusing overview.Build and the agentview data nav already loads.
+
+## bridge bot: idea / issue capture
+- id: 2026-10-26-bot-capture · captured: 2026-10-26 · status: raw
+- value: Capture an idea or open an issue from the phone without a Claude session
+Out of v1 of the Telegram nav bot. Free text would go to the existing capture paths (internal/capture); needs a prompt flow and repo/alias choice.
+
+## bridge bot: notes preview (ideas.md / TODO.md)
+- id: 2026-10-26-bot-notes-preview · captured: 2026-10-26 · status: raw
+- value: Read a repo's backlog files on the dashboard, like nav's right column
+Out of v1 of the Telegram nav bot. nav's readRepoNotes would move to internal/navdata first.
+
+## bridge bot: git side panels (branches / recent commits / status)
+- id: 2026-10-26-bot-git-panels · captured: 2026-10-26 · status: raw
+- value: nav's per-worktree detail panels on the phone
+Out of v1 of the Telegram nav bot. nav's gitBranchesCmd/gitCommitsCmd/gitStatusCmd parsers would move to internal/navdata.
+
+## bridge bot: multiple concurrent users
+- id: 2026-10-26-bot-multi-user · captured: 2026-10-26 · status: raw
+- value: More than one person steering the same bridge host
+v1 keeps per-chat state and an allowlist but assumes one operator: Busy and confirms are per chat, not per user, and there is no per-user audit. Out of v1 of the Telegram nav bot.
+
+## bridge bot: persist chat state across restarts
+- id: 2026-10-26-bot-persist-state · captured: 2026-10-26 · status: raw
+- value: Buttons keep working after a service restart instead of answering "outdated — /nav"
+Out of v1 of the Telegram nav bot. Would store per-chat State (message id, epoch, screen, repo) under the cache dir and reload it on start.

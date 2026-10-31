@@ -1,0 +1,16 @@
+🐞 bridge · open issues (1) · page 1/1
+--- keyboard ---
+[
+  [
+    {
+      "text": "#7 🚀 fix/launch: crash",
+      "callback_data": "2:i:0"
+    }
+  ],
+  [
+    {
+      "text": "◀ Dashboard",
+      "callback_data": "2:bk"
+    }
+  ]
+]

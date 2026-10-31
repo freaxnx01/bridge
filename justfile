@@ -36,6 +36,17 @@ admin-install:
     systemctl --user enable --now bridge-admin.service
     systemctl --user --no-pager status bridge-admin.service | head -5
 
+# Needs ~/.config/bridge/bot.env (docs/telegram-bot.md); run from the main checkout.
+# Install + enable the Telegram nav bot (`bridge bot`) as a systemd user service.
+[unix]
+bot-install:
+    test -f "$HOME/.config/bridge/bot.env" || { echo "missing ~/.config/bridge/bot.env — see docs/telegram-bot.md" >&2; exit 1; }
+    mkdir -p "$HOME/.config/systemd/user"
+    ln -sfn "{{justfile_directory()}}/docs/systemd/bridge-bot.service" "$HOME/.config/systemd/user/bridge-bot.service"
+    systemctl --user daemon-reload
+    systemctl --user enable --now bridge-bot.service
+    systemctl --user --no-pager status bridge-bot.service | head -5
+
 # Run Go + shim tests.
 test:
     make all

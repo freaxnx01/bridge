@@ -88,8 +88,10 @@ func clientFor(name string) forge.Client {
 			return forge.NewGitlabClient(t, os.Getenv("BRIDGE_GITLAB_API"))
 		}
 	case "forgejo":
-		if t := os.Getenv("FORGEJO_TOKEN"); t != "" || os.Getenv("BRIDGE_FORGEJO_API") != "" {
-			return forge.NewForgejoClient(t, os.Getenv("BRIDGE_FORGEJO_API"))
+		// Only with an explicit API base: NewForgejoClient's default is the
+		// public codeberg.org, which must never get a self-hosted token.
+		if api := os.Getenv("BRIDGE_FORGEJO_API"); api != "" {
+			return forge.NewForgejoClient(os.Getenv("FORGEJO_TOKEN"), api)
 		}
 	}
 	return nil

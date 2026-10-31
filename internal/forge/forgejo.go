@@ -50,7 +50,7 @@ func (c *ForgejoClient) get(ctx context.Context, path string, out any) error {
 	defer func() { _ = resp.Body.Close() }() // best-effort close
 	if resp.StatusCode >= 400 {
 		b, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("forgejo %s: %s: %s", path, resp.Status, string(b))
+		return &HTTPError{Forge: "forgejo", Path: path, Status: resp.Status, StatusCode: resp.StatusCode, Body: string(b)}
 	}
 	return json.NewDecoder(resp.Body).Decode(out)
 }

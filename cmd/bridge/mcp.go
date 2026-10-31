@@ -363,7 +363,8 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 }
 
 // clientForMCP builds the Deps.ClientFor resolver: per-owner GitHub tokens and
-// the single Forgejo token come from their direnv scopes via internal/remote.
+// the single Forgejo token (with its API base) come from their direnv scopes
+// via internal/remote.
 func clientForMCP(roots []string) func(forgeName, owner string) forge.Client {
 	return func(forgeName, owner string) forge.Client {
 		switch forgeName {
@@ -374,11 +375,20 @@ func clientForMCP(roots []string) func(forgeName, owner string) forge.Client {
 			}
 			return forge.NewGithubClient(tok, os.Getenv("BRIDGE_GITHUB_API"))
 		case "forgejo":
-			tok, ok := remote.ForgejoToken(roots)
+			tok, dirAPI, ok := remote.ForgejoAuth(roots)
 			if !ok {
 				return nil
 			}
-			return forge.NewForgejoClient(tok, os.Getenv("BRIDGE_FORGEJO_API"))
+			// A set BRIDGE_FORGEJO_API wins; else the .envrc's. Without one, no
+			// client: NewForgejoClient would send the token to codeberg.org.
+			api := os.Getenv("BRIDGE_FORGEJO_API")
+			if api == "" {
+				api = dirAPI
+			}
+			if api == "" {
+				return nil
+			}
+			return forge.NewForgejoClient(tok, api)
 		}
 		return nil
 	}

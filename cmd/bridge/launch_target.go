@@ -1,111 +1,42 @@
 package main
 
 import (
-	"fmt"
+	"context"
 	"os"
-	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/freaxnx01/bridge/internal/agents"
-	"github.com/freaxnx01/bridge/internal/core"
-	"github.com/freaxnx01/bridge/internal/store"
-	worktreepkg "github.com/freaxnx01/bridge/internal/worktree"
+	"github.com/freaxnx01/bridge/internal/launch"
 )
 
-// launchTarget is everything needed to start (or reattach) an agent session
-// for a repo — shared by `bridge <repo>` (preflightOpen, which emits an exec
-// directive for the shim) and `bridge launch` (which runs tmux detached).
-type launchTarget struct {
-	Repo            core.Repo
-	Worktree        string
-	WorkDir         string
-	WorktreeCreated bool
-	Slot            string
-	AgentName       string
-	Spec            agents.AgentSpec
-	HasAgent        bool
+// The launch logic lives in internal/launch (shared with `bridge bot`). These
+// cmd-layer names stay so preflight, `bridge launch` and their tests read
+// unchanged.
+type (
+	// launchTarget is everything needed to start (or reattach) a session.
+	launchTarget = launch.Target
+	// errRepoLookup marks unknown/ambiguous repo names; callers print it and exit 2.
+	errRepoLookup = launch.RepoLookupError
+	// errAgentLookup marks an unknown/invalid --agent; callers print it and exit 2.
+	errAgentLookup = launch.AgentLookupError
+)
+
+// launchDeps wires internal/launch to this binary's discovery, cache dir,
+// session listing (BRIDGE_TMUX_FIXTURE-aware) and stderr notes.
+func launchDeps() launch.Deps {
+	return launch.Deps{
+		Repos:     reposWithMeta,
+		CacheRoot: cacheRoot(),
+		Live:      loadSessions,
+		Getenv:    os.Getenv,
+		Stderr:    os.Stderr,
+	}
 }
-
-// errRepoLookup marks unknown/ambiguous repo names; callers print it and exit 2.
-type errRepoLookup struct{ msg string }
-
-func (e errRepoLookup) Error() string { return e.msg }
-
-// errAgentLookup marks an unknown/invalid --agent; callers print it and exit 2.
-type errAgentLookup struct{ cause error }
-
-func (e errAgentLookup) Error() string { return "bridge: " + e.cause.Error() }
-func (e errAgentLookup) Unwrap() error { return e.cause }
 
 func resolveLaunchTarget(name, worktree, agentName string) (launchTarget, error) {
-	repos, err := reposWithMeta()
-	if err != nil {
-		return launchTarget{}, err
-	}
-	repo, ok := findRepoByName(repos, name)
-	if !ok {
-		matches := findReposByKeyword(repos, name)
-		switch len(matches) {
-		case 1:
-			repo = matches[0]
-		case 0:
-			return launchTarget{}, errRepoLookup{fmt.Sprintf("bridge: unknown repo %q", name)}
-		default:
-			names := make([]string, len(matches))
-			for i, m := range matches {
-				names[i] = m.Name
-			}
-			return launchTarget{}, errRepoLookup{fmt.Sprintf("bridge: %q is ambiguous (%d matches): %s",
-				name, len(matches), strings.Join(names, ", "))}
-		}
-	}
-	_ = store.MRUTouch(filepath.Join(cacheRoot(), "mru"), repo.Path)
-
-	t := launchTarget{Repo: repo, Worktree: worktree, WorkDir: repo.Path}
-	// With -w, consult `git worktree list --porcelain` so an existing worktree
-	// is found wherever it lives; otherwise create `<repo>/.worktrees/<wt>`.
-	// Non-git repo / git failure falls back to the bare convention path.
-	if worktree != "" {
-		if dir, created, werr := worktreepkg.Resolve(worktreepkg.ExecRunner{}, repo.Path, worktree); werr == nil {
-			t.WorkDir, t.WorktreeCreated = dir, created
-			if created {
-				fmt.Fprintf(os.Stderr, "bridge: created worktree %s\n", dir)
-			}
-		} else {
-			t.WorkDir = filepath.Join(repo.Path, ".worktrees", worktree)
-			fmt.Fprintf(os.Stderr, "bridge: worktree resolve failed (%v); using %s\n", werr, t.WorkDir)
-		}
-	}
-
-	// Explicit --agent wins; otherwise BRIDGE_DEFAULT_AGENT (+ its args).
-	if agentName != "" {
-		spec, err := agents.Resolve(agentName)
-		if err != nil {
-			return launchTarget{}, errAgentLookup{err}
-		}
-		t.Spec, t.AgentName, t.HasAgent = spec, agentName, true
-	} else if spec, ok := resolveDefaultAgent(); ok {
-		t.Spec, t.AgentName, t.HasAgent = spec, spec.Name, true
-	}
-	t.Slot = slotIDFor(repo, worktree)
-	return t, nil
+	return launch.ResolveTarget(context.Background(), launchDeps(), name, worktree, agentName)
 }
 
-// finalizeLaunch applies the side effects every agent launch shares: the
-// claude `-n` display label + relabel hook, the best-effort pre-launch sync
-// (skipped for a live slot), and the slot-registry upsert (non-fatal).
+// finalizeLaunch applies the shared launch side effects (label, relabel hook,
+// pre-launch sync, slot upsert); see launch.Finalize.
 func finalizeLaunch(t *launchTarget, noSync bool) {
-	t.Spec = withClaudeName(t.Spec, t.Repo, t.Worktree)
-	ensureClaudeRelabel(t.Spec, t.Repo, t.Worktree)
-	maybePreLaunchSync(t.WorkDir, t.Slot, noSync)
-	if err := core.UpsertSlot(filepath.Join(cacheRoot(), "slots.json"), core.Slot{
-		ID:       t.Slot,
-		Repo:     t.Repo.Name,
-		Worktree: t.Worktree,
-		Agent:    t.AgentName,
-		Created:  time.Now().UTC(),
-	}); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: slot upsert failed: %v\n", err)
-	}
+	launch.Finalize(context.Background(), launchDeps(), t, noSync)
 }

@@ -4,11 +4,11 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 
 	"github.com/spf13/cobra"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/launch"
 	"github.com/freaxnx01/bridge/internal/store"
 )
 
@@ -93,13 +93,7 @@ func runOpen(cmd *cobra.Command, args []string) error {
 
 // findRepoByName returns the first repo whose Name equals name (case-insensitive).
 func findRepoByName(repos []core.Repo, name string) (core.Repo, bool) {
-	needle := strings.ToLower(name)
-	for _, r := range repos {
-		if strings.ToLower(r.Name) == needle {
-			return r, true
-		}
-	}
-	return core.Repo{}, false
+	return launch.FindRepoByName(repos, name)
 }
 
 // findReposByKeyword returns repos that match q (case-insensitive substring)
@@ -112,28 +106,7 @@ func findRepoByName(repos []core.Repo, name string) (core.Repo, bool) {
 // Topics and Desc are only populated if the caller merged repo-meta.json
 // (via core.MergeRepoMeta) onto the discovered repos beforehand.
 func findReposByKeyword(repos []core.Repo, q string) []core.Repo {
-	needle := strings.ToLower(q)
-	var nameHits, metaHits []core.Repo
-	for _, r := range repos {
-		if strings.Contains(strings.ToLower(r.Name), needle) {
-			nameHits = append(nameHits, r)
-			continue
-		}
-		if strings.Contains(strings.ToLower(r.Desc), needle) {
-			metaHits = append(metaHits, r)
-			continue
-		}
-		for _, t := range r.Topics {
-			if strings.Contains(strings.ToLower(t), needle) {
-				metaHits = append(metaHits, r)
-				break
-			}
-		}
-	}
-	if len(nameHits) > 0 {
-		return nameHits
-	}
-	return metaHits
+	return launch.FindReposByKeyword(repos, q)
 }
 
 // reposWithMeta returns DiscoverRepos enriched with cached topics +

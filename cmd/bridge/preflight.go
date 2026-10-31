@@ -14,11 +14,10 @@ import (
 
 	"github.com/freaxnx01/bridge/internal/agents"
 	"github.com/freaxnx01/bridge/internal/core"
-	"github.com/freaxnx01/bridge/internal/hooks"
+	"github.com/freaxnx01/bridge/internal/launch"
 	"github.com/freaxnx01/bridge/internal/launcher"
 	"github.com/freaxnx01/bridge/internal/shellbridge"
 	"github.com/freaxnx01/bridge/internal/store"
-	"github.com/freaxnx01/bridge/internal/syncer"
 )
 
 var preflightCmd = &cobra.Command{
@@ -174,20 +173,7 @@ func preflightPicker(out io.Writer) error {
 // only applies when the agent comes from the default — an explicit `--agent`
 // on the command line uses agents.Resolve directly and doesn't pick up
 // default args (so launching `code` doesn't get claude's flags).
-func resolveDefaultAgent() (agents.AgentSpec, bool) {
-	name := os.Getenv("BRIDGE_DEFAULT_AGENT")
-	if name == "" {
-		return agents.AgentSpec{}, false
-	}
-	spec, err := agents.Resolve(name)
-	if err != nil {
-		return agents.AgentSpec{}, false
-	}
-	if extra := os.Getenv("BRIDGE_DEFAULT_AGENT_ARGS"); extra != "" {
-		spec.Args = append(spec.Args, strings.Fields(extra)...)
-	}
-	return spec, true
-}
+func resolveDefaultAgent() (agents.AgentSpec, bool) { return launch.DefaultAgent(os.Getenv) }
 
 func preflightOpen(out io.Writer, args []string) error {
 	var name, agentName, worktree string
@@ -273,12 +259,7 @@ func slotIDFor(repo core.Repo, worktree string) string {
 // displayName returns the claude session display name for a repo launch:
 // "<repo>" normally, "<repo> [<worktree>]" when a worktree is given. Matches
 // the bash bridge's label.
-func displayName(repo core.Repo, worktree string) string {
-	if worktree != "" {
-		return repo.Name + " [" + worktree + "]"
-	}
-	return repo.Name
-}
+func displayName(repo core.Repo, worktree string) string { return launch.DisplayName(repo, worktree) }
 
 // withClaudeName prepends `-n <displayName>` to a claude spec's args so the
 // launched session is named in the picker/terminal title. No-op for non-claude
@@ -292,11 +273,7 @@ func withClaudeName(spec agents.AgentSpec, repo core.Repo, worktree string) agen
 // nav for issue launches, which name the session "#123 [<title>]" rather than
 // the default "<repo> [<wt>]").
 func withClaudeNameLabel(spec agents.AgentSpec, label string) agents.AgentSpec {
-	if spec.Name != "claude" {
-		return spec
-	}
-	spec.Args = append([]string{"-n", label}, spec.Args...)
-	return spec
+	return launch.WithClaudeName(spec, label)
 }
 
 // maybePreLaunchSync does a best-effort `git fetch && git pull --ff-only`
@@ -305,36 +282,7 @@ func withClaudeNameLabel(spec agents.AgentSpec, label string) agents.AgentSpec {
 // and skips silently. Non-trivial skip reasons surface as a one-line
 // stderr banner; success is silent. Never fails the launch.
 func maybePreLaunchSync(dir, slot string, noSync bool) {
-	if noSync || os.Getenv("BRIDGE_NO_SYNC") != "" {
-		return
-	}
-	if dir == "" {
-		return
-	}
-	if slot != "" && sessionLive(slot) {
-		// Reattach: don't touch the working tree under a live session.
-		return
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	s := &syncer.Syncer{Runner: syncer.ExecRunner{}}
-	res := s.SafePull(ctx, dir)
-	if res.Skipped != "" && res.Skipped != syncer.SkipNoUpstream {
-		fmt.Fprintf(os.Stderr, "bridge: sync skipped (%s)\n", res.Skipped)
-	}
-}
-
-func sessionLive(slot string) bool {
-	sessions, err := loadSessions()
-	if err != nil {
-		return false
-	}
-	for _, s := range sessions {
-		if s.SlotID == slot {
-			return true
-		}
-	}
-	return false
+	launch.PreLaunchSync(context.Background(), launchDeps(), dir, slot, noSync)
 }
 
 // ensureClaudeRelabel installs the SessionStart[clear] hook for claude
@@ -348,10 +296,5 @@ func ensureClaudeRelabel(spec agents.AgentSpec, repo core.Repo, worktree string)
 // ensureClaudeRelabelLabel is ensureClaudeRelabel with an explicit display label
 // (nav's issue launches restore "#123 [<title>]" after /clear).
 func ensureClaudeRelabelLabel(spec agents.AgentSpec, label string) {
-	if spec.Name != "claude" {
-		return
-	}
-	if err := hooks.EnsureRelabel(hooks.EffectiveConfigDir(), label); err != nil {
-		fmt.Fprintf(os.Stderr, "warning: relabel hook install failed: %v\n", err)
-	}
+	launch.EnsureRelabel(spec, label, os.Stderr)
 }
