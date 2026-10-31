@@ -6754,3 +6754,19 @@ No gaps found.
 **3. Type consistency** — checked: `navdata.DashRow`/`Dirty`/`RepoEntry` field names are identical in Tasks 1, 2, 5, 6, 7; `bot.Started{Slot, AlreadyRunning, Exited, RCURL, Err}` is produced by `startForBot` (Task 7) and consumed by `onStarted` (Task 5); `launch.TargetFor(ctx, d, repo, worktree, agentName)` and `launch.StartDetached(ctx, d, &t, rc, noSync)` match between Tasks 3 and 7; `telegram.InlineKeyboardMarkup` is built from `bot.Keyboard` by `toMarkup` (Task 7); nav's `issueSlugMax`, `repoForgeChoices`, `rowParts`, `matchesAllTerms`, `filterRepos`, `matchesForge`, `sortRepoRows`, `buildDashRows`, `parseDirtyStatus`, `buildSessionRows`, `humanLastAccessed`, `lastAccessedFor`, `buildFetchCmd`, `loadRepoIssuesCmd`, `issueWorktreeName`, `worktreeErrMessage` keep the names and signatures nav's tests use.
 
 **4. Review Focus** — the five failure modes above each have a pinned test in their owning task (2/5/6, 5/7, 7, 5/7, 3/5/6); zero worktrees, >64-byte callback data and token-in-error-string are pinned too.
+
+---
+
+## Execution status (2026-10-31)
+
+**Phase:** implementation done; PR [#356](https://github.com/freaxnx01/bridge/pull/356) open, CI green (build, golangci-lint, govulncheck, test). Awaiting the user's merge.
+
+- Tasks 1–8 done via subagent-driven development, then a final whole-branch review and two fix waves:
+  - wave 1: `KillMode=process`, `ErrNoForgeClient` never cached, env→direnv issue-client resolution, stable epoch/fetch pile-up fixes;
+  - wave 2 (security): no Forgejo token sent to codeberg.org when no API base is set (`remote.ForgejoAuth`, `forge.IsAuthError`, client eviction on 401/403).
+- Rebased onto origin/main; `--prompt` conflict in `cmd/bridge/launch.go` resolved (`--remote-control` before the prompt).
+- Parked (not in this PR): Forgejo token-hygiene items in `TODO.md`; deferred final finding 6 (non-claude agent waits full 20 s for the RC link); error texts shown in chat may contain local paths/stderr (only matters if the bot joins a group chat; not yet captured).
+
+**Next, user side:** merge #356; create the bot in @BotFather ("bridge" in the name), store the token with `pb-create`; write `~/.config/bridge/bot.env` (0600, `TELEGRAM_BOT_TOKEN`, `BRIDGE_BOT_ALLOW`); `just bot-install` from the main checkout; one live walk-through (Task 8 Step 6).
+
+**Next, agent side:** fix any PR feedback in `.worktrees/tg-nav-bot`; after merge remove the worktree and the session-scratchpad leftovers. GitHub ops only via `direnv exec .` (PAT, never the gho_ fallback).
