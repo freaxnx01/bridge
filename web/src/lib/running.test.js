@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitRunning, STUCK_ENRICHING_SECONDS } from './running.js'
+import { splitRunning, runDuration, STUCK_ENRICHING_SECONDS, RUN_WARN_MINUTES, RUN_OVER_MINUTES } from './running.js'
 
 const now = Date.parse('2026-10-27T20:00:00Z')
 const ago = (s) => new Date(now - s * 1000).toISOString()
@@ -35,5 +35,25 @@ describe('splitRunning', () => {
 
   it('splitRunning_NoCards_EmptyGroups', () => {
     expect(splitRunning(undefined, now)).toEqual({ active: [], idle: [], stuck: [] })
+  })
+})
+
+describe('runDuration', () => {
+  const run = (s) => ({ kind: 'pipeline', status: 'in_progress', since: ago(s) })
+
+  it('runDuration_UnderWarnThreshold_WholeMinutesLevelOk', () => {
+    expect(runDuration(run(29 * 60 + 59), now)).toEqual({ minutes: 29, level: 'ok' })
+  })
+
+  it('runDuration_AtWarnThreshold_LevelWarn', () => {
+    expect(runDuration(run(RUN_WARN_MINUTES * 60), now)).toEqual({ minutes: 30, level: 'warn' })
+  })
+
+  it('runDuration_AtOverThreshold_LevelOver', () => {
+    expect(runDuration(run(RUN_OVER_MINUTES * 60), now)).toEqual({ minutes: 60, level: 'over' })
+  })
+
+  it('runDuration_LongRun_StaysInMinutes', () => {
+    expect(runDuration(run(3 * 3600), now).minutes).toBe(180)
   })
 })

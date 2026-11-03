@@ -87,6 +87,7 @@ main { padding: 1rem; }
 .card .main { flex: 1; min-width: 0; }
 .card .line1 { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .card .line2 { color: var(--muted); font-size: 0.85em; }
+.duration.over { color: var(--error); font-weight: 600; }
 .card .title { color: var(--muted); }
 .card .action { flex: none; }
 .result { font-size: 0.85em; }

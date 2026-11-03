@@ -9,6 +9,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cockpit: a pipeline run's card shows its runtime in minutes, orange from 30 min and red from 60 min.
 - `bridge mcp serve`: milestone support — new **`list_milestones`** and **`set_milestone`** tools (assign, change or clear, draft by default), a **`milestone`** input on `create_issue`, and a **`milestone`** filter on `list_issues`; milestones are referenced by title or number and resolve across open and closed ones, on GitHub and Forgejo. (#349)
 - WebUI cockpit: shell with a **Pipeline board** (Running / Ready / Held / Needs enrichment) served by `bridge serve`, with token-guarded Enrich and Dispatch buttons. See `docs/cockpit.md`.
 - Pipeline API: `GET /api/pipeline`, `POST /api/pipeline/{refresh,enrich,dispatch}` and the SSE event `pipeline-updated`.
