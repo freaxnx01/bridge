@@ -1,5 +1,6 @@
 <script>
   import { ageSeconds, formatAge } from '../freshness.js';
+  import { runDuration } from '../running.js';
 
   let { card, now } = $props();
 
@@ -16,6 +17,7 @@
         : card.title,
   );
   const age = $derived(formatAge(ageSeconds(card.since, now)));
+  const duration = $derived(card.kind === 'pipeline' ? runDuration(card, now) : null);
   const link = $derived(openLink(card));
 
   function openLink(c) {
@@ -36,7 +38,13 @@
   <span class="icon" aria-hidden="true">{icon}</span>
   <div class="main">
     <div class="line1"><span class="kind">{card.kind}</span> <strong>{shortRepo}</strong> {subject}</div>
-    <div class="line2">{card.kind === 'pipeline' ? card.title : card.status} · {age}</div>
+    <div class="line2">
+      {#if duration}
+        {card.title} · <span class="duration" class:warn={duration.level === 'warn'} class:over={duration.level === 'over'}>{duration.minutes} min</span>
+      {:else}
+        {card.status} · {age}
+      {/if}
+    </div>
   </div>
   {#if link}<a class="action" href={link.href} target="_blank" rel="noopener noreferrer">{link.text}</a>{/if}
 </li>
