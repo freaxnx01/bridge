@@ -503,6 +503,10 @@ func (m Model) viewModal() string {
 	return panel(m.width, "New worktree", body)
 }
 
+// trunc clips plain (unstyled) text to at most n display columns, ending in
+// "…" when it cuts. It walks runes, so a multi-byte rune (an em dash in a
+// commit subject, an accented letter) is never split and a wide rune never
+// overruns n.
 func trunc(s string, n int) string {
 	if lipgloss.Width(s) <= n {
 		return s
@@ -510,7 +514,17 @@ func trunc(s string, n int) string {
 	if n <= 1 {
 		return "…"
 	}
-	return s[:n-1] + "…"
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > n-1 {
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String() + "…"
 }
 
 // detailColumn renders the three stacked detail panels for the highlighted

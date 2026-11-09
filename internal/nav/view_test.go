@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/charmbracelet/lipgloss"
 
@@ -709,5 +710,35 @@ func TestViewPicker_HintLine_HidesClearKeysOnEmptyFilter(t *testing.T) {
 	}
 	if !strings.Contains(got, "q quit") {
 		t.Errorf("picker hint line should still advertise \"q quit\":\n%s", got)
+	}
+}
+
+func TestTrunc_NeverSplitsARuneOrOverrunsWidth(t *testing.T) {
+	cases := []struct {
+		name string
+		in   string
+		n    int
+		want string // "" = only check validity and width
+	}{
+		{"ascii fits", "short", 10, "short"},
+		{"ascii clipped", "abcdefghij", 5, "abcd…"},
+		{"ascii n=1", "abcdef", 1, "…"},
+		{"em dash at cut", "fix — the thing", 6, ""},
+		{"accented", "café crème brûlée", 5, "café…"},
+		{"wide runes", "日本語のテキストです", 6, "日本…"},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := trunc(c.in, c.n)
+			if !utf8.ValidString(got) {
+				t.Fatalf("trunc(%q, %d) = %q, not valid UTF-8", c.in, c.n, got)
+			}
+			if w := lipgloss.Width(got); w > c.n {
+				t.Errorf("trunc(%q, %d) width = %d, want <= %d", c.in, c.n, w, c.n)
+			}
+			if c.want != "" && got != c.want {
+				t.Errorf("trunc(%q, %d) = %q, want %q", c.in, c.n, got, c.want)
+			}
+		})
 	}
 }
