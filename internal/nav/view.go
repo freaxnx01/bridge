@@ -319,7 +319,16 @@ func (m Model) viewPicker() string {
 	if m.forgeSubfilterVisible() {
 		hint += " · ctrl+f forge"
 	}
-	hint += " · esc/^c clear · q quit"
+	if m.filter.Value() != "" {
+		// Only advertised while there is something to clear. With an empty
+		// filter those two keys quit (update.go:413-427), so the segment would
+		// invite the user to end the session, and the footer has no room to
+		// spare either: hintLine/footerLine and the maxVisible budget above all
+		// bake in a single hint row, which 15 more columns of fixed text push
+		// into a soft wrap on a narrow terminal.
+		hint += " · esc/^c clear"
+	}
+	hint += " · q quit"
 	sections = append(sections, m.hintLine(hint))
 	return strings.Join(sections, "\n")
 }

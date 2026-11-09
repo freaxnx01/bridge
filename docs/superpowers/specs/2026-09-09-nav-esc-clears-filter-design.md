@@ -7,7 +7,7 @@
 >
 > - `ctrl+c` follows **exactly the same rule as `esc`**: a non-empty filter is
 >   cleared, an empty filter quits, from **any** picker focus.
-> - The hint line reads `esc/^c clear`.
+> - The hint line reads `esc/^c clear` while a filter is set.
 >
 > Line numbers below were re-verified against `main` @ `9fddc65`.
 
@@ -153,9 +153,17 @@ meaningless and the selection returns to the top.
 ## Discoverability
 
 The picker hint line (`internal/nav/view.go:318-323`) gains an `esc/^c`
-entry. It currently ends with `· q quit`; it should read
+entry. It currently ends with `· q quit`; with a filter set it should read
 `· esc/^c clear · q quit`. The `esc/^c` form follows the existing
 `r/^r refresh` entry on the same line.
+
+The entry is **conditional on a non-empty filter**, like the adjacent
+`· ctrl+f forge`. With an empty filter those keys quit, so the hint would be
+talking the user into ending the session — and the segment's 15 columns are
+width the footer does not have: `hintLine`/`footerLine` (`view.go:804-877`)
+and the picker's own `maxVisible` budget (`view.go:296`) both assume a single
+hint row, so on a narrow terminal the fixed text soft-wraps and the panel
+loses a line.
 
 There is no `key.Binding` registry and no `bubbles/help` in this repo —
 bindings are raw string switches and the hint line is the only place
@@ -184,7 +192,8 @@ regenerated (`go test ./internal/nav -update`, see
 - `esc` with the legend open still closes the legend without touching the
   filter. `ctrl+c` with the legend open still quits.
 - `esc`/`ctrl+c` on the dashboard, overview and agents screens are unchanged.
-- The picker hint line advertises `esc/^c clear`.
+- The picker hint line advertises `esc/^c clear` while a filter is set, and
+  omits the entry when the filter is empty (where the keys quit).
 - `gofmt`, `go vet`, `golangci-lint` clean; `go test -race ./...` green with
   goldens regenerated.
 

@@ -1432,8 +1432,15 @@ var clearKeys = []struct {
 	{"ctrl+c", tea.KeyMsg{Type: tea.KeyCtrlC}},
 }
 
+// isQuit reports whether cmd is the quit command. It type-asserts rather than
+// comparing messages with ==, which panics on an uncomparable dynamic type —
+// and the commands it is handed include arbitrary textinput ones.
 func isQuit(cmd tea.Cmd) bool {
-	return cmd != nil && cmd() == tea.Quit()
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
 }
 
 func TestUpdatePicker_ClearKey_ClearsNonEmptyFilter(t *testing.T) {
@@ -1455,6 +1462,28 @@ func TestUpdatePicker_ClearKey_ClearsNonEmptyFilter(t *testing.T) {
 			}
 			if cmd != nil {
 				t.Errorf("%s that clears the filter must not return a command (it would quit)", k.name)
+			}
+		})
+	}
+}
+
+func TestUpdatePicker_ClearKey_SecondPressQuitsAfterClearing(t *testing.T) {
+	// The property that justifies overloading ctrl+c: the picker stays
+	// escapable, so the same key twice in a row clears and then leaves.
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			m := initialModel(Config{})
+			m.filter.SetValue("workflow")
+
+			out, cmd := m.Update(k.msg)
+			if cmd != nil {
+				t.Fatalf("the first %s should clear the filter, not quit", k.name)
+			}
+
+			_, cmd = out.(Model).Update(k.msg)
+
+			if !isQuit(cmd) {
+				t.Errorf("a second %s should quit now that the filter is empty", k.name)
 			}
 		})
 	}
