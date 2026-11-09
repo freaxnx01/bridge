@@ -742,3 +742,86 @@ func TestTrunc_NeverSplitsARuneOrOverrunsWidth(t *testing.T) {
 		})
 	}
 }
+
+// detailFixture builds a dashboard model with one selected worktree whose
+// detail panels hold d, at the given terminal size.
+func detailFixture(w, h int, d *worktreeDetails) Model {
+	m := initialModel(Config{})
+	m.width, m.height = w, h
+	m.screen = screenDash
+	m.repo = core.Repo{Name: "bridge", Path: "/r"}
+	m.dashRows = []dashRow{{worktree: "wt", branch: "worktree-wt", path: "/r/wt"}}
+	m.dashSel = 0
+	m.details = map[string]*worktreeDetails{"/r/wt": d}
+	return m
+}
+
+func detailSet(nBranches, nCommits, nStatus int, branch, subject, path string) *worktreeDetails {
+	d := &worktreeDetails{branchesState: loadOK, commitsState: loadOK, statusState: loadOK}
+	for i := 0; i < nBranches; i++ {
+		d.branches = append(d.branches, branchInfo{name: fmt.Sprintf("%s-%d", branch, i)})
+	}
+	for i := 0; i < nCommits; i++ {
+		d.commits = append(d.commits, commitInfo{sha: fmt.Sprintf("abc%04d", i), subject: subject})
+	}
+	for i := 0; i < nStatus; i++ {
+		d.status = append(d.status, statusFile{code: "??", path: fmt.Sprintf("%s-%d.html", path, i)})
+	}
+	return d
+}
+
+func TestView_Dash_DetailColumn_FrameNeverExceedsPane(t *testing.T) {
+	long := "fix(release): never write a partial issue index, and keep the changelog's file mode (#555) (#559) — again"
+	longBranch := "worktree-assl-portal-sso-follow-up-for-the-customer-standard-package-and-more"
+	longPath := "correspondence/2026-10-21-roadmap-product-effort-estimate-for-the-customer-standard-package"
+	sets := []struct {
+		name string
+		d    *worktreeDetails
+	}{
+		{"long subjects", detailSet(9, 20, 0, "b", long, "f")},
+		{"50 status files", detailSet(9, 20, 50, "b", "short", "f")},
+		{"long branch names", detailSet(9, 20, 1, longBranch, "short", "f")},
+		{"long status paths", detailSet(3, 3, 9, "b", "short", longPath)},
+		{"everything", detailSet(20, 20, 50, longBranch, long, longPath)},
+	}
+	for _, w := range []int{100, 120, 150} {
+		for h := 24; h <= 60; h++ {
+			for _, s := range sets {
+				m := detailFixture(w, h, s.d)
+				out := m.View()
+				if got := lipgloss.Height(out); got != h {
+					t.Errorf("%dx%d %s: frame = %d rows, want exactly %d", w, h, s.name, got, h)
+					continue
+				}
+				lines := strings.Split(stripANSI(out), "\n")
+				if !strings.HasPrefix(strings.TrimSpace(lines[0]), "╭") || !strings.Contains(lines[1], "bridge nav · bridge") {
+					t.Errorf("%dx%d %s: header box is not the top of the frame:\n%s\n%s", w, h, s.name, lines[0], lines[1])
+				}
+			}
+		}
+	}
+}
+
+func TestView_Dash_DetailColumn_LongSubjectClipsToOneRow(t *testing.T) {
+	subject := strings.Repeat("very long commit subject ", 10)
+	m := detailFixture(120, 40, detailSet(1, 1, 0, "b", subject, "f"))
+
+	out := stripANSI(m.View())
+
+	lines := strings.Split(out, "\n")
+	idx := -1
+	for i, l := range lines {
+		if strings.Contains(l, "abc0000") {
+			idx = i
+		}
+	}
+	if idx < 0 || idx+1 >= len(lines) {
+		t.Fatalf("commit row with sha abc0000 not rendered:\n%s", out)
+	}
+	if !strings.Contains(lines[idx], "…") {
+		t.Errorf("a subject wider than the panel should be clipped with …, got row:\n%s", lines[idx])
+	}
+	if strings.Contains(lines[idx+1], "commit subject") {
+		t.Errorf("subject wraps onto the next row:\n%s\n%s", lines[idx], lines[idx+1])
+	}
+}
