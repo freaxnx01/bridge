@@ -679,3 +679,17 @@ func TestPicker_RemoteUnavailable_KeepsHintsAndSaysItOnce(t *testing.T) {
 		t.Errorf("rendered %d times, want 1 — the Repos panel title is the one place for it", n)
 	}
 }
+
+func TestViewPicker_HintLine_AdvertisesClearKeys(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{{label: "github/public/bridge"}}
+
+	got := stripANSI(m.View())
+	if !strings.Contains(got, "esc/^c clear") {
+		t.Errorf("picker hint line should advertise \"esc/^c clear\":\n%s", got)
+	}
+	if !strings.Contains(got, "q quit") {
+		t.Errorf("picker hint line should still advertise \"q quit\":\n%s", got)
+	}
+}

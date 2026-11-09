@@ -319,7 +319,7 @@ func (m Model) viewPicker() string {
 	if m.forgeSubfilterVisible() {
 		hint += " · ctrl+f forge"
 	}
-	hint += " · q quit"
+	hint += " · esc/^c clear · q quit"
 	sections = append(sections, m.hintLine(hint))
 	return strings.Join(sections, "\n")
 }
