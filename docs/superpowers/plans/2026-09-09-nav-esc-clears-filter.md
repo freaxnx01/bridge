@@ -371,6 +371,13 @@ Closes #282"
 
 ### Task 2: Advertise esc/^c on the picker hint line
 
+> **Revised in review:** the entry is appended only when `m.filter.Value() != ""`,
+> mirroring the adjacent `· ctrl+f forge` guard. With an empty filter the keys
+> quit, so the hint would be misleading, and the segment's 15 columns push the
+> one-line footer budget over on a narrow terminal. The test below is therefore
+> split into a filter-set case and an empty-filter case, and the goldens (both
+> rendered with an empty filter) keep their pre-change hint line.
+
 **Files:**
 - Modify: `internal/nav/view.go:322`
 - Test: `internal/nav/view_test.go` (append)

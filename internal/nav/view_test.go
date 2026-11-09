@@ -679,3 +679,35 @@ func TestPicker_RemoteUnavailable_KeepsHintsAndSaysItOnce(t *testing.T) {
 		t.Errorf("rendered %d times, want 1 — the Repos panel title is the one place for it", n)
 	}
 }
+
+func TestViewPicker_HintLine_AdvertisesClearKeysWhileFilterSet(t *testing.T) {
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{{label: "github/public/bridge"}}
+	m.filter.SetValue("bridge")
+
+	got := stripANSI(m.View())
+	if !strings.Contains(got, "esc/^c clear") {
+		t.Errorf("picker hint line should advertise \"esc/^c clear\" with a filter set:\n%s", got)
+	}
+	if !strings.Contains(got, "q quit") {
+		t.Errorf("picker hint line should still advertise \"q quit\":\n%s", got)
+	}
+}
+
+func TestViewPicker_HintLine_HidesClearKeysOnEmptyFilter(t *testing.T) {
+	// With nothing to clear, esc/ctrl+c quit — advertising them as "clear"
+	// would talk a user into ending the session. Dropping the segment also
+	// keeps the footer within the single hint row the layout budgets for.
+	m := initialModel(Config{})
+	m.width, m.height = 120, 40
+	m.localRepos = []repoRow{{label: "github/public/bridge"}}
+
+	got := stripANSI(m.View())
+	if strings.Contains(got, "esc/^c clear") {
+		t.Errorf("picker hint line must not offer \"esc/^c clear\" when the filter is empty:\n%s", got)
+	}
+	if !strings.Contains(got, "q quit") {
+		t.Errorf("picker hint line should still advertise \"q quit\":\n%s", got)
+	}
+}
