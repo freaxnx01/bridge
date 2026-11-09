@@ -32,6 +32,15 @@ normal `~/.claude`, not this admin session's `~/.claude-s0`.
   within the wait; offer to re-run the same
   `env -u CLAUDE_CONFIG_DIR bridge launch … --rc --json` — on a live session it
   reports `already_running` and re-scrapes the link.
+- **Repo names with dots** (e.g. `freaxnx01.github.io`, the games hub): tmux
+  renames the session to `freaxnx01_github_io`, so `bridge launch` reports
+  "exited during startup" although it is alive, and a re-launch says
+  "duplicate session". No `rc_url` is scraped. Check `bridge sessions --json`
+  for the `_` name. A worktree does NOT help (slot id is `<repo>-wt-<name>`,
+  still has dots). Workaround: user attaches via tmux and runs
+  `/remote-control`.
+  (bridge bug #337; fixed in bridge 1600ea5 on 2026-10-07: launch now returns
+  the `_` slot plus `rc_url`. Only relevant on older builds.)
 
 ## Stop a session
 
