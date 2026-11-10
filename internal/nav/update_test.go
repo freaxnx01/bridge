@@ -1741,3 +1741,48 @@ func TestUpdate_RemoteMsgShrinksPicker_ClampsPickerSel(t *testing.T) {
 		})
 	}
 }
+
+// recentArchivedModel is archivedModel with both repos on disk and recently
+// opened, the archived one most recently.
+func recentArchivedModel() Model {
+	m := archivedModel()
+	m.localRepos[0].repo.Path = "/r/bridge"
+	m.localRepos[1].repo.Path = "/r/flowhub"
+	m.mruPaths = []string{"/r/flowhub", "/r/bridge"}
+	return m
+}
+
+func TestRecentRepos_ArchivedHiddenUnlessRevealed(t *testing.T) {
+	m := recentArchivedModel()
+	if rows := m.recentRepos(); len(rows) != 1 || rows[0].repo.Name != "bridge" {
+		t.Errorf("archived clone must be hidden from Recent, got %+v", rows)
+	}
+	m.showArchived = true
+	if got := len(m.recentRepos()); got != 2 {
+		t.Errorf("ctrl+a must reveal the archived clone in Recent too, got %d rows", got)
+	}
+}
+
+func TestViewPicker_RecentArchivedRowCarriesMarker(t *testing.T) {
+	m := recentArchivedModel()
+	m.showArchived = true
+	block, _ := m.recentBlock()
+	for _, line := range strings.Split(stripANSI(block), "\n") {
+		if strings.Contains(line, "FlowHub-CAS-AISE") && !strings.Contains(line, "archived") {
+			t.Errorf("revealed archived Recent row must carry the marker: %q", line)
+		}
+	}
+}
+
+func TestUpdate_RemoteMsgShrinksRecent_ClampsRecentSel(t *testing.T) {
+	m := recentArchivedModel()
+	m.archived = nil
+	m.pickerFocus = focusRecent
+	m.recentSel = 1 // on bridge; FlowHub above it is about to be hidden
+	archived := archivedKeys([]forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "FlowHub-CAS-AISE", Archived: true}})
+	out, _ := m.Update(remoteMsg{archived: archived})
+	got := out.(Model)
+	if n := len(got.recentRepos()); got.recentSel >= n {
+		t.Errorf("recentSel = %d with %d Recent rows, want it clamped", got.recentSel, n)
+	}
+}

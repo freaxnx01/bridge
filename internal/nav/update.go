@@ -38,8 +38,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.archived = msg.archived
 		m.remoteState = loadOK
 		m = m.normalizeForgeFilter()
-		// The archived set can hide the row under the cursor.
-		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
+		m = m.clampPickerCursors()
 		return m, m.issueCountCmds(msg.rows)
 	case remoteErrMsg:
 		if len(msg.rows) > 0 {
@@ -49,7 +48,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.archived = msg.archived
 			m.remoteState = loadPartial
 			m = m.normalizeForgeFilter()
-			m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
+			m = m.clampPickerCursors()
 			return m, m.issueCountCmds(msg.rows)
 		}
 		// remoteState alone reports this: the Repos panel title renders
@@ -400,6 +399,9 @@ func (m Model) recentRepos() []repoRow {
 	out := make([]repoRow, 0, maxRecent)
 	for _, p := range m.mruPaths {
 		if r, ok := byPath[p]; ok {
+			if !m.showArchived && m.archived[repoRowKey(r)] {
+				continue
+			}
 			out = append(out, r)
 			if len(out) == maxRecent {
 				break
@@ -407,6 +409,14 @@ func (m Model) recentRepos() []repoRow {
 		}
 	}
 	return out
+}
+
+// clampPickerCursors keeps both picker cursors inside their lists after the
+// remote cache arrives: its archived set can hide the row under either one.
+func (m Model) clampPickerCursors() Model {
+	m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
+	m.recentSel = clampInt(m.recentSel, 0, len(m.recentRepos())-1)
+	return m
 }
 
 // recentVisible reports whether the Recent section shows: only with an empty

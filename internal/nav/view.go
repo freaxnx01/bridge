@@ -198,7 +198,7 @@ func (m Model) recentBlock() (string, int) {
 	var b strings.Builder
 	b.WriteString(stMuted.Render("Recent") + "\n")
 	for i, r := range rows {
-		tag := repoIssueTag(r)
+		tag := repoIssueTag(r) + m.repoArchivedTag(r)
 		if m.pickerFocus == focusRecent && i == m.recentSel {
 			b.WriteString(stSel.Render(stAccent.Render("▸ ")+r.label+tag) + "\n")
 		} else {
