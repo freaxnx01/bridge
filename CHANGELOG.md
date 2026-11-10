@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - The pipeline write endpoints (`refresh`, `enrich`, `dispatch`) require an Origin from an explicit allowlist (`localhost`/`127.0.0.1` on the serve port plus `BRIDGE_COCKPIT_ORIGINS`) as well as the bearer token, defending against DNS rebinding and CSRF. They fail closed with `503` when `BRIDGE_API_TOKEN` is unset.
-- `forge.ListRepos` (GitHub, Forgejo, GitLab) now **returns archived repos with `Archived: true`** instead of silently dropping them, so callers decide. The `list_repos` MCP tool and nav's clone-on-select rows filter them explicitly, so both behave exactly as before. (#292)
+- `forge.ListRepos` (GitHub, Forgejo, GitLab) now **returns archived repos with `Archived: true`** instead of silently dropping them, so callers decide. The `list_repos` MCP tool, `bridge list -r` (text and `--json`), the `bridge open -r` clone picker and nav's clone-on-select rows filter them explicitly, so all four behave exactly as before. (#292)
 
 ### Fixed
 
