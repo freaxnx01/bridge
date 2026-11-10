@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -141,12 +142,13 @@ func TestSlug(t *testing.T) {
 
 type fakeIssueCreator struct {
 	gotOwner, gotRepo, gotTitle, gotBody string
+	gotLabels                            []string
 	ret                                  forge.Issue
 	err                                  error
 }
 
-func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string) (forge.Issue, error) {
-	f.gotOwner, f.gotRepo, f.gotTitle, f.gotBody = owner, repo, title, body
+func (f *fakeIssueCreator) CreateIssue(_ context.Context, owner, repo, title, body string, labels []string, _ int) (forge.Issue, error) {
+	f.gotOwner, f.gotRepo, f.gotTitle, f.gotBody, f.gotLabels = owner, repo, title, body, labels
 	return f.ret, f.err
 }
 
@@ -191,5 +193,17 @@ func TestCaptureIssue_EmptyTitleRejected(t *testing.T) {
 	w := &fakeIssueCreator{}
 	if _, err := CaptureIssue(context.Background(), w, "freaxnx01", "bridge", "   ", ""); err == nil {
 		t.Errorf("empty title must error")
+	}
+}
+
+func TestCaptureIssue_StampsNeedsEnrichment(t *testing.T) {
+	fake := &fakeIssueCreator{ret: forge.Issue{Number: 7, URL: "https://forge/issues/7"}}
+	if _, err := CaptureIssue(context.Background(), fake, "freaxnx01", "bridge", "Login 500", "detail"); err != nil {
+		t.Fatal(err)
+	}
+	// Without this, a captured issue is dispatch-eligible the moment it is
+	// filed — the bug in #303.
+	if len(fake.gotLabels) != 1 || fake.gotLabels[0] != dispatch.LabelNeedsEnrichment {
+		t.Errorf("labels = %+v, want [%s]", fake.gotLabels, dispatch.LabelNeedsEnrichment)
 	}
 }

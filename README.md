@@ -36,6 +36,8 @@ bridge -D <name>                # delete a local repo
 bridge <name> -w <wt>           # open the <wt> worktree (resolves existing via git, else creates it)
 bridge <name> --agent <name>    # launch via tmux + named agent (claude|copilot|opencode|code)
 bridge <name> --rc              # pass --remote-control to claude
+bridge launch <name> [-w <wt>] [--agent <name>] [--rc] [--rc-wait <dur>] [--no-sync] [--json]   # start a session detached (no attach) — scripts / Telegram admin; --rc reports the Remote Control URL (unix only)
+bridge serve                    # WebUI cockpit + Pipeline board on :7777 — see docs/cockpit.md
 bridge --version
 
 # Composed read commands (each supports --json):
@@ -55,6 +57,8 @@ bridge tui                      # Bubbletea dashboard (repos / cached issues / l
 bridge nav                      # interactive navigator: pick a repo → dashboard of its sessions & worktrees
 bridge --dashboard              # alias for `bridge tui` (legacy spelling)
 ```
+
+Telegram admin session (steer bridge from your phone): see [docs/admin-session.md](docs/admin-session.md).
 
 Legacy flag spellings (`-r`, `--refresh`, `-D`, `-a`/`--attach`, `--status`, `--dashboard`, `away`/`back`/`auto`) are silently rewritten to the modern subcommand form so bash-bridge muscle memory keeps working. See `cmd/bridge/legacy.go`.
 
@@ -107,7 +111,7 @@ The shim is ≤20 lines of logic on purpose. All real work lives in the binary.
 
 ## MCP server
 
-`bridge mcp serve` runs a self-hosted, remote (Streamable HTTP) MCP endpoint exposing four cross-forge tools (`list_repos`, `read_file`, `create_issue`, `cross_forge_status`) over GitHub + Forgejo. `--read-only` omits the write tool by construction. `--host`/`--port` bind the listener (default `127.0.0.1:7788`); `--no-auth` skips bearer auth entirely and requires a loopback `--host`.
+`bridge mcp serve` runs a self-hosted, remote (Streamable HTTP) MCP endpoint exposing cross-forge tools over GitHub + Forgejo — repos, files, issues, pull requests with their checks, and Actions runs; see the tool table in [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md). `--read-only` omits the write tools by construction. `--host`/`--port` bind the listener (default `127.0.0.1:7788`); `--no-auth` skips bearer auth entirely and requires a loopback `--host`.
 
 The `--auth` flag selects how callers authenticate:
 

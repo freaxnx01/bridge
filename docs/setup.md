@@ -48,7 +48,7 @@ grep -q '.local/bin' ~/.bashrc || echo 'export PATH="$HOME/.local/bin:$PATH"' >>
 > [step 3 (clone bridge)](#3-install-bridge-binary--shim) first if you're going
 > top-to-bottom, then come back here.
 
-Bridge needs the Go version pinned in `go.mod` (currently **1.25.0**). The repo
+Bridge needs the Go version pinned in `go.mod` (currently **1.26.10**). The repo
 fetches the exact version into `~/.local/go` for you (works on x86_64 and
 arm64, Linux and macOS):
 
@@ -57,11 +57,11 @@ arm64, Linux and macOS):
 just install-go-toolchain
 echo 'export PATH="$HOME/.local/go/bin:$PATH"' >> ~/.bashrc
 exec bash -l
-go version            # → go1.25.0 ...
+go version            # → go1.26.10 ...
 ```
 
 Install `just` first if missing: `apt/dnf/pacman install just`, or
-`brew install just`. (If your distro already ships Go ≥ 1.25 you can skip this
+`brew install just`. (If your distro already ships Go ≥ 1.26.10 you can skip this
 and use the system Go.)
 
 ---

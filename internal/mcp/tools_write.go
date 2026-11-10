@@ -9,32 +9,49 @@ import (
 	"github.com/modelcontextprotocol/go-sdk/mcp"
 
 	"github.com/freaxnx01/bridge/internal/audit"
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
 type createIssueInput struct {
-	Forge   string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
-	Owner   string `json:"owner" jsonschema:"repository owner"`
-	Repo    string `json:"repo" jsonschema:"repository name"`
-	Title   string `json:"title" jsonschema:"issue title"`
-	Body    string `json:"body,omitempty" jsonschema:"issue body (markdown)"`
-	Confirm bool   `json:"confirm,omitempty" jsonschema:"when false, returns a draft without creating; set true to create"`
+	Forge     string `json:"forge" jsonschema:"forge hosting the repo: github or forgejo"`
+	Owner     string `json:"owner" jsonschema:"repository owner"`
+	Repo      string `json:"repo" jsonschema:"repository name"`
+	Title     string `json:"title" jsonschema:"issue title"`
+	Body      string `json:"body,omitempty" jsonschema:"issue body (markdown)"`
+	Milestone string `json:"milestone,omitempty" jsonschema:"optional milestone: its title, or its number as a string (e.g. \"3\"); resolved against the repo's milestones (any state)"`
+	Confirm   bool   `json:"confirm,omitempty" jsonschema:"when false, returns a draft without creating; set true to create"`
 }
 
 type createIssueOutput struct {
-	Draft bool         `json:"draft"`
-	Forge string       `json:"forge"`
-	Owner string       `json:"owner"`
-	Repo  string       `json:"repo"`
-	Title string       `json:"title"`
-	Body  string       `json:"body,omitempty"`
-	Issue *forge.Issue `json:"issue,omitempty"`
+	Draft     bool             `json:"draft"`
+	Forge     string           `json:"forge"`
+	Owner     string           `json:"owner"`
+	Repo      string           `json:"repo"`
+	Title     string           `json:"title"`
+	Body      string           `json:"body,omitempty"`
+	Labels    []string         `json:"labels,omitempty"`
+	Milestone *forge.Milestone `json:"milestone,omitempty"`
+	Issue     *forge.Issue     `json:"issue,omitempty"`
 }
 
 func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in createIssueInput) (*mcp.CallToolResult, createIssueOutput, error) {
+	// Intake stamps needs-enrichment on every path, create_issue included.
+	// There is no opt-out: removing the label is a deliberate act, which is
+	// the fail-closed direction.
+	labels := []string{dispatch.LabelNeedsEnrichment}
 	draft := createIssueOutput{
 		Draft: true,
 		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Title: in.Title, Body: in.Body,
+		Labels: labels,
+	}
+	milestoneNumber := 0
+	if in.Milestone != "" {
+		m, err := d.lookupMilestone(ctx, in.Forge, in.Owner, in.Repo, in.Milestone)
+		if err != nil {
+			return nil, createIssueOutput{}, err
+		}
+		draft.Milestone, milestoneNumber = &m, m.Number
 	}
 	if !in.Confirm {
 		return nil, draft, nil
@@ -47,7 +64,7 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	if !ok {
 		return nil, createIssueOutput{}, fmt.Errorf("forge %q does not support creating issues", in.Forge)
 	}
-	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body)
+	issue, err := issues.CreateIssue(ctx, in.Owner, in.Repo, in.Title, in.Body, labels, milestoneNumber)
 	if err != nil {
 		d.auditLog(audit.Entry{Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Tool: "create_issue", Confirm: true, Outcome: "error"})
 		return nil, createIssueOutput{}, fmt.Errorf("create issue %s/%s: %w", in.Owner, in.Repo, err)
@@ -56,7 +73,9 @@ func (d Deps) handleCreateIssue(ctx context.Context, _ *mcp.CallToolRequest, in 
 	return nil, createIssueOutput{
 		Draft: false,
 		Forge: in.Forge, Owner: in.Owner, Repo: in.Repo, Title: in.Title, Body: in.Body,
-		Issue: &issue,
+		Labels:    labels,
+		Milestone: draft.Milestone,
+		Issue:     &issue,
 	}, nil
 }
 

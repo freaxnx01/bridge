@@ -14,6 +14,8 @@ func TestSlotIDForPath_MapsBridgeLayoutToSlotIDs(t *testing.T) {
 		{"trailing slash on worktree", "/home/a/repos/x/bridge/.worktrees/foo/", "bridge-wt-foo"},
 		{"uppercase repo name is preserved", "/home/a/repos/x/BI_ExportSQLiteToCsv", "BI_ExportSQLiteToCsv"},
 		{"nested dir inside a repo is not the repo", "/home/a/repos/x/bridge/internal/nav", "nav"},
+		{"dotted repo root", "/home/u/repos/freaxnx01.github.io", "freaxnx01_github_io"},
+		{"dotted repo worktree", "/home/u/repos/freaxnx01.github.io/.worktrees/fix.1", "freaxnx01_github_io-wt-fix_1"},
 		{"empty", "", ""},
 		{"root", "/", ""},
 		{"empty worktree name falls back to the repo", "/home/a/repos/x/bridge/.worktrees", "bridge"},

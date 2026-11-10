@@ -37,7 +37,22 @@ func ReadIssueCache(path string) (IssueCache, error) {
 	return c, nil
 }
 
+// WriteIssueCache persists the cache, minus issue bodies.
+//
+// ListOpenIssues populates Body for the dispatcher's empty-body gate, but this
+// file is an on-disk outward boundary and is read back only for titles, labels
+// and counts. Persisting bodies would write the full text of every open issue
+// across every discovered repo — private ones included — to an unencrypted
+// file. The caller's slice is left untouched: dispatch reads Body off the same
+// shape and would otherwise see every issue as empty.
 func WriteIssueCache(path string, c IssueCache) error {
+	stripped := make([]Issue, len(c.Issues))
+	copy(stripped, c.Issues)
+	for i := range stripped {
+		stripped[i].Body = ""
+	}
+	c.Issues = stripped
+
 	b, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err

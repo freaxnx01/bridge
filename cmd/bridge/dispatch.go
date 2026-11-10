@@ -2,33 +2,94 @@ package main
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
 
 	"github.com/spf13/cobra"
 
 	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/usage"
 )
+
+// decisionStatus renders one decision's outcome. A lane downgrade always shows,
+// dispatch or skip: "why is this repo not in the auto lane" is the question the
+// observation week exists to answer.
+func decisionStatus(d dispatch.Decision) string {
+	reason := d.Candidate.LaneReason
+	switch {
+	case d.Dispatch && d.Candidate.Lane.DryRun:
+		return withReason("WOULD dispatch (dry-run)", reason)
+	case d.Dispatch:
+		return withReason("dispatch", reason)
+	default:
+		if reason != "" {
+			return fmt.Sprintf("SKIP (%s; %s)", reason, d.Reason)
+		}
+		return fmt.Sprintf("SKIP (%s)", d.Reason)
+	}
+}
+
+func withReason(status, reason string) string {
+	if reason == "" {
+		return status
+	}
+	return fmt.Sprintf("%s (%s)", status, reason)
+}
 
 func renderDecisions(w io.Writer, ds []dispatch.Decision) {
 	dispatched, skipped := 0, 0
 	for _, d := range ds {
-		status := "dispatch"
-		if !d.Dispatch {
-			status = fmt.Sprintf("SKIP (%s)", d.Reason)
-			skipped++
-		} else {
+		if d.Dispatch {
 			dispatched++
+		} else {
+			skipped++
 		}
-		fmt.Fprintf(w, "  %-12s #%-4d %-28s → %s\n",
-			d.Candidate.Repo, d.Candidate.Issue.Number, truncate(d.Candidate.Issue.Title, 28), status)
+		fmt.Fprintf(w, "  %-16s #%-4d %-28s %-6s → %s\n",
+			d.Candidate.Repo, d.Candidate.Issue.Number,
+			truncate(d.Candidate.Issue.Title, 28),
+			d.Candidate.Lane.Name, decisionStatus(d))
 	}
 	fmt.Fprintf(w, "\n%d dispatched, %d skipped\n", dispatched, skipped)
+}
+
+// decisionJSON is the machine-readable view of a decision. Decision itself
+// carries no json tags and nests a whole forge.Issue; a named view keeps the
+// documented shape stable as the struct grows.
+type decisionJSON struct {
+	Repo       string   `json:"repo"`
+	Issue      int      `json:"issue"`
+	Title      string   `json:"title"`
+	Lane       string   `json:"lane"`
+	LaneReason string   `json:"lane_reason,omitempty"`
+	Labels     []string `json:"labels"`
+	DryRun     bool     `json:"dry_run"`
+	Dispatch   bool     `json:"dispatch"`
+	Reason     string   `json:"reason,omitempty"`
+}
+
+func decisionsJSON(ds []dispatch.Decision) []decisionJSON {
+	out := make([]decisionJSON, 0, len(ds))
+	for _, d := range ds {
+		out = append(out, decisionJSON{
+			Repo:       d.Candidate.Repo,
+			Issue:      d.Candidate.Issue.Number,
+			Title:      d.Candidate.Issue.Title,
+			Lane:       d.Candidate.Lane.Name,
+			LaneReason: d.Candidate.LaneReason,
+			Labels:     d.Candidate.Lane.EffectiveLabels(),
+			DryRun:     d.Candidate.Lane.DryRun,
+			Dispatch:   d.Dispatch,
+			Reason:     d.Reason,
+		})
+	}
+	return out
 }
 
 // repoInput is one repo's fetched state, kept as a plain struct so
@@ -128,6 +189,76 @@ func dispatchConfigPath() string {
 
 func dispatchStatePath() string { return filepath.Join(cacheRoot(), "dispatch.json") }
 
+func dispatchLedgerPath() string { return filepath.Join(cacheRoot(), "usage.json") }
+
+// transcriptRoot is where Claude Code writes its session transcripts. The env
+// override exists so tests never read the operator's real history.
+func transcriptRoot() string {
+	if v := os.Getenv("BRIDGE_CLAUDE_PROJECTS"); v != "" {
+		return v
+	}
+	home, _ := os.UserHomeDir()
+	return filepath.Join(home, ".claude", "projects")
+}
+
+// measureWindowUSD sums interactive and pipeline consumption over the trailing
+// quota window. The bool reports whether the number can be trusted: false means
+// fail closed, and is never the same as a measured zero.
+func measureWindowUSD(ctx context.Context, cfg dispatch.Config, from, to time.Time) (float64, bool) {
+	turns, err := usage.ScanTranscripts(ctx, transcriptRoot(), from)
+	if err != nil {
+		slog.Warn("dispatch: cannot read Claude transcripts — guarded dispatch will be blocked", "error", err)
+		return 0, false
+	}
+	ledger, err := usage.LoadLedger(dispatchLedgerPath())
+	if err != nil {
+		slog.Warn("dispatch: cannot read the usage ledger — guarded dispatch will be blocked", "error", err)
+		return 0, false
+	}
+
+	pricing := usage.DefaultPricing().Merge(cfg.Budget.Pricing)
+	return usage.SumWindow(turns, pricing, from, to) + ledger.SumSince(from), true
+}
+
+// tickTiming resolves one instant against the configured schedule: which
+// window covers it, what the budget rung is guarding, the span to measure
+// usage over, and which window occurrence the nightly counter belongs to.
+type tickTiming struct {
+	Now             time.Time
+	Window          dispatch.Window
+	InWindow        bool
+	RungOn          bool
+	Guard           time.Time // the instant the rung protects
+	MeasureFrom     time.Time
+	NightCapApplies bool
+	NightStart      time.Time
+}
+
+// resolveTiming is the single place the schedule is interpreted, so a tick and
+// a `status` read can never disagree about which bounds are in force.
+func resolveTiming(cfg dispatch.Config, now time.Time) tickTiming {
+	t := tickTiming{Now: now}
+	t.Window, t.InWindow = cfg.Schedule.InWindow(now)
+
+	guard, on := cfg.Schedule.RungGuard(now, cfg.Budget.WindowHours)
+	t.RungOn = on
+	t.Guard = guard
+	if on {
+		// Measure the quota window that ends at the guarded instant. Inside a
+		// rung window that is now; in the pre-dawn shoulder it is the coming
+		// handover, so only spend still inside the window at that point counts.
+		t.MeasureFrom = guard.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
+	}
+
+	// The nightly ceiling bounds unattended spend, so it belongs to a window
+	// whose rung is off — and its counter resets at that window's own start.
+	if t.InWindow && !t.Window.BudgetRung {
+		t.NightCapApplies = true
+		t.NightStart = t.Window.StartOf(now)
+	}
+	return t
+}
+
 func runDispatch(cmd *cobra.Command, _ []string) error {
 	cfg, err := dispatch.LoadConfig(dispatchConfigPath())
 	if err != nil {
@@ -144,20 +275,61 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		return nil
 	}
 
-	repos, err := fetchRepoInputs(context.Background())
+	now := time.Now()
+	timing := resolveTiming(cfg, now)
+
+	// The window gate is --auto only, as before: an explicit `dispatch now` is
+	// the operator asking for a tick. With lanes the question is per lane, so
+	// the tick stops only when no lane acts at all — and that question is
+	// answered from the config alone, before any network call, which keeps an
+	// out-of-window tick the free no-op it was before lanes.
+	if dispatchAuto && !anyLaneActs(cfg, now) {
+		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
+		return nil
+	}
+
+	ctx := context.Background()
+	repos, err := fetchRepoInputs(ctx)
 	if err != nil {
 		return err
 	}
 
-	openByRepo, globalOpen := countOpenAgentPRs(repos)
-	now := time.Now()
-	decisions := dispatch.ApplyCaps(
-		dispatch.Order(collectCandidates(repos), cfg.RepoPriority),
-		cfg, openByRepo, globalOpen, state.NightBudgetUsed(now),
+	gate := resolveGate(ctx, repos, cfg.Lanes, now)
+	candidates := collectCandidates(repos)
+	assignLanes(candidates, cfg.Lanes, gate)
+	ordered := dispatch.Order(candidates, cfg.RepoPriority)
+	acting, outOfWindow := partitionForTick(ordered, cfg, now, dispatchAuto)
+
+	// The rung is keyed on what it guards, not on --auto: a manual tick burns
+	// the same quota, and a pre-dawn tick burns the window the operator will
+	// inherit at the handover. It is off only when now is genuinely outside
+	// every rung window and its shoulder.
+	usedUSD, usedKnown := 0.0, true
+	if timing.RungOn {
+		usedUSD, usedKnown = measureWindowUSD(ctx, cfg, timing.MeasureFrom, now)
+	}
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
+
+	autonomous := func(repo string) bool {
+		lane, _ := dispatch.ResolveLane(cfg.Lanes, repo, gate)
+		return lane.Autonomous
+	}
+	openByRepo, globalOpen := countOpenAgentPRs(repos, autonomous)
+
+	decisions := dispatch.ApplyCaps(acting, cfg,
+		dispatch.Counts{
+			OpenPRsByRepo:     openByRepo,
+			GlobalOpen:        globalOpen,
+			DispatchedTonight: state.DispatchesSince(nightStartForReport(cfg, timing, now)),
+			NightCapApplies:   timing.NightCapApplies,
+			DispatchedByLane:  laneCounts(state, cfg, now),
+		},
+		budget,
 	)
+	decisions = mergeInOrder(ordered, decisions, outOfWindow)
 
 	if dispatchJSON {
-		if err := emitJSON(cmd.OutOrStdout(), decisions); err != nil {
+		if err := emitJSON(cmd.OutOrStdout(), decisionsJSON(decisions)); err != nil {
 			return err
 		}
 	} else {
@@ -166,7 +338,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	if dispatchDryRun {
 		return nil
 	}
-	return applyDecisions(context.Background(), decisions, state, now)
+	return applyDecisions(ctx, decisions, state, timing, cfg)
 }
 
 // fetchRepoInputs reads every discovered repo's issues, milestones and open
@@ -224,17 +396,84 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	return out, nil
 }
 
+// anyLaneActs reports whether any lane acts at now. The implicit default lane
+// is always considered: a repo no configured lane claims still dispatches in
+// it, on the top-level schedule.
+func anyLaneActs(cfg dispatch.Config, now time.Time) bool {
+	if dispatch.DefaultLane().InWindow(cfg.Schedule, now) {
+		return true
+	}
+	for _, l := range cfg.Lanes {
+		if l.InWindow(cfg.Schedule, now) {
+			return true
+		}
+	}
+	return false
+}
+
+// partitionForTick splits candidates into those whose lane acts now and skip
+// decisions for the rest. A manual tick skips the split entirely: `dispatch
+// now` was never window-gated, and partitioning it would turn a documented
+// schedule gap into a tick that dispatches nothing.
+func partitionForTick(ordered []dispatch.Candidate, cfg dispatch.Config, now time.Time, auto bool) ([]dispatch.Candidate, []dispatch.Decision) {
+	if !auto {
+		return ordered, nil
+	}
+	return dispatch.PartitionByWindow(ordered, cfg.Schedule, now)
+}
+
+// mergeInOrder puts the decision groups back into the order Order produced.
+// ApplyCaps only ever sees the acting candidates, so appending the
+// out-of-window skips afterwards would render --dry-run — the review surface —
+// out of ladder order.
+func mergeInOrder(ordered []dispatch.Candidate, groups ...[]dispatch.Decision) []dispatch.Decision {
+	type key struct {
+		repo   string
+		number int
+	}
+	byKey := make(map[key]dispatch.Decision)
+	for _, g := range groups {
+		for _, d := range g {
+			byKey[key{d.Candidate.Repo, d.Candidate.Issue.Number}] = d
+		}
+	}
+	out := make([]dispatch.Decision, 0, len(byKey))
+	for _, c := range ordered {
+		if d, ok := byKey[key{c.Repo, c.Issue.Number}]; ok {
+			out = append(out, d)
+		}
+	}
+	return out
+}
+
+// assignLanes resolves each candidate's lane in place, before ordering, so the
+// cap walk and the label write read the same decision.
+func assignLanes(cs []dispatch.Candidate, lanes []dispatch.Lane, gate dispatch.GateState) {
+	for i := range cs {
+		cs[i].Lane, cs[i].LaneReason = dispatch.ResolveLane(lanes, cs[i].Repo, gate)
+	}
+}
+
 // countOpenAgentPRs counts open PRs that close one of the repo's own issues.
 // Only those are pipeline output, so a hand-written PR never consumes a slot.
-func countOpenAgentPRs(repos []repoInput) (map[string]int, int) {
+//
+// An autonomous lane's PRs are left out of the global total entirely: that cap
+// is the operator's review capacity, and nobody reviews them. They still count
+// per repo, where the bound is conflicting concurrent PRs rather than review.
+func countOpenAgentPRs(repos []repoInput, autonomous func(repo string) bool) (map[string]int, int) {
 	byRepo := make(map[string]int, len(repos))
 	total := 0
 	for _, r := range repos {
+		// Resolved once per repo: the answer cannot change within one repo, and
+		// ResolveLane walks every lane's globs.
+		skipGlobal := autonomous(r.Name)
 		for _, pr := range r.PRs {
 			for _, i := range r.Issues {
 				if dispatch.ClosesIssue(pr.Body, i.Number) {
 					byRepo[r.Name]++
-					total++
+					if !skipGlobal {
+						total++
+					}
 					break
 				}
 			}
@@ -243,13 +482,37 @@ func countOpenAgentPRs(repos []repoInput) (map[string]int, int) {
 	return byRepo, total
 }
 
+// laneCounts reads each configured lane's spent counter for the occurrence it
+// is currently in. The implicit default lane is bounded by the nightly cap, not
+// by a lane ceiling, so it needs no entry here.
+func laneCounts(state dispatch.State, cfg dispatch.Config, now time.Time) map[string]int {
+	out := make(map[string]int, len(cfg.Lanes))
+	for _, l := range cfg.Lanes {
+		out[l.Name] = state.DispatchesInLane(l.Name, l.WindowStart(cfg.Schedule, now))
+	}
+	return out
+}
+
 // applyDecisions writes the one label the dispatcher owns, then persists the
-// nightly counter. It never writes agent:* or model:* — model choice belongs
-// to agent-workflow's classify-task.sh.
-func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, now time.Time) error {
-	dispatched := 0
+// ledger and the nightly counter. It never writes agent:* or model:* — model
+// choice belongs to agent-workflow's classify-task.sh.
+func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing tickTiming, cfg dispatch.Config) error {
+	var runs []usage.Run
+	var dispatchErr error
+
+	laneDispatched := map[string]int{}
 	for _, d := range ds {
 		if !d.Dispatch {
+			continue
+		}
+		lane := d.Candidate.Lane
+		if lane.DryRun {
+			// The lane is being observed, not run: it applies no label and
+			// books no spend. Its own counter still advances and still
+			// persists, so `max_dispatches` bounds the observation week the
+			// way it will bound the live lane — otherwise every tick reports
+			// a full lane's worth of decisions and `status` reads 0 spent.
+			laneDispatched[lane.Name]++
 			continue
 		}
 		gh, ok := clientFor("github").(*forge.GithubClient)
@@ -257,21 +520,80 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 			continue
 		}
 		owner, repo, num := d.Candidate.Owner, d.Candidate.Repo, d.Candidate.Issue.Number
-		if _, err := gh.AddLabels(ctx, owner, repo, num, []string{dispatch.LabelAIImplement}); err != nil {
-			return fmt.Errorf("label %s#%d: %w", repo, num, err)
+		if _, err := gh.AddLabels(ctx, owner, repo, num, lane.EffectiveLabels()); err != nil {
+			dispatchErr = fmt.Errorf("label %s#%d: %w", repo, num, err)
+			break
 		}
+		// The label is the pipeline's trigger, so from here the run is real and
+		// has to be booked even if the follow-up comment fails. Booking only on
+		// the all-succeeded path under-counted spend whenever a forge call
+		// failed mid-loop — the fail-open direction the rung exists to prevent.
+		runs = append(runs, usage.Run{
+			At: timing.Now, Repo: repo, Issue: num, EstUSD: cfg.Budget.MeanRunCostUSD,
+		})
+		laneDispatched[lane.Name]++
 		if _, err := gh.CommentIssue(ctx, owner, repo, num,
 			"Dispatched by `bridge dispatch`."); err != nil {
-			return fmt.Errorf("comment %s#%d: %w", repo, num, err)
+			dispatchErr = fmt.Errorf("comment %s#%d: %w", repo, num, err)
+			break
 		}
-		dispatched++
 	}
-	state.DispatchedTonight = state.NightBudgetUsed(now) + dispatched
-	if state.NightBudgetUsed(now) == 0 {
-		state.NightStartedAt = now
+
+	// Persist what actually happened before surfacing any dispatch error: the
+	// labels are already on the forge, so dropping their accounting would let
+	// the next tick spend the same headroom twice.
+	//
+	// The two stores are independent on purpose — a failing ledger write must
+	// not also discard the nightly counter, or three issues labelled at 23:00
+	// with a full cache disk would lose both records and let the 00:00 tick
+	// dispatch three more past the cap. Fail-open in two dimensions at once.
+	ledgerErr := recordRuns(dispatchLedgerPath(), runs, timing.Now)
+
+	if timing.NightCapApplies {
+		base := state.DispatchesSince(timing.NightStart)
+		if base == 0 {
+			state.NightStartedAt = timing.Now
+		}
+		state.DispatchedTonight = base + len(runs)
 	}
-	state.LastTick = now
-	return dispatch.WriteState(dispatchStatePath(), state)
+	for _, l := range cfg.Lanes {
+		if n := laneDispatched[l.Name]; n > 0 {
+			state.RecordLaneDispatch(l.Name, l.WindowStart(cfg.Schedule, timing.Now), timing.Now, n)
+		}
+	}
+	state.LastTick = timing.Now
+	stateErr := dispatch.WriteState(dispatchStatePath(), state)
+
+	return errors.Join(dispatchErr, ledgerErr, stateErr)
+}
+
+// recordRuns appends runs to the ledger and trims history outside the window
+// anyone reads.
+//
+// The reload sits immediately before the write to keep the read-modify-write
+// window as small as possible. It does not close it: an overlapping writer's
+// runs can still be lost. A file lock would, but needs per-platform syscalls
+// and bridge ships a Windows build — disproportionate for an hourly timer
+// racing a hand-run command, and the failure is a slight under-count rather
+// than a corrupt file.
+func recordRuns(path string, runs []usage.Run, now time.Time) error {
+	if len(runs) == 0 {
+		return nil
+	}
+	ledger, err := usage.LoadLedger(path)
+	if err != nil {
+		return fmt.Errorf("read usage ledger: %w", err)
+	}
+	for _, r := range runs {
+		ledger.Append(r)
+	}
+	// Only the trailing window is ever summed; a week of history is plenty for
+	// calibration and keeps the file bounded.
+	ledger.Prune(now.AddDate(0, 0, -7))
+	if err := usage.WriteLedger(path, ledger); err != nil {
+		return fmt.Errorf("write usage ledger: %w", err)
+	}
+	return nil
 }
 
 // setPaused flips the dispatcher's paused flag in local state and reports the
@@ -295,9 +617,10 @@ func setPaused(cmd *cobra.Command, paused bool) error {
 }
 
 // runDispatchStatus reports the configured caps and local dispatch state.
-// It reads no network state: in-flight PR counts would require a repo fetch,
-// which is out of scope for a v1 status command — this stays as cheap and
-// side-effect-free as pause/resume.
+// It makes no network call: in-flight PR counts would require a repo fetch,
+// which is out of scope for a v1 status command. The trailing-window usage it
+// reports comes from local sources only (transcripts + the run ledger), which
+// keeps that property intact.
 func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 	cfg, err := dispatch.LoadConfig(dispatchConfigPath())
 	if err != nil {
@@ -308,28 +631,151 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 
+	now := time.Now()
+	timing := resolveTiming(cfg, now)
+	measureFrom := timing.MeasureFrom
+	if measureFrom.IsZero() {
+		// Unguarded right now, but the operator still wants a reading, so show
+		// the plain trailing window.
+		measureFrom = now.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
+	}
+	usedUSD, usedKnown := measureWindowUSD(context.Background(), cfg, measureFrom, now)
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
+
 	if dispatchJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
-			Limits            dispatch.Limits `json:"limits"`
-			Paused            bool            `json:"paused"`
-			DispatchedTonight int             `json:"dispatched_tonight"`
-			LastTick          time.Time       `json:"last_tick,omitempty"`
+			Limits            dispatch.Limits  `json:"limits"`
+			Paused            bool             `json:"paused"`
+			DispatchedTonight int              `json:"dispatched_tonight"`
+			LastTick          time.Time        `json:"last_tick,omitempty"`
+			BudgetWindowHours float64          `json:"budget_window_hours"`
+			BudgetUsedUSD     float64          `json:"budget_used_usd"`
+			BudgetLimitUSD    float64          `json:"budget_limit_usd"`
+			BudgetKnown       bool             `json:"budget_known"`
+			BudgetRungActive  bool             `json:"budget_rung_active"`
+			NightCapApplies   bool             `json:"night_cap_applies"`
+			Lanes             []laneStatusJSON `json:"lanes,omitempty"`
 		}{
 			Limits:            cfg.Limits,
 			Paused:            state.Paused,
-			DispatchedTonight: state.NightBudgetUsed(time.Now()),
+			DispatchedTonight: state.DispatchesSince(timing.NightStart),
 			LastTick:          state.LastTick,
+			BudgetWindowHours: cfg.Budget.WindowHours,
+			BudgetUsedUSD:     budget.UsedUSD,
+			BudgetLimitUSD:    budget.LimitUSD,
+			BudgetKnown:       !budget.Unknown,
+			BudgetRungActive:  budget.Enabled,
+			NightCapApplies:   timing.NightCapApplies,
+			Lanes:             laneStatuses(cfg, state, now),
 		})
 	}
 
 	w := cmd.OutOrStdout()
 	fmt.Fprintf(w, "paused: %t\n", state.Paused)
-	fmt.Fprintf(w, "dispatched tonight: %d/%d\n", state.NightBudgetUsed(time.Now()), cfg.Limits.MaxDispatchesPerNight)
+	// Report the count against the most recent unattended window either way:
+	// "how many did it dispatch overnight?" is a fair question at 09:00, and
+	// answering n/a made the number unrecoverable from the CLI. Only the label
+	// changes with whether the cap is currently in force.
+	nightCount := state.DispatchesSince(nightStartForReport(cfg, timing, now))
+	if timing.NightCapApplies {
+		fmt.Fprintf(w, "dispatched tonight: %d/%d\n", nightCount, cfg.Limits.MaxDispatchesPerNight)
+	} else {
+		fmt.Fprintf(w, "dispatched last night: %d/%d (cap not in force for this window)\n",
+			nightCount, cfg.Limits.MaxDispatchesPerNight)
+	}
 	fmt.Fprintf(w, "per-repo cap: %d, global cap: %d\n", cfg.Limits.PerRepo, cfg.Limits.GlobalOpenPRs)
+	if budget.Unknown {
+		fmt.Fprintf(w, "budget window: %gh — usage unreadable, daytime dispatch blocked\n", cfg.Budget.WindowHours)
+	} else {
+		pct := 0.0
+		if budget.LimitUSD > 0 {
+			pct = budget.UsedUSD / budget.LimitUSD * 100
+		}
+		fmt.Fprintf(w, "budget window: %gh — used $%.2f of $%.2f (%.0f%%)\n",
+			cfg.Budget.WindowHours, budget.UsedUSD, budget.LimitUSD, pct)
+	}
+	fmt.Fprintf(w, "budget rung: %s\n", rungLabel(timing))
 	if state.LastTick.IsZero() {
 		fmt.Fprintln(w, "last tick: never")
 	} else {
 		fmt.Fprintf(w, "last tick: %s\n", state.LastTick.Format(time.RFC3339))
 	}
+	for _, l := range cfg.Lanes {
+		start := l.WindowStart(cfg.Schedule, now)
+		spent := state.DispatchesInLane(l.Name, start)
+		mode := "live"
+		if l.DryRun {
+			mode = "dry-run"
+		}
+		ceiling := "∞"
+		if l.Limits.MaxDispatches > 0 {
+			ceiling = strconv.Itoa(l.Limits.MaxDispatches)
+		}
+		fmt.Fprintf(w, "lane %s: %s, autonomous=%t, dispatched %d/%s this window\n",
+			l.Name, mode, l.Autonomous, spent, ceiling)
+	}
 	return nil
+}
+
+// laneStatusJSON reports one lane's configuration and spent counter.
+type laneStatusJSON struct {
+	Name          string `json:"name"`
+	Autonomous    bool   `json:"autonomous"`
+	DryRun        bool   `json:"dry_run"`
+	Dispatched    int    `json:"dispatched"`
+	MaxDispatches int    `json:"max_dispatches,omitempty"`
+	InWindow      bool   `json:"in_window"`
+}
+
+func laneStatuses(cfg dispatch.Config, state dispatch.State, now time.Time) []laneStatusJSON {
+	out := make([]laneStatusJSON, 0, len(cfg.Lanes))
+	for _, l := range cfg.Lanes {
+		out = append(out, laneStatusJSON{
+			Name:          l.Name,
+			Autonomous:    l.Autonomous,
+			DryRun:        l.DryRun,
+			Dispatched:    state.DispatchesInLane(l.Name, l.WindowStart(cfg.Schedule, now)),
+			MaxDispatches: l.Limits.MaxDispatches,
+			InWindow:      l.InWindow(cfg.Schedule, now),
+		})
+	}
+	return out
+}
+
+// nightStartForReport resolves the occurrence the nightly counter belongs to
+// for display. Inside an unattended window that is the tick's own boundary;
+// elsewhere it is the latest unattended window's start, so `status` can still
+// report what the last night spent instead of dropping the number.
+func nightStartForReport(cfg dispatch.Config, timing tickTiming, now time.Time) time.Time {
+	if !timing.NightStart.IsZero() {
+		return timing.NightStart
+	}
+	var latest time.Time
+	for _, w := range cfg.Schedule.Windows {
+		if w.BudgetRung {
+			continue
+		}
+		if s := w.StartOf(now); !s.IsZero() && (latest.IsZero() || s.After(latest)) {
+			latest = s
+		}
+	}
+	return latest
+}
+
+// rungLabel describes whether the budget rung is policing this moment, and
+// which window that decision came from.
+func rungLabel(t tickTiming) string {
+	switch {
+	case t.RungOn && t.InWindow && t.Window.BudgetRung:
+		return fmt.Sprintf("active (window %s-%s)", t.Window.From, t.Window.To)
+	case t.RungOn:
+		// The shoulder: still in an unguarded window, but close enough to the
+		// handover that this spend survives into the operator's quota window.
+		return fmt.Sprintf("active (reserving headroom for the %s handover)",
+			t.Guard.Format("15:04"))
+	case !t.InWindow:
+		return "inactive (outside every configured window)"
+	default:
+		return fmt.Sprintf("inactive (window %s-%s)", t.Window.From, t.Window.To)
+	}
 }

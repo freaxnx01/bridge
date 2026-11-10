@@ -2,16 +2,20 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
+	"github.com/freaxnx01/bridge/internal/usage"
 	"github.com/spf13/cobra"
 )
 
@@ -51,11 +55,12 @@ func TestCollectCandidatesSkipsNonGithubAndIneligible(t *testing.T) {
 	repos := []repoInput{
 		{Forge: "github", Owner: "o", Name: "quotes",
 			Issues: []forge.Issue{
-				{Number: 41, Labels: []string{"feat"}},
-				{Number: 42, Labels: []string{"needs-enrichment"}},
+				{Number: 41, Body: "a real description\n## Implementation Plan\n- step", Labels: []string{"feat"}},
+				{Number: 42, Body: "d", Labels: []string{"needs-enrichment"}},
+				{Number: 31, Body: ""}, // capture-created, no body, no labels
 			}},
 		{Forge: "forgejo", Owner: "f", Name: "notes",
-			Issues: []forge.Issue{{Number: 1, Labels: []string{"feat"}}}},
+			Issues: []forge.Issue{{Number: 1, Body: "d\n## Implementation Plan\n- step", Labels: []string{"feat"}}}},
 	}
 
 	got := collectCandidates(repos)
@@ -102,6 +107,7 @@ func TestSetPausedTogglesState(t *testing.T) {
 func TestRunDispatchStatusJSON(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 
 	if err := dispatch.WriteState(dispatchStatePath(), dispatch.State{Paused: true, DispatchedTonight: 2}); err != nil {
 		t.Fatalf("WriteState: %v", err)
@@ -141,8 +147,9 @@ func setDispatchFlags(t *testing.T, jsonOut, dryRun bool) {
 func TestRunDispatch_JSONLiveTick_CallsApplyDecisions(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
-	t.Setenv("BRIDGE_BASE", t.TempDir()) // exists but has no repos: fetchRepoInputs finds nothing
-	setDispatchFlags(t, true, false)     // --json, no --dry-run
+	t.Setenv("BRIDGE_BASE", t.TempDir())                                     // exists but has no repos: fetchRepoInputs finds nothing
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent")) // never touch the real ~/.claude in a test
+	setDispatchFlags(t, true, false)                                         // --json, no --dry-run
 
 	cmd := &cobra.Command{}
 	var out bytes.Buffer
@@ -177,6 +184,7 @@ func TestRunDispatch_JSONLiveTick_CallsApplyDecisions(t *testing.T) {
 func TestDispatchSubcommands_InheritPersistentFlags(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	t.Cleanup(func() { dispatchJSON, dispatchDryRun, dispatchAuto = false, false, false })
 
 	var out bytes.Buffer
@@ -225,8 +233,8 @@ func TestRunDispatch_FullPipeline_AppliesOnlyEligibleLabel(t *testing.T) {
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
 			w.Header().Set("Content-Type", "application/json")
 			w.Write([]byte(`[
-				{"number":41,"title":"eligible issue","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"},
-				{"number":42,"title":"already dispatched","html_url":"u42","labels":[{"name":"ai-implement"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"},
+				{"number":42,"title":"already dispatched","body":"a real description","html_url":"u42","labels":[{"name":"ai-implement"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
 			]`))
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
 			w.Write([]byte(`[]`))
@@ -254,6 +262,7 @@ func TestRunDispatch_FullPipeline_AppliesOnlyEligibleLabel(t *testing.T) {
 	t.Setenv("GH_TOKEN", "tok")
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	setDispatchFlags(t, false, false)
 
 	cmd := &cobra.Command{}
@@ -283,6 +292,7 @@ func TestRunDispatch_DryRunJSON_SkipsApplyDecisions(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
 	t.Setenv("BRIDGE_BASE", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
 	setDispatchFlags(t, true, true) // --json --dry-run: dry-run always wins
 
 	cmd := &cobra.Command{}
@@ -299,5 +309,700 @@ func TestRunDispatch_DryRunJSON_SkipsApplyDecisions(t *testing.T) {
 	}
 	if !state.LastTick.IsZero() {
 		t.Errorf("want LastTick unset (--dry-run must skip applyDecisions), got %v", state.LastTick)
+	}
+}
+
+func TestMeasureWindowUSDCountsBothSources(t *testing.T) {
+	projects := t.TempDir()
+	cache := t.TempDir()
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", projects)
+	t.Setenv("XDG_CACHE_HOME", cache)
+
+	now := time.Now().UTC()
+
+	// One interactive turn: 1M output tokens of opus at 75 USD/Mtok.
+	line := `{"type":"assistant","timestamp":"` + now.Add(-time.Hour).Format(time.RFC3339) +
+		`","message":{"model":"claude-opus-4-7","usage":{"input_tokens":0,"output_tokens":1000000,` +
+		`"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`
+	dir := filepath.Join(projects, "proj")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(line+"\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	// One dispatched run in the ledger.
+	var l usage.Ledger
+	l.Append(usage.Run{At: now.Add(-time.Minute), Repo: "bridge", Issue: 254, EstUSD: 2})
+	if err := usage.WriteLedger(dispatchLedgerPath(), l); err != nil {
+		t.Fatal(err)
+	}
+
+	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), now.Add(-5*time.Hour), now)
+	if !ok {
+		t.Fatal("measurement should be known")
+	}
+	if diff := got - 77.0; diff > 0.01 || diff < -0.01 {
+		t.Errorf("want 75 interactive + 2 pipeline = 77, got %v", got)
+	}
+}
+
+func TestMeasureWindowUSDMissingSourcesAreZeroNotUnknown(t *testing.T) {
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now().Add(-5*time.Hour), time.Now())
+	if !ok || got != 0 {
+		t.Errorf("a fresh install has measured zero usage, not unknown: got=%v ok=%v", got, ok)
+	}
+}
+
+func TestMeasureWindowUSDUnreadableLedgerIsUnknown(t *testing.T) {
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	cache := t.TempDir()
+	t.Setenv("XDG_CACHE_HOME", cache)
+
+	// Corrupt ledger: readable file, invalid JSON.
+	path := dispatchLedgerPath()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now().Add(-5*time.Hour), time.Now()); ok {
+		t.Error("a corrupt ledger must report unknown so the rung fails closed")
+	}
+}
+
+func TestTranscriptRootHonoursTheEnvOverride(t *testing.T) {
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", "/tmp/somewhere")
+	if got := transcriptRoot(); got != "/tmp/somewhere" {
+		t.Errorf("got %q", got)
+	}
+}
+
+func TestRunDispatchStatusReportsBudget(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	if err := runDispatchStatus(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+	out := buf.String()
+	if !strings.Contains(out, "budget window:") {
+		t.Errorf("status must report the budget window:\n%s", out)
+	}
+	if !strings.Contains(out, "9.60") {
+		t.Errorf("status must show the limit (12.00 * 0.80):\n%s", out)
+	}
+}
+
+func TestRunDispatchStatusJSONCarriesBudgetFields(t *testing.T) {
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+
+	dispatchJSON = true
+	t.Cleanup(func() { dispatchJSON = false })
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+	if err := runDispatchStatus(cmd, nil); err != nil {
+		t.Fatal(err)
+	}
+
+	var got struct {
+		BudgetUsedUSD  float64 `json:"budget_used_usd"`
+		BudgetLimitUSD float64 `json:"budget_limit_usd"`
+		BudgetKnown    bool    `json:"budget_known"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &got); err != nil {
+		t.Fatal(err)
+	}
+	if diff := got.BudgetLimitUSD - 9.6; diff > 0.0001 || diff < -0.0001 || !got.BudgetKnown {
+		t.Errorf("%+v", got)
+	}
+}
+
+func TestRunDispatchAutoOutsideWindowSkipsBeforeFetching(t *testing.T) {
+	cfgDir := t.TempDir()
+	t.Setenv("XDG_CONFIG_HOME", cfgDir)
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+
+	// A window that cannot contain "now": one minute wide, three hours ahead.
+	// Deliberately not now-1h — on a fall-back DST day the repeated hour gives
+	// now-1h the same wall-clock HH:MM as now, the window then covers now, and
+	// the test falls through into a real fetch once a year.
+	future := time.Now().Add(3 * time.Hour)
+	body := `{"schedule":{"windows":[{"from":"` + future.Format("15:04") + `","to":"` +
+		future.Add(time.Minute).Format("15:04") + `","budget_rung":false}]}}`
+	if err := os.MkdirAll(filepath.Join(cfgDir, "bridge"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(cfgDir, "bridge", "dispatch.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	dispatchAuto = true
+	t.Cleanup(func() { dispatchAuto = false })
+
+	var buf bytes.Buffer
+	cmd := &cobra.Command{}
+	cmd.SetOut(&buf)
+
+	// No forge client is configured here: reaching the fetch would fail, so a
+	// clean return is itself the assertion that the gate ran first.
+	if err := runDispatch(cmd, nil); err != nil {
+		t.Fatalf("out-of-window tick must return cleanly: %v", err)
+	}
+	if !strings.Contains(buf.String(), "outside dispatch window") {
+		t.Errorf("got %q", buf.String())
+	}
+}
+
+// recordRuns is what the budget rung trusts to know what the pipeline spent,
+// so it needs a direct assertion rather than incidental execution.
+func TestRecordRunsBooksEveryRunAndPrunesOldHistory(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	now := time.Now().UTC()
+	path := dispatchLedgerPath()
+
+	// Pre-existing history: one entry inside the retention window, one outside.
+	seed := usage.Ledger{Runs: []usage.Run{
+		{At: now.Add(-2 * time.Hour), Repo: "old-but-kept", Issue: 1, EstUSD: 9},
+		{At: now.AddDate(0, 0, -30), Repo: "expired", Issue: 2, EstUSD: 9},
+	}}
+	if err := usage.WriteLedger(path, seed); err != nil {
+		t.Fatal(err)
+	}
+
+	runs := []usage.Run{
+		{At: now, Repo: "bridge", Issue: 254, EstUSD: 2},
+		{At: now, Repo: "quotes", Issue: 41, EstUSD: 2},
+	}
+	if err := recordRuns(path, runs, now); err != nil {
+		t.Fatal(err)
+	}
+
+	got, err := usage.LoadLedger(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got.Runs) != 3 {
+		t.Fatalf("want 2 new + 1 retained = 3 runs, got %d: %+v", len(got.Runs), got.Runs)
+	}
+	byIssue := map[int]usage.Run{}
+	for _, r := range got.Runs {
+		byIssue[r.Issue] = r
+	}
+	for _, n := range []int{254, 41} {
+		if r, ok := byIssue[n]; !ok || r.EstUSD != 2 {
+			t.Errorf("issue %d not booked at the mean: %+v (ok=%v)", n, r, ok)
+		}
+	}
+	if byIssue[254].Repo != "bridge" || byIssue[41].Repo != "quotes" {
+		t.Errorf("repos mismatched: %+v", got.Runs)
+	}
+	if _, expired := byIssue[2]; expired {
+		t.Error("a 30-day-old run must be pruned")
+	}
+	if _, kept := byIssue[1]; !kept {
+		t.Error("a 2-hour-old run must be retained")
+	}
+	if sum := got.SumSince(now.Add(-5 * time.Hour)); sum != 13 {
+		t.Errorf("trailing-window sum = %v, want 9 + 2 + 2 = 13", sum)
+	}
+}
+
+func TestRecordRunsNoRunsLeavesTheLedgerAlone(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	if err := recordRuns(dispatchLedgerPath(), nil, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(dispatchLedgerPath()); !os.IsNotExist(err) {
+		t.Errorf("an empty tick must not create the ledger file: %v", err)
+	}
+}
+
+// The quota window is rolling, so spend late in the night is still inside it
+// when the operator starts work. resolveTiming must therefore arm the rung in
+// the shoulder before a rung window and measure only the span that survives to
+// the handover.
+func TestResolveTimingGuardsTheMorningHandover(t *testing.T) {
+	cfg := dispatch.DefaultConfig() // 18:00-07:00 no rung, 07:00-18:00 rung; 5h window
+	day := func(h, m int) time.Time { return time.Date(2026, 9, 18, h, m, 0, 0, time.Local) }
+
+	tests := []struct {
+		name            string
+		now             time.Time
+		wantRung        bool
+		wantMeasureFrom time.Time
+		wantNightCap    bool
+	}{
+		{
+			name: "deep night burns freely", now: day(23, 0),
+			wantRung: false, wantNightCap: true,
+		},
+		{
+			// 01:00 + 5h = 06:00, aged out before the handover.
+			name: "01:00 is still outside the shoulder", now: day(1, 0),
+			wantRung: false, wantNightCap: true,
+		},
+		{
+			// 05:00 + 5h = 10:00: this spend is in the operator's window at
+			// 07:00, so it is measured against the 02:00-07:00 span.
+			name: "05:00 is guarded for the 07:00 handover", now: day(5, 0),
+			wantRung: true, wantMeasureFrom: day(2, 0), wantNightCap: true,
+		},
+		{
+			name: "midday measures the plain trailing window", now: day(12, 0),
+			wantRung: true, wantMeasureFrom: day(7, 0), wantNightCap: false,
+		},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := resolveTiming(cfg, tc.now)
+			if got.RungOn != tc.wantRung {
+				t.Fatalf("RungOn=%v want %v", got.RungOn, tc.wantRung)
+			}
+			if tc.wantRung && !got.MeasureFrom.Equal(tc.wantMeasureFrom) {
+				t.Errorf("MeasureFrom=%v want %v", got.MeasureFrom, tc.wantMeasureFrom)
+			}
+			if got.NightCapApplies != tc.wantNightCap {
+				t.Errorf("NightCapApplies=%v want %v", got.NightCapApplies, tc.wantNightCap)
+			}
+		})
+	}
+}
+
+// The concrete failure the shoulder exists to stop: the night has already
+// spent the operator's window, and a 05:00 tick must refuse rather than hand
+// over a window with no headroom left.
+func TestShoulderRefusesWhenTheHandoverWindowIsAlreadySpent(t *testing.T) {
+	cfg := dispatch.DefaultConfig()
+	timing := resolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
+	if !timing.RungOn {
+		t.Fatal("05:00 must be guarded")
+	}
+
+	// $9.00 already spent inside the 02:00-07:00 span; the limit is 12.00*0.80.
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, 9.0, true)
+	ds := dispatch.ApplyCaps(
+		[]dispatch.Candidate{{Repo: "bridge", Issue: forge.Issue{Number: 254}}},
+		cfg,
+		dispatch.Counts{NightCapApplies: timing.NightCapApplies},
+		budget,
+	)
+	if ds[0].Dispatch {
+		t.Errorf("a run projected at $2 on top of $9 would cross $9.60: %+v", ds[0])
+	}
+	if !strings.HasPrefix(ds[0].Reason, "budget-exhausted") {
+		t.Errorf("reason = %q", ds[0].Reason)
+	}
+}
+
+// And the converse: an unspent handover window still lets the night work.
+func TestShoulderAllowsWhenTheHandoverWindowHasHeadroom(t *testing.T) {
+	cfg := dispatch.DefaultConfig()
+	timing := resolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
+	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, 1.0, true)
+	ds := dispatch.ApplyCaps(
+		[]dispatch.Candidate{{Repo: "bridge", Issue: forge.Issue{Number: 254}}},
+		cfg,
+		dispatch.Counts{NightCapApplies: timing.NightCapApplies},
+		budget,
+	)
+	if !ds[0].Dispatch {
+		t.Errorf("$1 spent leaves room for a $2 run under $9.60: %+v", ds[0])
+	}
+}
+
+// pinUnattendedSchedule writes a dispatch.json whose single window covers the
+// whole day with the budget rung off (from == to is an always-on window).
+//
+// Without it, a command-layer dispatch test depends on the wall-clock hour:
+// under the default windows a run between 07:00 and 18:00 local arms the rung,
+// which measures usage — so a test that deliberately breaks the ledger also
+// breaks the measurement, fail-closed refuses every candidate, and nothing is
+// dispatched. That passed locally in the evening and failed in CI at 17:54 UTC.
+func pinUnattendedSchedule(t *testing.T) {
+	t.Helper()
+	dir := filepath.Join(os.Getenv("XDG_CONFIG_HOME"), "bridge")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	body := `{"schedule":{"windows":[{"from":"00:00","to":"00:00","budget_rung":false}]}}`
+	if err := os.WriteFile(filepath.Join(dir, "dispatch.json"), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// A dispatched run is real the moment its label lands, so a failing follow-up
+// comment must not un-book it. Booking only on the all-succeeded path lost
+// real spend whenever a forge call failed mid-loop — the fail-open direction
+// the budget rung exists to prevent.
+func TestRunDispatchBooksTheRunWhenTheCommentFails(t *testing.T) {
+	var labelCalls, commentCalls int
+
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+			]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
+			w.Write([]byte(`[]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+			w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/labels":
+			labelCalls++
+			w.Write([]byte(`[{"name":"ai-implement"}]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/comments":
+			// The label already landed; the comment is what fails.
+			commentCalls++
+			w.WriteHeader(http.StatusInternalServerError)
+			w.Write([]byte(`{"message":"boom"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	root := writeFakeGithubRepo(t, "freaxnx01", "bridge")
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	t.Setenv("GH_TOKEN", "tok")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	setDispatchFlags(t, false, false)
+	pinUnattendedSchedule(t)
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := runDispatch(cmd, nil)
+	if err == nil {
+		t.Fatal("the failing comment must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "comment") {
+		t.Errorf("error should name the failing call: %v", err)
+	}
+	if labelCalls != 1 || commentCalls != 1 {
+		t.Fatalf("labelCalls=%d commentCalls=%d", labelCalls, commentCalls)
+	}
+
+	// The run is booked despite the error, because #41 carries the label and
+	// the pipeline will act on it.
+	ledger, lerr := usage.LoadLedger(dispatchLedgerPath())
+	if lerr != nil {
+		t.Fatal(lerr)
+	}
+	if len(ledger.Runs) != 1 {
+		t.Fatalf("want the labelled run booked, got %d runs: %+v", len(ledger.Runs), ledger.Runs)
+	}
+	if ledger.Runs[0].Issue != 41 || ledger.Runs[0].Repo != "bridge" {
+		t.Errorf("booked the wrong run: %+v", ledger.Runs[0])
+	}
+
+	// And the local state was still written, so LastTick advanced.
+	state, serr := dispatch.ReadState(dispatchStatePath())
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if state.LastTick.IsZero() {
+		t.Error("state must be persisted even when the tick errored")
+	}
+}
+
+func TestDecisionStatus(t *testing.T) {
+	auto := dispatch.Lane{Name: "auto", Autonomous: true}
+	dry := dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true}
+
+	tests := []struct {
+		name string
+		d    dispatch.Decision
+		want string
+	}{
+		{"live dispatch", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: auto}, Dispatch: true}, "dispatch"},
+		{"dry-run dispatch", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: dry}, Dispatch: true}, "WOULD dispatch (dry-run)"},
+		{"skip", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: auto}, Reason: "repo at WIP 1/1"},
+			"SKIP (repo at WIP 1/1)"},
+		{"skip after a lane downgrade shows both", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: dispatch.Lane{Name: "hitl"},
+				LaneReason: "auto→hitl: agent.yml lacks ai-review-ai-merge: true"},
+			Reason: "global cap 3/3"},
+			"SKIP (auto→hitl: agent.yml lacks ai-review-ai-merge: true; global cap 3/3)"},
+		{"a downgrade is still visible on a dispatch", dispatch.Decision{
+			Candidate: dispatch.Candidate{Lane: dispatch.Lane{Name: "hitl"},
+				LaneReason: "auto→hitl: agent.yml lacks ai-review-ai-merge: true"},
+			Dispatch: true},
+			"dispatch (auto→hitl: agent.yml lacks ai-review-ai-merge: true)"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := decisionStatus(tc.d); got != tc.want {
+				t.Errorf("got %q want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestRenderDecisionsShowsTheLaneColumn(t *testing.T) {
+	var buf bytes.Buffer
+	renderDecisions(&buf, []dispatch.Decision{{
+		Candidate: dispatch.Candidate{
+			Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 14, Title: "fix: card flip race"},
+			Lane: dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true},
+		},
+		Dispatch: true,
+	}})
+
+	out := buf.String()
+	if !strings.Contains(out, "auto") || !strings.Contains(out, "WOULD dispatch (dry-run)") {
+		t.Errorf("lane column and dry-run status must both show:\n%s", out)
+	}
+}
+
+func TestDecisionsJSONCarriesTheLane(t *testing.T) {
+	js := decisionsJSON([]dispatch.Decision{{
+		Candidate: dispatch.Candidate{
+			Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 14, Title: "fix: card flip race"},
+			Lane: dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true},
+		},
+		Dispatch: true,
+	}})
+
+	if len(js) != 1 {
+		t.Fatalf("%+v", js)
+	}
+	got := js[0]
+	if got.Lane != "auto" || !got.DryRun || got.Repo != "game-tschau-sepp" || got.Issue != 14 {
+		t.Errorf("%+v", got)
+	}
+	if !slices.Equal(got.Labels, []string{"ai-implement", "ai-review-ai-merge"}) {
+		t.Errorf("labels: %v", got.Labels)
+	}
+}
+
+func TestAssignLanes(t *testing.T) {
+	lanes := []dispatch.Lane{
+		{Name: "auto", Repos: []string{"game-*"}, Autonomous: true},
+		{Name: "hitl", Repos: []string{"*"}},
+	}
+	cs := []dispatch.Candidate{
+		{Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 1}},
+		{Repo: "game-huusli-jagd", Issue: forge.Issue{Number: 2}},
+		{Repo: "bridge", Issue: forge.Issue{Number: 3}},
+	}
+
+	assignLanes(cs, lanes, dispatch.GateState{"game-tschau-sepp": true})
+
+	if cs[0].Lane.Name != "auto" || cs[0].LaneReason != "" {
+		t.Errorf("gated repo stays in auto: %+v", cs[0])
+	}
+	if cs[1].Lane.Name != "hitl" || cs[1].LaneReason == "" {
+		t.Errorf("ungated repo falls back with a reason: %+v", cs[1])
+	}
+	if cs[2].Lane.Name != "hitl" {
+		t.Errorf("catch-all: %+v", cs[2])
+	}
+}
+
+func TestCountOpenAgentPRsExcludesAutonomousRepos(t *testing.T) {
+	repos := []repoInput{
+		{Forge: "github", Owner: "freaxnx01", Name: "game-tschau-sepp",
+			Issues: []forge.Issue{{Number: 1}},
+			PRs:    []forge.PullRequest{{Body: "Closes #1"}}},
+		{Forge: "github", Owner: "freaxnx01", Name: "bridge",
+			Issues: []forge.Issue{{Number: 9}},
+			PRs:    []forge.PullRequest{{Body: "Closes #9"}}},
+	}
+	autonomous := func(repo string) bool { return repo == "game-tschau-sepp" }
+
+	byRepo, global := countOpenAgentPRs(repos, autonomous)
+
+	if global != 1 {
+		t.Errorf("only human-reviewed PRs spend review capacity: global=%d want 1", global)
+	}
+	// The per-repo count still has to include it — per_repo bounds conflicting
+	// PRs in one repo, which is true in either lane.
+	if byRepo["game-tschau-sepp"] != 1 {
+		t.Errorf("per-repo count: %+v", byRepo)
+	}
+}
+
+// The ledger and the local state are independent stores. A failing ledger
+// write must not also discard the nightly counter and LastTick — losing both
+// would let the next tick spend the same headroom again, fail-open in two
+// dimensions at once. The ledger path is poisoned with a directory so its
+// write fails while the state write (a sibling file) still succeeds.
+func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+			]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
+			w.Write([]byte(`[]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+			w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/labels":
+			w.Write([]byte(`[{"name":"ai-implement"}]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/comments":
+			w.WriteHeader(http.StatusCreated)
+			w.Write([]byte(`{"id":1,"body":"x","created_at":"2026-07-01T00:00:00Z"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer srv.Close()
+
+	root := writeFakeGithubRepo(t, "freaxnx01", "bridge")
+	t.Setenv("BRIDGE_REPOS_ROOT", root)
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	t.Setenv("GH_TOKEN", "tok")
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	setDispatchFlags(t, false, false)
+	pinUnattendedSchedule(t)
+
+	// A directory where the ledger file belongs: reading it fails with EISDIR.
+	if err := os.MkdirAll(dispatchLedgerPath(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	err := runDispatch(cmd, nil)
+	if err == nil {
+		t.Fatal("a failing ledger write must surface as an error")
+	}
+	if !strings.Contains(err.Error(), "ledger") {
+		t.Errorf("error should name the ledger: %v", err)
+	}
+
+	// The state write must still have happened.
+	state, serr := dispatch.ReadState(dispatchStatePath())
+	if serr != nil {
+		t.Fatal(serr)
+	}
+	if state.LastTick.IsZero() {
+		t.Error("LastTick must advance even though the ledger write failed")
+	}
+}
+
+// The window gate is --auto only. `bridge dispatch now` is the operator asking
+// for a tick, and before lanes it ran regardless of the schedule; a schedule
+// with a gap (documented in docs/dispatch.md) must keep behaving that way.
+func TestPartitionForTickManualTickIsNeverWindowGated(t *testing.T) {
+	cfg := dispatch.DefaultConfig()
+	cfg.Schedule = dispatch.Schedule{Windows: []dispatch.Window{
+		{Span: dispatch.Span{From: "03:00", To: "03:01"}},
+	}}
+	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local) // outside that window
+	cands := []dispatch.Candidate{{Repo: "bridge", Lane: dispatch.DefaultLane()}}
+
+	acting, skipped := partitionForTick(cands, cfg, now, false)
+	if len(acting) != 1 || len(skipped) != 0 {
+		t.Errorf("manual tick must consider every candidate: acting=%d skipped=%+v", len(acting), skipped)
+	}
+
+	acting, skipped = partitionForTick(cands, cfg, now, true)
+	if len(acting) != 0 || len(skipped) != 1 {
+		t.Errorf("--auto must honour the window: acting=%d skipped=%d", len(acting), len(skipped))
+	}
+}
+
+func TestAnyLaneActs(t *testing.T) {
+	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local)
+	gap := dispatch.Schedule{Windows: []dispatch.Window{{Span: dispatch.Span{From: "03:00", To: "03:01"}}}}
+
+	tests := []struct {
+		name string
+		cfg  dispatch.Config
+		want bool
+	}{
+		{"no lanes, schedule covers now", dispatch.Config{Schedule: dispatch.DefaultConfig().Schedule}, true},
+		{"no lanes, schedule gap", dispatch.Config{Schedule: gap}, false},
+		{"a 24h lane acts even in a schedule gap", dispatch.Config{
+			Schedule: gap,
+			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "00:00", To: "00:00"}}}},
+		}, true},
+		{"lanes all asleep, and the default lane is in a gap", dispatch.Config{
+			Schedule: gap,
+			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "22:00", To: "23:00"}}}},
+		}, false},
+		{"lanes asleep but the default lane's schedule covers now", dispatch.Config{
+			Schedule: dispatch.DefaultConfig().Schedule,
+			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "22:00", To: "23:00"}}}},
+		}, true},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := anyLaneActs(tc.cfg, now); got != tc.want {
+				t.Errorf("got %v want %v", got, tc.want)
+			}
+		})
+	}
+}
+
+// A dry-run lane applies no labels, but its own counter has to persist across
+// ticks — otherwise a half-hourly timer reports the same max_dispatches worth
+// of "WOULD dispatch" decisions 48 times a day and `status` shows 0 spent.
+func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	cfg := dispatch.DefaultConfig()
+	lane := dispatch.Lane{Name: "auto", Autonomous: true, DryRun: true,
+		Windows: []dispatch.Span{{From: "00:00", To: "00:00"}}}
+	cfg.Lanes = []dispatch.Lane{lane}
+
+	now := time.Now()
+	timing := tickTiming{Now: now}
+	ds := []dispatch.Decision{
+		{Candidate: dispatch.Candidate{Owner: "freaxnx01", Repo: "game-a",
+			Issue: forge.Issue{Number: 1}, Lane: lane}, Dispatch: true},
+		{Candidate: dispatch.Candidate{Owner: "freaxnx01", Repo: "game-b",
+			Issue: forge.Issue{Number: 2}, Lane: lane}, Dispatch: true},
+	}
+
+	if err := applyDecisions(context.Background(), ds, dispatch.State{}, timing, cfg); err != nil {
+		t.Fatalf("applyDecisions: %v", err)
+	}
+
+	state, err := dispatch.ReadState(dispatchStatePath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := state.DispatchesInLane("auto", lane.WindowStart(cfg.Schedule, now)); got != 2 {
+		t.Errorf("dry-run lane counter: got %d want 2", got)
+	}
+
+	// Nothing may have been booked as real spend.
+	ledger, err := usage.LoadLedger(dispatchLedgerPath())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(ledger.Runs) != 0 {
+		t.Errorf("a dry-run lane must book no runs: %+v", ledger.Runs)
 	}
 }

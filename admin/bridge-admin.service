@@ -1,0 +1,20 @@
+# Telegram-reachable bridge admin session (tmux bridge-admin), started at boot
+# and restarted by the built-in watchdog. Install: `just admin-install`.
+[Unit]
+Description=bridge admin session (Telegram @agent_dev_ctl_bot)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=PATH=%h/.local/bin:%h/.bun/bin:/usr/local/bin:/usr/bin:/bin
+ExecStart=%h/repos/github/freaxnx01/public/bridge/admin/run-admin-service.sh
+ExecStopPost=-/usr/bin/tmux kill-session -t bridge-admin
+Restart=always
+RestartSec=30
+# Only stop the watchdog script; the tmux server hosts other sessions too.
+KillMode=process
+WorkingDirectory=%h
+
+[Install]
+WantedBy=default.target

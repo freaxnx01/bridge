@@ -1,14 +1,83 @@
 # Bridge TODO
 
+## Session 2026-09-17/18 (#254 dispatch usage-budget rung) — merged
+
+Enriched (#277), implemented by the pipeline (#293, +1899/-115 over 12 commits),
+three review rounds, merged 2026-09-18. Issue closed as completed. Spec:
+`docs/specs/2026-09-07-dispatch-usage-budget-design.md` (D4a + D6 record the
+two post-review design amendments).
+
+- [x] Night-cap/window interaction — the nightly cap is armed by
+      `Counts.NightCapApplies` (only for a `budget_rung: false` window) and its
+      counter resets at that window's own start. `NightBudgetUsed`, `nightOf`
+      and the 12:00 pivot are gone.
+- [x] Handover guard (D6) — the rung is also armed in the `window_hours`
+      shoulder before a rung window, measuring
+      `[window_start - window_hours, now]`, so night work cannot hand over an
+      already-spent quota window at 07:00. AC #9 amended and ratified on the
+      issue.
+- [x] All 7 pre-preview concerns, plus 3 bugs the later rounds found: the
+      DST duration-arithmetic boundary, its ambiguous-hour regression, and a
+      clock-dependent test that only failed in CI.
+- [x] `claude-timeout-minutes` (#291) and the self-fix opt-in (#298).
+- [x] Merged branches and the `self-fix` worktree cleaned up.
+- [ ] **Calibrate `window_budget_usd` and `mean_run_cost_usd`** — still the
+      placeholders 12.00 and 2.00. **First reading taken 2026-09-20 14:08
+      CEST:** `$9.15` then `$13.06` of a `$9.60` limit minutes apart, from one
+      long interactive session, and `dispatch --dry-run` correctly refused all
+      89 candidates with `budget-exhausted 13.06/9.60 USD`. So the machinery is
+      verified end-to-end on real data; only the constants are unpinned.
+      Outstanding half needs a human: read `/usage` in an interactive session
+      at the same moment and compare against `bridge dispatch status`, since
+      `/usage` is TUI-only and cannot be scripted. If one HITL session alone
+      exceeds the 80% line, `window_budget_usd` is set too low.
+- [ ] **Decide whether the rung is too tight for a working day** — a single
+      long session hit 136% of the limit, which would block daytime dispatch
+      outright. That may be correct (the operator *is* using the window) or may
+      mean the reserve should be a share of a larger budget. Needs the `/usage`
+      comparison above before changing a number.
+- [ ] **Install the dispatch timer — it has never been installed.** Checked
+      2026-09-20: only `bridge-mcp.service` and `bridge-serve.service` exist as
+      user units, and `systemctl --user list-timers bridge*` is empty. So this
+      is not a reinstall; it switches on autonomous dispatch for the first
+      time, and the pre-existing checklist below says dry-run only for the
+      first week. Steps: copy `docs/systemd/bridge-dispatch.{service,timer}` to
+      `~/.config/systemd/user/`, create `~/.config/bridge/dispatch.env` with
+      `GH_TOKEN=...`, then `systemctl --user daemon-reload && systemctl --user
+      enable --now bridge-dispatch.timer`. Deliberately left undone — needs an
+      explicit decision, not a default.
+- [x] Rebuild and install the binary carrying the rung — done 2026-09-20,
+      `bridge v2.9.0-104-g0946f00`. The previously installed build predated
+      the feature entirely.
+- [x] **Audit whether #283 swept other issues closed** — done 2026-09-20,
+      **clean**. Repo issue-events show exactly one close alongside its merge:
+      #283 itself at 18:51:18 and #254 at 18:51:19. No other issue was
+      affected, and #283 carries no closing keyword at all. (Query worth
+      reusing: `gh api repos/OWNER/REPO/issues/events --paginate | jq` filtered
+      on `.event=="closed"` — a state-based query misses it, because #254's
+      `closedAt` now reflects its *re*-close.)
+- [ ] **Consider per-window `max_dispatches`** — the spec rejected it (D4) and
+      the scoping fix made D4 true without it, but splitting the night into two
+      `budget_rung: false` windows still doubles the nightly cap. Documented as
+      a footgun in `docs/dispatch.md` rather than fixed.
+
 ## Bridge MCP endpoint (#195, merged 2026-07-12)
 
-- [ ] Cheat sheet for starting/operating `bridge mcp serve` and integrating
+- [x] Cheat sheet for starting/operating `bridge mcp serve` and integrating
       it with Claude Code / Claude Desktop: [`docs/mcp-cheatsheet.md`](docs/mcp-cheatsheet.md)
+      — brought in line with the server in #341 (2026-10-07)
 - [x] Spin up `bridge mcp serve` and test it end to end (real client
       connect, all four tools, read-only + write/confirm paths)
-- [ ] `bridge mcp serve` systemd unit for always-on access (same follow-up as
-      the WebUI one below — could share a unit-file pattern)
-- [ ] MCP test with Claude App
+- [x] `bridge mcp serve` systemd unit for always-on access — runs as the
+      `systemd --user` unit `bridge-mcp.service` on the deployed hosts
+- [ ] Check the `bridge-mcp.service` unit file into `docs/systemd/` (only the
+      dispatch units are there; the deployed one exists only on the hosts)
+- [x] MCP test with Claude Desktop — works through the stdio proxy
+      ([`docs/claude-desktop-setup.md`](docs/claude-desktop-setup.md)),
+      verified on the Win11 work notebook 2026-10-05
+- [ ] MCP test with the Claude web/mobile app — needs a custom connector,
+      i.e. the public `--auth=oauth` deployment that hasn't been decided yet
+      (see README, `--auth=oauth`)
 
 ## Bridge WebUI — Plan 2 (Svelte UI Components)
 
@@ -17,7 +86,7 @@ Plan 2 covers the actual Svelte pages and components.
 
 **Required gates before writing any component code:**
 
-- [ ] Run `/ui-brainstorm` → get ASCII wireframes approved for:
+- [x] Superseded by `docs/design/cockpit/` (wireframe + flow approved; cockpit shell and Pipeline board shipped, see `docs/cockpit.md`). Remaining panels: spec section "Roadmap: the other panels" in `docs/superpowers/specs/2026-10-24-bridge-cockpit-design.md`. Original gates, now superseded:
   - Overview page (`/`): Radar + Word Cloud viz panel, Tier list, Capture bar
   - Repo dashboard (`/repos/:owner/:name`): Sessions, Worktrees, Branches, Git status, Issues, ArchViz stub
 - [ ] Run `/ui-flow` → get Mermaid state diagrams approved (Svelte store states + transitions)
@@ -98,6 +167,8 @@ Full docs: [`docs/dispatch.md`](docs/dispatch.md). Spec: [`docs/specs/2026-07-27
       `systemctl --user start bridge-dispatch.service` to trigger manually)
       dispatches as expected — watch for the new `slog.Warn` if the token
       env file is missing/misconfigured
+      — **note:** PR #293 replaces this timer with a bare hourly heartbeat and
+      moves the hours into `schedule.windows`; re-read the unit before installing
 
 ## Agent / Bot Integration (ideas captured 2026-06-24)
 
@@ -106,3 +177,7 @@ session summaries, auto-labeling, WebUI panels — see issue tracker for these).
 
 - [ ] Test starting a new Claude Code session via the Telegram bot
 - [ ] Add support for Hermes Agent
+
+### bridge-bot (Telegram admin session, `@agent_dev_ctl_bot`)
+
+- [ ] How to call `/usage` + `/clear`, or other slash cmds from the chat so they are executed in the CC CLI session?

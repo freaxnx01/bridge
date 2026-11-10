@@ -29,8 +29,10 @@ it (one large run can outweigh three small ones).
 
 Add a **usage-budget rung** to `bridge dispatch`, alongside the existing caps:
 
-- **Night window (18:00–07:00):** rung disabled. Burning the window overnight is
-  fine; the existing caps remain the only bound.
+- **Night window (18:00–07:00):** rung disabled *for the early night only*.
+  Burning the window then is fine and the existing caps remain the only bound.
+  Within `window_hours` of the day window's start the rung is armed against the
+  handover — see D6, added after review.
 - **Day window (07:00–18:00):** dispatch is refused once *combined* trailing-5h
   consumption — interactive sessions **plus** pipeline runs — reaches **80%** of
   the window budget. The last 20% is reserved for the operator. The cap is on
@@ -146,6 +148,53 @@ refactor of persisted state semantics needing a migration for
 near-identical counters and two window-attribution helpers doing one job).
 
 A counter can be added later if the rung alone proves too loose.
+
+### D4a — Amendment (2026-09-18, after review of PR #293)
+
+D4 as written said the nightly cap "keeps applying to the night window only".
+Nothing in the code enforced that — `ApplyCaps` checked it unconditionally — and
+with the default windows tiling all 24h the consequence was severe: every
+daytime dispatch incremented `state.DispatchedTonight`, while `NightBudgetUsed`
+still bucketed on a hardcoded 12:00 pivot. A night that spent its 5 dispatches
+therefore refused every candidate the following *morning* with `night cap 5/5`
+while the budget rung had full headroom, and at noon the bucket flipped so
+afternoon dispatches consumed the coming night's budget.
+
+Two changes make D4 true rather than aspirational:
+
+- The cap is armed by `Counts.NightCapApplies`, set only when the covering
+  window has `budget_rung: false`.
+- The counter's reset boundary is the covering window's own start
+  (`Window.StartOf`), not a clock pivot. `NightBudgetUsed`/`nightOf` and the
+  12:00 constant are gone.
+
+This is **not** the per-window `max_dispatches` that D4 rejected: there is still
+one `max_dispatches_per_night`, no new config surface, and the `State` field
+shape is unchanged, so nothing needs migrating. That rejection was about adding
+per-window limits, which this does not do.
+
+### D6 — The rung guards the handover, not just the window
+
+The quota window is **rolling**, so "rung disabled at night" is wrong near the
+day boundary: spend at 05:00 is still inside the window at 07:00, and an
+unattended run late in the night can hand the operator a window that is already
+spent. That defeats the issue's whole purpose.
+
+The rung is therefore armed inside a `budget_rung: true` window **and** in the
+`window_hours` shoulder before one. In the shoulder the measured span ends at
+the coming window start rather than at `now`
+(`[window_start - window_hours, now]`), so only spend that survives to the
+handover is counted. Daytime is the same rule with the guarded instant equal to
+`now`, so this unifies the two cases instead of adding a special case.
+
+Consequence: the night is no longer wholly unbounded. Before
+`day_start - window_hours` it is (that spend ages out harmlessly); after it, the
+pipeline is spending against the operator's morning and is budgeted accordingly.
+The reserve used at the handover is the same `daytime_cap`.
+
+*Rejected:* a fixed-hour "stop dispatching at 02:00" cutoff — it hardcodes what
+the rolling window already determines, and drifts the moment `window_hours` or
+the day start changes.
 
 ### D5 — The projective estimate is the same constant
 

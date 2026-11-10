@@ -9,6 +9,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cockpit: a pipeline run's card shows its runtime in minutes, orange from 30 min and red from 60 min.
+- `bridge mcp serve`: milestone support — new **`list_milestones`** and **`set_milestone`** tools (assign, change or clear, draft by default), a **`milestone`** input on `create_issue`, and a **`milestone`** filter on `list_issues`; milestones are referenced by title or number and resolve across open and closed ones, on GitHub and Forgejo. (#349)
+- WebUI cockpit: shell with a **Pipeline board** (Running / Ready / Held / Needs enrichment) served by `bridge serve`, with token-guarded Enrich and Dispatch buttons. See `docs/cockpit.md`.
+- Pipeline API: `GET /api/pipeline`, `POST /api/pipeline/{refresh,enrich,dispatch}` and the SSE event `pipeline-updated`.
+- `bridge launch --prompt`: pass an initial prompt to the claude agent.
+- `bridge mcp serve`: read-only **`list_prs`**, **`get_pr`** and **`list_runs`** tools, so an MCP client can verify a dispatched ai-implement run — its PR, the PR's check-runs and commit statuses on the head SHA, and which actor triggered its Actions runs. `list_prs closes=N` uses dispatch's own closing-keyword rule. GitHub-only; a Forgejo target returns a warning. Each call is bounded to 30 s. (#326)
+- `CreateIssue` accepts labels and creates any that the target repo does not
+  define (#303)
+- Issue bodies are populated by `ListOpenIssues` for internal consumers and
+  cleared at the MCP `list_issues` and `GET /api/repos/{repo}` boundaries (#303)
+- `bridge dispatch` autonomy lanes: per-repo `auto` vs `hitl` lanes with their own
+  windows, caps and labels. An autonomous lane is exempt from `global_open_prs`
+  both ways, is gated on `ai-review-ai-merge: true` in the repo's `agent.yml`
+  (falling back to human review when unmet), and can run `dry_run` to be observed
+  before it acts. The systemd heartbeat moves to half-hourly. (#304)
+- `bridge dispatch`: usage-budget rung reserving subscription headroom for
+  interactive work during the day, measured from Claude Code transcripts and a
+  local ledger of dispatched runs (#254)
+- `bridge dispatch`: the rung also guards the **handover** — because the quota
+  window is rolling, it is armed in the `window_hours` shoulder before a
+  `budget_rung` window and measures only spend that survives to that window's
+  start, so a late-night run cannot hand over an already-spent window (#254)
+- `bridge dispatch status`: trailing-window usage, limit, and utilization
 - `bridge nav`: the repo picker **hides repos archived on their forge**, including local clones of them — an archived repo can't be worked on, so it was pure noise in the list. **`ctrl+a`** reveals them (rendered muted with an `archived` marker) and hides them again; the hint only advertises the key when there is something archived to reveal. Archived state comes from the remote repo cache, so a missing, unreadable or stale cache, or a repo with no remote at all, hides nothing. (#292)
 - `bridge dispatch`: **`repo_priority`** in `dispatch.json` — an ordered list of repo-name patterns (`path.Match` glob syntax) that becomes the ordering ladder's new first rung, ahead of milestone due date. A repo's rank is the index of the first pattern it matches; unmatched repos sort after every configured entry. This lets software-factory repos dispatch before `game-*` prototypes regardless of what each repo has queued. Absent or empty (the default) skips the rung, so existing configs order exactly as before. (#222)
 - `internal/herdr`: `(*Client).Attach` and `(*Client).Launch`, completing `launcher.Backend` for Herdr mode. `Launch` opens a tab, starts the agent, and focuses it — idempotent via an attach-first check re-evaluated at plan-execution time (not build time), with concurrent same-slot launches collapsed via `singleflight`. `agent start` retries only on a busy pane (`agent_pane_busy` → `ErrPaneBusy`, mapped from Herdr's real CLI error code) with capped exponential backoff (~4s worst case); `agent_not_ready` focuses the tab and reports success since the agent is up and waiting on a prompt. The `code` agent runs via `pane run` instead, without stealing focus. (#264)
@@ -19,10 +42,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking:** `bridge dispatch` requires an `## Implementation Plan` heading in the issue body and treats `❓ to-be-defined` as unenriched, so previously dispatchable issues without a plan are now skipped.
+- `bridge dispatch`: the nightly cap now applies only while the covering window
+  has `budget_rung: false`, and its counter resets at that window's own start
+  instead of a hardcoded 12:00 pivot. Previously a spent night blocked the whole
+  following morning with `night cap N/N` while the budget rung had full
+  headroom (#254)
+- `bridge dispatch`: dispatch hours moved from the systemd timer into
+  `schedule.windows` in `dispatch.json`; the timer is now an hourly heartbeat.
+  The retired `dispatch_at`/`retry_until` keys are ignored (#254)
+- **BREAKING:** `bridge mcp serve` runs the Streamable HTTP transport stateless
+  with JSON responses: no in-memory MCP session, so clients survive a server
+  restart instead of getting 404 on a stale `Mcp-Session-Id`. `GET` no longer
+  opens a standalone SSE stream and answers `405 Allow: POST` instead —
+  spec-compliant clients fall back to POST-only, but a consumer pinned to that
+  stream (the `mcp-remote` path in #232) breaks. (#313)
+- `bridge mcp serve --no-auth` refuses cross-origin requests with `403`. With no
+  bearer token to guess, the session handshake was the only thing stopping a page
+  in the user's browser from reaching a mutating tool on `127.0.0.1`, and a
+  stateless transport executes the tool on the first POST. (#313)
+
+### Security
+
+- The pipeline write endpoints (`refresh`, `enrich`, `dispatch`) require an Origin from an explicit allowlist (`localhost`/`127.0.0.1` on the serve port plus `BRIDGE_COCKPIT_ORIGINS`) as well as the bearer token, defending against DNS rebinding and CSRF. They fail closed with `503` when `BRIDGE_API_TOKEN` is unset.
 - `forge.ListRepos` (GitHub, Forgejo, GitLab) now **returns archived repos with `Archived: true`** instead of silently dropping them, so callers decide. The `list_repos` MCP tool and nav's clone-on-select rows filter them explicitly, so both behave exactly as before. (#292)
 
 ### Fixed
 
+- Cockpit: has its own favicon instead of keeping Authentik's from the login redirect.
+- Cockpit: long issue titles no longer push the Ready column's buttons over Needs enrichment and its Enrich buttons off-screen.
+- Cockpit: Running counts only active work; idle sessions and `enrichment-ongoing` labels unchanged for 6 h+ fold into their own collapsed rows.
+- Go toolchain raised from 1.25.0 to **1.26.10**: Go 1.25 is end of life and
+  has no fix for the 11 reachable `net/http` and other stdlib vulnerabilities
+  that failed the required `govulncheck` check. CI now reads the Go version from
+  `go.mod` (`go-version-file`) instead of a hard-coded `'1.25'`. (#352)
+- Repos with a `.` (or `:`) in their name, e.g. `freaxnx01.github.io`, launch
+  and are detected again: slot ids now replace those characters with `_`, the
+  same way tmux rewrites session names. Previously `bridge launch` reported
+  "exited during startup", scraped no RC link, and failed on re-launch with
+  `duplicate session` (#337)
+- Forgejo repo listing pages through every result page instead of stopping
+  after the first 50, so owners with more repos no longer lose the rest from
+  `bridge list -r` and the `nav` picker
+- Capture-created issues are no longer dispatch-eligible without enrichment:
+  every intake path (`POST /api/capture/issue`, MCP `create_issue`) now stamps
+  `needs-enrichment`, and `bridge dispatch` rejects an issue with a blank body
+  regardless of its labels (#303)
 - `bridge nav`: the status line is now rendered. `Model.status` is where every
   nav outcome already routed — backend launch/attach failures, clone and
   worktree-create failures, agent resolution, the overview's `⏎ show link/path`

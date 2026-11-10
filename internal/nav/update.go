@@ -417,12 +417,25 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.updateRepoModal(msg)
 	}
 	switch msg.String() {
-	case "ctrl+c", "q":
+	case "q":
 		if m.pickerFocus != focusFilter {
 			return m, tea.Quit
 		}
 		// fallthrough to filter editing for 'q' typed into the filter
-	case "esc":
+	case "esc", "ctrl+c":
+		// Clear a set filter before quitting: the value survives a trip
+		// through a second screen (nothing on those return paths touches
+		// m.filter), and backspacing it away is the slow way. Raw != ""
+		// on purpose: a whitespace-only value leaves the list unfiltered
+		// but hides Recent (recentVisible above), so the key must rescue
+		// that state too rather than quit out of it. A second press quits;
+		// q still quits on the first press from a non-filter focus. The
+		// forge subfilter is deliberately independent and stays put.
+		if m.filter.Value() != "" {
+			m.filter.SetValue("")
+			m.pickerSel = 0
+			return m, nil
+		}
 		return m, tea.Quit
 	case "tab":
 		return m.cyclePickerFocus(), nil

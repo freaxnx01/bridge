@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/freaxnx01/bridge/internal/audit"
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -1168,5 +1169,116 @@ func TestHandlePutFile_ForgeLacksCapability(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("want error when the forge client does not support put_file")
+	}
+}
+
+func TestHandleCreateIssue_StampsNeedsEnrichment(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.createCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, _, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Body: "b", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// create_issue is a second intake path; leaving it unlabeled reproduces
+	// #303 through a different door.
+	if len(gh.gotLabels) != 1 || gh.gotLabels[0] != dispatch.LabelNeedsEnrichment {
+		t.Errorf("labels = %+v, want [%s]", gh.gotLabels, dispatch.LabelNeedsEnrichment)
+	}
+}
+
+func TestHandleCreateIssue_DraftReportsTheLabel(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+
+	_, out, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Body: "b", Confirm: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Draft {
+		t.Fatalf("Confirm=false must return a draft: %+v", out)
+	}
+	// A draft that hides the label misrepresents the issue the caller is about
+	// to confirm.
+	if len(out.Labels) != 1 || out.Labels[0] != dispatch.LabelNeedsEnrichment {
+		t.Errorf("draft labels = %+v, want [%s]", out.Labels, dispatch.LabelNeedsEnrichment)
+	}
+}
+
+func TestHandleCreateIssue_DraftWithMilestoneResolvesWithoutCreating(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.createCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	_, out, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Milestone: "v1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if out.Milestone == nil || out.Milestone.Number != 1 {
+		t.Fatalf("draft must show the resolved milestone: %+v", out.Milestone)
+	}
+	if calls != 0 {
+		t.Fatalf("draft must not call CreateIssue, got %d calls", calls)
+	}
+}
+
+func TestHandleCreateIssue_UnknownMilestoneErrors(t *testing.T) {
+	calls := 0
+	gh := newFakeFull("github")
+	gh.createCalled = &calls
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	_, _, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Milestone: "nope", Confirm: true,
+	})
+	if !errors.Is(err, ErrMilestoneNotFound) {
+		t.Fatalf("want ErrMilestoneNotFound, got %v", err)
+	}
+	if calls != 0 {
+		t.Fatalf("must not create on unresolved milestone, got %d calls", calls)
+	}
+}
+
+func TestHandleCreateIssue_ConfirmPassesResolvedClosedMilestone(t *testing.T) {
+	gh := newFakeFull("github")
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	_, out, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+		Forge: "github", Owner: "o", Repo: "r", Title: "t", Milestone: "2026", Confirm: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gh.gotMilestone != 2 {
+		t.Fatalf("CreateIssue milestone = %d, want 2 (closed milestone %q)", gh.gotMilestone, "2026")
+	}
+	if out.Milestone == nil || out.Milestone.Number != 2 {
+		t.Fatalf("output must carry the milestone: %+v", out.Milestone)
+	}
+}
+
+func TestHandleCreateIssue_NoMilestoneStaysNetworkFree(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.gotMilestone = -1
+	d := depsWith(map[string]*fakeFull{"github": gh}, nil)
+	for _, confirm := range []bool{false, true} {
+		_, _, err := d.handleCreateIssue(context.Background(), nil, createIssueInput{
+			Forge: "github", Owner: "o", Repo: "r", Title: "t", Confirm: confirm,
+		})
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	if gh.listCalls != 0 {
+		t.Fatalf("ListMilestones called %d times without a milestone", gh.listCalls)
+	}
+	if gh.gotMilestone != 0 {
+		t.Fatalf("CreateIssue milestone = %d, want 0", gh.gotMilestone)
 	}
 }

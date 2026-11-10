@@ -55,7 +55,7 @@ func newMCPCmd() *cobra.Command {
 	}
 	serveCmd.Flags().IntVar(&mcpPort, "port", 7788, "port to listen on")
 	serveCmd.Flags().StringVar(&mcpHost, "host", "127.0.0.1", "host to bind to")
-	serveCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "disable write tools (create_issue is not registered)")
+	serveCmd.Flags().BoolVar(&mcpReadOnly, "read-only", false, "disable write tools (none of them is registered)")
 	serveCmd.Flags().BoolVar(&mcpAllowDestructive, "allow-destructive", false, "allow destructive tools to execute when confirmed (reserved for future archive_repo/delete_repo; tier-1 tools are unaffected)")
 	serveCmd.Flags().BoolVar(&mcpNoAuth, "no-auth", false, "skip bearer check (localhost dev only)")
 	serveCmd.Flags().StringVar(&mcpAuthMode, "auth", "static", "auth mode: static (bearer token) or oauth")
@@ -131,13 +131,33 @@ func firstNonEmpty(a, b string) string {
 	return b
 }
 
+// newStreamableHandler mounts srv on a stateless Streamable HTTP handler that
+// answers with plain JSON. No tool makes server→client requests or streams
+// progress, so a protocol session buys nothing — and an in-memory one is lost
+// on every restart, leaving clients with 404s on a dead Mcp-Session-Id. Both
+// auth modes build their transport here so they cannot drift.
+func newStreamableHandler(srv *sdkmcp.Server) http.Handler {
+	return sdkmcp.NewStreamableHTTPHandler(
+		func(*http.Request) *sdkmcp.Server { return srv },
+		&sdkmcp.StreamableHTTPOptions{Stateless: true, JSONResponse: true},
+	)
+}
+
 // buildMCPHandler mounts srv on a Streamable HTTP handler and, unless noAuth is
 // set, wraps it in bearer-token middleware. It fails fast when a token is
 // required but empty.
+//
+// In --no-auth mode the handler also gets cross-origin protection. A bearer
+// token is itself a CSRF defence — an attacker's page cannot guess it — but
+// without one the only thing that kept a browser page from invoking a tool on
+// 127.0.0.1:7788 was the session handshake a stateless transport no longer
+// performs: the first POST now executes the tool. go-sdk v1.6.1 rejects a POST
+// whose Content-Type is not application/json but applies no Origin check of its
+// own, which the MCP spec requires of a locally-bound server.
 func buildMCPHandler(srv *sdkmcp.Server, token string, noAuth bool) (http.Handler, error) {
-	streamable := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
+	streamable := newStreamableHandler(srv)
 	if noAuth {
-		return streamable, nil
+		return http.NewCrossOriginProtection().Handler(streamable), nil
 	}
 	if token == "" {
 		return nil, fmt.Errorf("BRIDGE_MCP_TOKEN is required (or pass --no-auth for localhost dev)")
@@ -176,7 +196,7 @@ func buildOAuthHandler(srv *sdkmcp.Server, cfg oauth.Config, discoveryClient *ht
 		AuthorizationServers: []string{cfg.Issuer},
 	})
 
-	streamable := sdkmcp.NewStreamableHTTPHandler(func(*http.Request) *sdkmcp.Server { return srv }, nil)
+	streamable := newStreamableHandler(srv)
 	guarded := sdkauth.RequireBearerToken(store.Verifier(), &sdkauth.RequireBearerTokenOptions{
 		ResourceMetadataURL: strings.TrimRight(cfg.Issuer, "/") + "/.well-known/oauth-protected-resource",
 	})(streamable)
@@ -319,8 +339,9 @@ func runMCPServe(cmd *cobra.Command, _ []string) error {
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
 		ReadTimeout:       30 * time.Second,
-		// WriteTimeout is intentionally 0: SSE connections are long-lived streams
-		// and a write deadline would terminate them prematurely.
+		// WriteTimeout is intentionally 0: responses are single JSON bodies, but
+		// one tool call (cross_forge_status, list_repos across many owners) can
+		// legitimately run long, and a write deadline would cut it off mid-reply.
 		IdleTimeout: 120 * time.Second,
 	}
 

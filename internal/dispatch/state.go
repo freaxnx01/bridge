@@ -35,26 +35,51 @@ func WriteState(path string, s State) error {
 	return store.AtomicWrite(path, b)
 }
 
-// NightBudgetUsed returns how much of the nightly ceiling this night has
-// already spent. A "night" runs from one evening into the following morning,
-// so a 02:00 retry tick belongs to the previous calendar day's night — hence
-// the 12:00 pivot rather than a date comparison.
-func (s State) NightBudgetUsed(now time.Time) int {
-	if s.NightStartedAt.IsZero() {
+// DispatchesSince returns how many dispatches the current counting period has
+// already spent, where since is the start of the window occurrence being
+// bounded. A counter recorded before that boundary belongs to an earlier
+// occurrence and does not carry over.
+//
+// The boundary is passed in rather than derived from the clock on purpose: an
+// earlier version bucketed on a hardcoded 12:00 pivot, which was correct only
+// while dispatch ran at night. Once the configured windows tile the whole day,
+// a morning tick resolved to the previous night and inherited its spent
+// counter, refusing every daytime candidate with "night cap N/N" while the
+// budget rung had full headroom.
+func (s State) DispatchesSince(since time.Time) int {
+	// A zero boundary means the caller has no window occurrence to attribute
+	// the counter to — during a budget-rung window, or in a schedule gap.
+	// Returning the raw counter there would report last night's spend as this
+	// window's.
+	if since.IsZero() || s.NightStartedAt.IsZero() || s.NightStartedAt.Before(since) {
 		return 0
 	}
-	if nightOf(now).Equal(nightOf(s.NightStartedAt)) {
-		return s.DispatchedTonight
-	}
-	return 0
+	return s.DispatchedTonight
 }
 
-// nightOf maps an instant to the date its night began. Anything before noon
-// belongs to the previous day's night.
-func nightOf(t time.Time) time.Time {
-	d := time.Date(t.Year(), t.Month(), t.Day(), 0, 0, 0, 0, t.Location())
-	if t.Hour() < 12 {
-		d = d.AddDate(0, 0, -1)
+// DispatchesInLane returns how many dispatches lane's current window
+// occurrence has already spent. since is that occurrence's start: a counter
+// recorded before it belongs to an earlier occurrence and does not carry over,
+// the same rule DispatchesSince applies to the nightly counter.
+func (s State) DispatchesInLane(lane string, since time.Time) int {
+	ls, ok := s.Lanes[lane]
+	if !ok || since.IsZero() || ls.StartedAt.IsZero() || ls.StartedAt.Before(since) {
+		return 0
 	}
-	return d
+	return ls.Dispatched
+}
+
+// RecordLaneDispatch adds n dispatches to lane's counter, restarting it when
+// the stored counter belongs to an earlier window occurrence.
+func (s *State) RecordLaneDispatch(lane string, since, now time.Time, n int) {
+	if s.Lanes == nil {
+		s.Lanes = make(map[string]LaneState)
+	}
+	base := s.DispatchesInLane(lane, since)
+	ls := s.Lanes[lane]
+	if base == 0 {
+		ls.StartedAt = now
+	}
+	ls.Dispatched = base + n
+	s.Lanes[lane] = ls
 }

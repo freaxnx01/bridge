@@ -446,8 +446,12 @@ func tmuxSafe(s string) string {
 		switch {
 		case r >= 'a' && r <= 'z', r >= 'A' && r <= 'Z', r >= '0' && r <= '9':
 			b.WriteRune(r)
-		case r == '-', r == '_', r == '.':
+		case r == '-', r == '_':
 			b.WriteRune(r)
+		case r == '.':
+			// tmux itself rewrites '.' to '_'; match it (and core.SlotID) so
+			// the session keeps the name we look it up by.
+			b.WriteRune('_')
 		default:
 			b.WriteRune('-')
 		}

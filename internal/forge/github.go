@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -214,8 +215,82 @@ func (c *GithubClient) SetTopics(ctx context.Context, owner, repo string, topics
 	return out.Names, nil
 }
 
-func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
+// githubLabelsPageSize is the page size requested per call to the repo labels
+// endpoint — GitHub's maximum per_page.
+const githubLabelsPageSize = 100
+
+// ensureLabels makes sure every name exists as a label on owner/repo, creating
+// the ones that don't. Capture targets are not guaranteed to define the labels
+// bridge stamps at intake, so without this a capture into a fresh repo can fail
+// on an undefined label.
+//
+// It lists and matches rather than probing GET /labels/{name}: the get helper
+// collapses every status >= 400 into one error, so a probe cannot tell an
+// absent label from a broken request.
+func (c *GithubClient) ensureLabels(ctx context.Context, owner, repo string, names []string) error {
+	if len(names) == 0 {
+		return nil
+	}
+	basePath := "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+
+	// Page the listing: a repo carrying the agent-workflow label set plus
+	// GitHub's defaults plus per-area labels can run past one page, and a label
+	// missed there is one this function then tries to create.
+	have := make(map[string]bool)
+	for page := 1; page <= maxLabelPages; page++ {
+		var existing []struct {
+			Name string `json:"name"`
+		}
+		path := fmt.Sprintf("%s?per_page=%d&page=%d", basePath, githubLabelsPageSize, page)
+		if err := c.get(ctx, path, &existing); err != nil {
+			return fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
+		}
+		for _, l := range existing {
+			have[l.Name] = true
+		}
+		if len(existing) < githubLabelsPageSize {
+			break
+		}
+	}
+
+	for _, name := range names {
+		if have[name] {
+			continue
+		}
+		var created struct {
+			Name string `json:"name"`
+		}
+		if err := c.post(ctx, basePath, map[string]any{"name": name, "color": "ededed"}, &created); err != nil {
+			// GitHub answers 422 already_exists when the label is already
+			// defined, and the shared post helper maps every 422 to
+			// ErrRepoExists. That is precisely the state this function wants,
+			// so it is success — not a failed capture reporting, misleadingly,
+			// that the repository already exists.
+			if errors.Is(err, ErrRepoExists) {
+				continue
+			}
+			return fmt.Errorf("create label %q on %s/%s: %w", name, owner, repo, err)
+		}
+	}
+	return nil
+}
+
+// CreateIssue creates an issue on owner/repo and returns the minimal Issue.
+// labels ride along on the create request rather than a follow-up AddLabels
+// call: a second call leaves a window in which the issue is live and
+// unlabeled, which is exactly what the dispatcher must never see. milestone is
+// a milestone number; 0 means none.
+func (c *GithubClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
+	if err := c.ensureLabels(ctx, owner, repo, labels); err != nil {
+		return Issue{}, err
+	}
 	req := map[string]any{"title": title, "body": body}
+	if len(labels) > 0 {
+		req["labels"] = labels
+	}
+	if milestone > 0 {
+		req["milestone"] = milestone
+	}
 	var raw struct {
 		Number    int       `json:"number"`
 		Title     string    `json:"title"`
@@ -287,6 +362,23 @@ func (c *GithubClient) UpdateIssue(ctx context.Context, owner, repo string, numb
 		Number: raw.Number, Title: raw.Title, State: raw.State,
 		URL: raw.HTMLURL, Updated: raw.UpdatedAt,
 	}, nil
+}
+
+// SetMilestone assigns milestone (GitHub number) to owner/repo#number; 0
+// clears it. The returned Issue's Milestone is the title the forge reports
+// after the change ("" when cleared).
+func (c *GithubClient) SetMilestone(ctx context.Context, owner, repo string, number, milestone int) (Issue, error) {
+	// GitHub clears a milestone with JSON null, so the key is always sent.
+	req := map[string]any{"milestone": nil}
+	if milestone > 0 {
+		req["milestone"] = milestone
+	}
+	var raw milestonePatchResponse
+	path := fmt.Sprintf("/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return raw.toIssue("github", owner+"/"+repo), nil
 }
 
 // AddLabels adds labels to owner/repo#number and returns the issue's full
@@ -362,6 +454,7 @@ func (c *GithubClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, 
 type ghIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
+	Body    string `json:"body"`
 	HTMLURL string `json:"html_url"`
 	Labels  []struct {
 		Name string `json:"name"`
@@ -523,8 +616,19 @@ func (c *GithubClient) ListProjectV2Items(ctx context.Context, owner string, num
 }
 
 func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, "")
+}
+
+// ListOpenIssuesInMilestone lists owner/repo's open issues in the milestone
+// with the given GitHub number, filtered server-side.
+func (c *GithubClient) ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, fmt.Sprintf("&milestone=%d", milestone))
+}
+
+// listOpenIssues lists open issues; extraQuery is appended to the query string.
+func (c *GithubClient) listOpenIssues(ctx context.Context, owner, repo, extraQuery string) ([]Issue, error) {
 	var raw []ghIssue
-	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/issues?state=open&per_page=100", &raw); err != nil {
+	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/issues?state=open&per_page=100"+extraQuery, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, 0, len(raw))
@@ -545,6 +649,7 @@ func (c *GithubClient) ListOpenIssues(ctx context.Context, owner, repo string) (
 			Repo:      owner + "/" + repo,
 			Number:    i.Number,
 			Title:     i.Title,
+			Body:      i.Body,
 			URL:       i.HTMLURL,
 			Labels:    labels,
 			Milestone: milestone,
@@ -926,41 +1031,94 @@ func (c *GithubClient) PutFile(ctx context.Context, owner, repo, path string, co
 	return out.Content.HTMLURL, nil
 }
 
+// ListOpenMilestones lists the repo's open milestones.
 func (c *GithubClient) ListOpenMilestones(ctx context.Context, owner, repo string) ([]Milestone, error) {
-	var raw []struct {
-		Number int        `json:"number"`
-		Title  string     `json:"title"`
-		DueOn  *time.Time `json:"due_on"`
-	}
-	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/milestones?state=open&per_page=100", &raw); err != nil {
-		return nil, err
-	}
-	out := make([]Milestone, 0, len(raw))
-	for _, m := range raw {
-		ms := Milestone{Number: m.Number, Title: m.Title}
-		if m.DueOn != nil {
-			ms.DueOn = *m.DueOn
+	return c.ListMilestones(ctx, owner, repo, "open")
+}
+
+// ListMilestones lists owner/repo's milestones in the given state (open,
+// closed or all, passed through verbatim), across pages.
+func (c *GithubClient) ListMilestones(ctx context.Context, owner, repo, state string) ([]Milestone, error) {
+	const pageSize = 100
+	out := make([]Milestone, 0)
+	for page := 1; page <= maxMilestonePages; page++ {
+		var raw []milestoneWire
+		path := fmt.Sprintf("/repos/%s/%s/milestones?state=%s&per_page=%d&page=%d", owner, repo, url.QueryEscape(state), pageSize, page)
+		if err := c.get(ctx, path, &raw); err != nil {
+			return nil, err
 		}
-		out = append(out, ms)
+		for _, m := range raw {
+			out = append(out, m.toMilestone(m.Number))
+		}
+		if len(raw) < pageSize {
+			break
+		}
 	}
 	return out, nil
 }
 
-func (c *GithubClient) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error) {
-	var raw []struct {
-		Number int    `json:"number"`
-		Title  string `json:"title"`
-		Body   string `json:"body"`
-		Draft  bool   `json:"draft"`
+// ghPull is GitHub's pull-request JSON, shared by the list and single-PR
+// endpoints; the single endpoint additionally fills MergeableState and
+// ChangedFiles.
+type ghPull struct {
+	Number int    `json:"number"`
+	Title  string `json:"title"`
+	Body   string `json:"body"`
+	Draft  bool   `json:"draft"`
+	State  string `json:"state"`
+	User   struct {
+		Login string `json:"login"`
+	} `json:"user"`
+	Head struct {
+		Ref string `json:"ref"`
+		SHA string `json:"sha"`
+	} `json:"head"`
+	Base struct {
+		Ref string `json:"ref"`
+	} `json:"base"`
+	HTMLURL        string     `json:"html_url"`
+	CreatedAt      time.Time  `json:"created_at"`
+	UpdatedAt      time.Time  `json:"updated_at"`
+	MergedAt       *time.Time `json:"merged_at"`
+	MergeableState string     `json:"mergeable_state"`
+	ChangedFiles   int        `json:"changed_files"`
+}
+
+func (p ghPull) toPullRequest() PullRequest {
+	return PullRequest{
+		Number: p.Number, Title: p.Title, Body: p.Body, Draft: p.Draft, State: p.State,
+		Author: p.User.Login, HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA, BaseRef: p.Base.Ref,
+		URL: p.HTMLURL, Created: p.CreatedAt, Updated: p.UpdatedAt, Merged: p.MergedAt != nil,
+		MergeableState: p.MergeableState, ChangedFiles: p.ChangedFiles,
 	}
+}
+
+func toPullRequests(raw []ghPull) []PullRequest {
+	out := make([]PullRequest, 0, len(raw))
+	for _, p := range raw {
+		out = append(out, p.toPullRequest())
+	}
+	return out
+}
+
+func (c *GithubClient) ListOpenPullRequests(ctx context.Context, owner, repo string) ([]PullRequest, error) {
+	var raw []ghPull
 	if err := c.get(ctx, "/repos/"+owner+"/"+repo+"/pulls?state=open&per_page=100", &raw); err != nil {
 		return nil, err
 	}
-	out := make([]PullRequest, 0, len(raw))
-	for _, p := range raw {
-		out = append(out, PullRequest{Number: p.Number, Title: p.Title, Body: p.Body, Draft: p.Draft})
+	return toPullRequests(raw), nil
+}
+
+// ListPullRequests returns one page (100) of a repo's pull requests in the
+// given state ("open", "closed" or "all"), most recently updated first.
+func (c *GithubClient) ListPullRequests(ctx context.Context, owner, repo, state string) ([]PullRequest, error) {
+	path := fmt.Sprintf("/repos/%s/%s/pulls?state=%s&sort=updated&direction=desc&per_page=100",
+		url.PathEscape(owner), url.PathEscape(repo), url.QueryEscape(state))
+	var raw []ghPull
+	if err := c.get(ctx, path, &raw); err != nil {
+		return nil, err
 	}
-	return out, nil
+	return toPullRequests(raw), nil
 }
 
 // RemoveLabel deletes one label from an issue. A 404 (label not present) is
