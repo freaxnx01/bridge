@@ -1336,6 +1336,94 @@ func TestUpdatePicker_CtrlF_NoopWhenSingleForge(t *testing.T) {
 	}
 }
 
+// archivedModel has one active and one archived local clone, plus the archived
+// key set nav would have built from the remote cache.
+func archivedModel() Model {
+	m := initialModel(Config{})
+	m.localRepos = []repoRow{
+		{label: "github/public/bridge", repo: core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"}},
+		{label: "github/public/FlowHub-CAS-AISE", repo: core.Repo{Forge: "github", Owner: "freaxnx01", Name: "FlowHub-CAS-AISE"}},
+	}
+	m.archived = map[string]bool{"github\x00freaxnx01\x00flowhub-cas-aise": true}
+	return m
+}
+
+func TestVisibleRepos_ArchivedHiddenByDefault(t *testing.T) {
+	m := archivedModel()
+	rows := m.visibleRepos()
+	if len(rows) != 1 || rows[0].repo.Name != "bridge" {
+		t.Fatalf("archived local clone must be hidden, got %+v", rows)
+	}
+}
+
+func TestVisibleRepos_ArchivedShownWhenToggled(t *testing.T) {
+	m := archivedModel()
+	m.showArchived = true
+	if got := len(m.visibleRepos()); got != 2 {
+		t.Errorf("showArchived must reveal the archived row, got %d rows", got)
+	}
+}
+
+func TestVisibleRepos_EmptyArchivedSetHidesNothing(t *testing.T) {
+	m := archivedModel()
+	m.archived = nil // no cache / unreadable cache — fail open
+	if got := len(m.visibleRepos()); got != 2 {
+		t.Errorf("an empty archived set must hide nothing, got %d rows", got)
+	}
+}
+
+func TestUpdatePicker_CtrlA_TogglesArchived(t *testing.T) {
+	m := archivedModel() // pickerFocus == focusFilter (initial)
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := out.(Model)
+	if !got.showArchived {
+		t.Fatal("ctrl+a should reveal archived rows")
+	}
+	if got.pickerFocus != focusFilter {
+		t.Errorf("ctrl+a must not change focus, got %d", got.pickerFocus)
+	}
+	if len(got.visibleRepos()) != 2 {
+		t.Errorf("revealed row count wrong: %+v", got.visibleRepos())
+	}
+	out2, _ := got.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	if out2.(Model).showArchived {
+		t.Error("ctrl+a should hide archived rows again")
+	}
+}
+
+func TestUpdatePicker_CtrlA_WorksWhileTypingFilter(t *testing.T) {
+	m := archivedModel()
+	m.filter.SetValue("fl")
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := out.(Model)
+	if !got.showArchived {
+		t.Error("ctrl+a should toggle even with filter text present")
+	}
+	if got.filter.Value() != "fl" {
+		t.Errorf("ctrl+a must not be captured as filter text, got %q", got.filter.Value())
+	}
+}
+
+func TestUpdatePicker_CtrlA_NoopWhenNothingArchived(t *testing.T) {
+	m := archivedModel()
+	m.archived = nil
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	if out.(Model).showArchived {
+		t.Error("ctrl+a with no archived repos should be a no-op")
+	}
+}
+
+func TestUpdatePicker_CtrlA_KeepsSelectionInRange(t *testing.T) {
+	m := archivedModel()
+	m.showArchived = true
+	m.pickerSel = 1 // the archived row
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	got := out.(Model)
+	if got.pickerSel > len(got.visibleRepos())-1 {
+		t.Errorf("selection %d out of range for %d rows", got.pickerSel, len(got.visibleRepos()))
+	}
+}
+
 func TestUpdate_RemoteMsg_ResetsForgeFilterWhenGone(t *testing.T) {
 	m := initialModel(Config{})
 	m.localRepos = []repoRow{{repo: core.Repo{Forge: "github", Owner: "o", Name: "a"}}}
@@ -1626,5 +1714,90 @@ func TestUpdatePicker_LegendOpen_CtrlCStillQuitsWithFilterSet(t *testing.T) {
 
 	if !isQuit(cmd) {
 		t.Errorf("ctrl+c with the legend open should still quit, not clear the filter")
+	}
+}
+
+func TestUpdate_RemoteMsgShrinksPicker_ClampsPickerSel(t *testing.T) {
+	// The remote cache arrives after the local rows: its archived set can hide
+	// the row the cursor is on. An unclamped pickerSel then indexes past the
+	// end of visibleRepos() and enter panics.
+	flowhub := core.Repo{Forge: "github", Owner: "freaxnx01", Name: "FlowHub-CAS-AISE"}
+	bridgeDup := remoteRows([]forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "bridge"}})
+	archived := archivedKeys([]forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: flowhub.Name, Archived: true}})
+	msgs := map[string]tea.Msg{
+		"remoteMsg":            remoteMsg{archived: archived},
+		"partial remoteErrMsg": remoteErrMsg{err: errFake, rows: bridgeDup, archived: archived},
+	}
+	for name, msg := range msgs {
+		t.Run(name, func(t *testing.T) {
+			m := archivedModel()
+			m.archived = nil
+			m.pickerSel = 1 // on FlowHub-CAS-AISE, about to be hidden
+			out, _ := m.Update(msg)
+			got := out.(Model)
+			if n := len(got.visibleRepos()); got.pickerSel >= n {
+				t.Errorf("pickerSel = %d with %d visible rows, want it clamped", got.pickerSel, n)
+			}
+		})
+	}
+}
+
+// recentArchivedModel is archivedModel with both repos on disk and recently
+// opened, the archived one most recently.
+func recentArchivedModel() Model {
+	m := archivedModel()
+	m.localRepos[0].repo.Path = "/r/bridge"
+	m.localRepos[1].repo.Path = "/r/flowhub"
+	m.mruPaths = []string{"/r/flowhub", "/r/bridge"}
+	return m
+}
+
+func TestRecentRepos_ArchivedHiddenUnlessRevealed(t *testing.T) {
+	m := recentArchivedModel()
+	if rows := m.recentRepos(); len(rows) != 1 || rows[0].repo.Name != "bridge" {
+		t.Errorf("archived clone must be hidden from Recent, got %+v", rows)
+	}
+	m.showArchived = true
+	if got := len(m.recentRepos()); got != 2 {
+		t.Errorf("ctrl+a must reveal the archived clone in Recent too, got %d rows", got)
+	}
+}
+
+func TestViewPicker_RecentArchivedRowCarriesMarker(t *testing.T) {
+	m := recentArchivedModel()
+	m.showArchived = true
+	block, _ := m.recentBlock()
+	for _, line := range strings.Split(stripANSI(block), "\n") {
+		if strings.Contains(line, "FlowHub-CAS-AISE") && !strings.Contains(line, "archived") {
+			t.Errorf("revealed archived Recent row must carry the marker: %q", line)
+		}
+	}
+}
+
+func TestUpdate_RemoteMsgShrinksRecent_ClampsRecentSel(t *testing.T) {
+	m := recentArchivedModel()
+	m.archived = nil
+	m.pickerFocus = focusRecent
+	m.recentSel = 1 // on bridge; FlowHub above it is about to be hidden
+	archived := archivedKeys([]forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "FlowHub-CAS-AISE", Archived: true}})
+	out, _ := m.Update(remoteMsg{archived: archived})
+	got := out.(Model)
+	if n := len(got.recentRepos()); got.recentSel >= n {
+		t.Errorf("recentSel = %d with %d Recent rows, want it clamped", got.recentSel, n)
+	}
+}
+
+func TestUpdatePicker_CtrlA_NothingArchived_ReachesFilterAsLineStart(t *testing.T) {
+	// With nothing to reveal, ctrl+a must not be swallowed: the filter is a
+	// readline-style input where it moves the cursor to the start of the line.
+	m := archivedModel()
+	m.archived = nil
+	m.pickerFocus = focusFilter
+	m.filter.Focus()
+	m.filter.SetValue("flow")
+	m.filter.CursorEnd()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	if pos := out.(Model).filter.Position(); pos != 0 {
+		t.Errorf("filter cursor = %d after ctrl+a, want 0 (line start)", pos)
 	}
 }

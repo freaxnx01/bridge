@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/worktree"
 )
 
@@ -74,6 +75,12 @@ func dedupRemoteRows(local, remote []repoRow) []repoRow {
 func repoRowKey(r repoRow) string {
 	forge, owner, _, name := rowParts(r)
 	return strings.ToLower(forge + "\x00" + owner + "\x00" + name)
+}
+
+// refKey is the case-insensitive forge+owner+name identity of a forge ref, in
+// the same form as repoRowKey so a remote ref and its local clone collide.
+func refKey(r forge.RepoRef) string {
+	return strings.ToLower(r.Forge + "\x00" + r.Owner + "\x00" + r.Name)
 }
 
 // rowParts returns the forge, owner, visibility, and name of a repo row, from

@@ -27,6 +27,24 @@ func TestHandleListRepos_AggregatesDefaultOwners(t *testing.T) {
 	}
 }
 
+func TestHandleListRepos_ArchivedOmitted(t *testing.T) {
+	gh := newFakeFull("github")
+	gh.repos = []forge.RepoRef{
+		{Forge: "github", Owner: "freaxnx01", Name: "bridge"},
+		{Forge: "github", Owner: "freaxnx01", Name: "FlowHub-CAS-AISE", Archived: true},
+	}
+	clients := map[string]*fakeFull{"github": gh}
+	d := depsWith(clients, []Target{{"github", "freaxnx01"}})
+	_, out, err := d.handleListRepos(context.Background(), nil, listReposInput{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// The forge clients stopped filtering (#292); the tool contract did not.
+	if len(out.Repos) != 1 || out.Repos[0].Name != "bridge" {
+		t.Fatalf("archived repo must not reach the tool output: %+v", out.Repos)
+	}
+}
+
 func TestHandleListRepos_ForgeFilterHonoured(t *testing.T) {
 	gh := newFakeFull("github")
 	gh.repos = []forge.RepoRef{{Forge: "github", Name: "bridge"}}

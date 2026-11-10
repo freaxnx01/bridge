@@ -35,16 +35,20 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case remoteMsg:
 		m.remoteRepos = msg.rows
+		m.archived = msg.archived
 		m.remoteState = loadOK
 		m = m.normalizeForgeFilter()
+		m = m.clampPickerCursors()
 		return m, m.issueCountCmds(msg.rows)
 	case remoteErrMsg:
 		if len(msg.rows) > 0 {
 			// Partial success: at least one forge loaded. Show the fresh rows
 			// rather than discarding them; the cache would only be staler.
 			m.remoteRepos = msg.rows
+			m.archived = msg.archived
 			m.remoteState = loadPartial
 			m = m.normalizeForgeFilter()
+			m = m.clampPickerCursors()
 			return m, m.issueCountCmds(msg.rows)
 		}
 		// remoteState alone reports this: the Repos panel title renders
@@ -284,6 +288,16 @@ func (m Model) visibleRepos() []repoRow {
 	all := append([]repoRow{}, m.localRepos...)
 	all = append(all, dedupRemoteRows(m.localRepos, m.remoteRepos)...)
 	all = disambiguateOwners(all)
+	if !m.showArchived && len(m.archived) > 0 {
+		kept := make([]repoRow, 0, len(all))
+		for _, r := range all {
+			if m.archived[repoRowKey(r)] {
+				continue
+			}
+			kept = append(kept, r)
+		}
+		all = kept
+	}
 	if m.forgeFilter != "" {
 		scoped := make([]repoRow, 0, len(all))
 		for _, r := range all {
@@ -385,6 +399,9 @@ func (m Model) recentRepos() []repoRow {
 	out := make([]repoRow, 0, maxRecent)
 	for _, p := range m.mruPaths {
 		if r, ok := byPath[p]; ok {
+			if !m.showArchived && m.archived[repoRowKey(r)] {
+				continue
+			}
 			out = append(out, r)
 			if len(out) == maxRecent {
 				break
@@ -392,6 +409,14 @@ func (m Model) recentRepos() []repoRow {
 		}
 	}
 	return out
+}
+
+// clampPickerCursors keeps both picker cursors inside their lists after the
+// remote cache arrives: its archived set can hide the row under either one.
+func (m Model) clampPickerCursors() Model {
+	m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
+	m.recentSel = clampInt(m.recentSel, 0, len(m.recentRepos())-1)
+	return m
 }
 
 // recentVisible reports whether the Recent section shows: only with an empty
@@ -433,6 +458,15 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		m = m.cycleForge(1)
 		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
 		return m, nil
+	case "ctrl+a":
+		// Picker-global like ctrl+f: the picker opens with the filter focused,
+		// where a bare letter key would be typed instead of bound. With nothing
+		// archived it falls through, so the filter keeps it as line-start.
+		if len(m.archived) > 0 {
+			m.showArchived = !m.showArchived
+			m = m.clampPickerCursors()
+			return m, nil
+		}
 	case "ctrl+r":
 		// Picker-global twin of the focusList 'r' below, so refresh is reachable
 		// from focusFilter — where the picker starts and a bare 'r' has to stay

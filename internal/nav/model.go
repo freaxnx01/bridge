@@ -19,16 +19,18 @@ type Model struct {
 	pickerFocus focus
 	showLegend  bool // ? toggles the status-glyph legend overlay (picker/dash only)
 
-	filter      textinput.Model
-	sessions    []sessionRow
-	localRepos  []repoRow
-	remoteRepos []repoRow
-	remoteState loadState
-	pickerSel   int
-	sessionSel  int
-	forgeFilter string   // active forge subfilter key ("" = All); session-local, ctrl+f cycles it
-	mruPaths    []string // raw MRU order (from recentMsg); resolved lazily by recentRepos
-	recentSel   int
+	filter       textinput.Model
+	sessions     []sessionRow
+	localRepos   []repoRow
+	remoteRepos  []repoRow
+	remoteState  loadState
+	pickerSel    int
+	sessionSel   int
+	forgeFilter  string          // active forge subfilter key ("" = All); session-local, ctrl+f cycles it
+	archived     map[string]bool // refKey set of archived repos, from the remote cache
+	showArchived bool            // ctrl+a reveals archived rows; session-local, default false
+	mruPaths     []string        // raw MRU order (from recentMsg); resolved lazily by recentRepos
+	recentSel    int
 
 	repo        core.Repo
 	dashRows    []dashRow

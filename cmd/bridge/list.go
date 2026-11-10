@@ -68,6 +68,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "warning: remote fetch failed, using cache: %v\n", err)
 	}
+	remoteRepos = withoutArchived(remoteRepos)
 	if listJSON {
 		return emitJSON(cmd.OutOrStdout(), struct {
 			Local  []core.Repo     `json:"local"`
@@ -86,6 +87,19 @@ func runList(cmd *cobra.Command, args []string) error {
 }
 
 const remoteTTL = time.Hour
+
+// withoutArchived drops archived refs. ListRepos returns them flagged (#292)
+// so nav can hide archived local clones, but `list -r` keeps listing only
+// active repos, as it did before.
+func withoutArchived(refs []forge.RepoRef) []forge.RepoRef {
+	out := make([]forge.RepoRef, 0, len(refs))
+	for _, r := range refs {
+		if !r.Archived {
+			out = append(out, r)
+		}
+	}
+	return out
+}
 
 func loadOrFetchRemote(ctx context.Context, local []core.Repo, refresh bool) ([]forge.RepoRef, error) {
 	cachePath := filepath.Join(cacheRoot(), "remote.list")
