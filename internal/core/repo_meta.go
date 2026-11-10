@@ -6,6 +6,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/freaxnx01/bridge/internal/store"
 )
 
 // RepoMeta is per-repo metadata cached from forge APIs by `bridge list -r`.
@@ -15,10 +17,11 @@ type RepoMeta struct {
 	Topics        []string `json:"topics,omitempty"`
 	DefaultBranch string   `json:"default_branch,omitempty"`
 	RemoteURL     string   `json:"remote_url,omitempty"`
+	FetchedAt     int64    `json:"fetched_at,omitempty"` // Unix seconds of the last refresh
 }
 
 // LoadRepoMeta reads the on-disk metadata cache. Missing file → empty map, no error.
-// Tolerates unknown extra fields (e.g. fetched_at) per encoding/json defaults.
+// Tolerates unknown extra fields per encoding/json defaults.
 func LoadRepoMeta(path string) (map[string]RepoMeta, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -70,6 +73,27 @@ func MergeRepoMeta(repos []Repo, reposRoots []string, meta map[string]RepoMeta) 
 		out[i] = r
 	}
 	return out
+}
+
+// RepoMetaKey returns the repo-meta.json key for a repo path: its shortest
+// non-escaping path relative to any of roots, falling back to the path itself
+// when no root matches. Writers use it so their keys match what MergeRepoMeta
+// resolves on read.
+func RepoMetaKey(roots []string, repoPath string) string {
+	return bestRelUnder(roots, repoPath)
+}
+
+// SaveRepoMeta atomically writes the metadata cache. A nil map writes an empty
+// object rather than "null", keeping the file loadable.
+func SaveRepoMeta(path string, meta map[string]RepoMeta) error {
+	if meta == nil {
+		meta = map[string]RepoMeta{}
+	}
+	b, err := json.MarshalIndent(meta, "", "  ")
+	if err != nil {
+		return err
+	}
+	return store.AtomicWrite(path, b)
 }
 
 func relUnder(base, p string) string {
