@@ -32,6 +32,7 @@ func build(rd ...RepoData) Board { return BuildBoard(Input{Repos: rd}) }
 func TestBuildBoard_ParkedAndRoadmap_Dropped(t *testing.T) {
 	tests := []struct{ name, label string }{
 		{"parked", dispatch.LabelParked},
+		{"parked legacy", dispatch.LabelParkedLegacy},
 		{"roadmap", LabelRoadmap},
 	}
 	for _, tc := range tests {
@@ -41,6 +42,15 @@ func TestBuildBoard_ParkedAndRoadmap_Dropped(t *testing.T) {
 				t.Errorf("want dropped: %+v", b)
 			}
 		})
+	}
+}
+
+// The pipeline parks with the ASCII label, so a parked issue that is otherwise a
+// perfectly good dispatch candidate must still reach no column at all.
+func TestBuildBoard_ParkedIssue_NotAGateCandidate(t *testing.T) {
+	b := build(repo(issue(1, dispatch.LabelParked)))
+	if len(b.Ready)+len(b.Held)+len(b.NeedsEnrichment)+len(b.Running) != 0 {
+		t.Errorf("want dropped: %+v", b)
 	}
 }
 

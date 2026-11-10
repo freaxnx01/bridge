@@ -25,6 +25,25 @@ func TestAttempts(t *testing.T) {
 	}
 }
 
+func TestIsParked(t *testing.T) {
+	cases := []struct {
+		labels []string
+		want   bool
+	}{
+		{nil, false},
+		{[]string{"parked"}, true},
+		{[]string{"🧊 parked"}, true},
+		{[]string{"feat", "parked"}, true},
+		{[]string{"parked-later"}, false},
+		{[]string{"🧊"}, false},
+	}
+	for _, c := range cases {
+		if got := IsParked(c.labels); got != c.want {
+			t.Errorf("IsParked(%v) = %v, want %v", c.labels, got, c.want)
+		}
+	}
+}
+
 func TestActiveMilestoneEarliestDueDate(t *testing.T) {
 	d := func(s string) time.Time {
 		v, _ := time.Parse("2006-01-02", s)
@@ -96,6 +115,9 @@ func TestEligible(t *testing.T) {
 			false, "needs-enrichment"},
 		{"parked",
 			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"🧊 parked"}}, "", nil,
+			false, "parked"},
+		{"parked (pipeline ASCII)",
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"parked"}}, "", nil,
 			false, "parked"},
 		{"attempt budget spent",
 			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"attempt:2"}}, "", nil,

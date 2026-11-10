@@ -24,7 +24,7 @@ carry `.github/workflows/agent.yml` or `agent-implement.yml` ("wired").
 
 Classification is first match wins:
 
-1. `🧊 parked` or `roadmap`: ignored.
+1. `parked` (legacy `🧊 parked`) or `roadmap`: ignored.
 2. `enrichment-ongoing`: Running (kind `enrichment`).
 3. `needs-enrichment` or `❓ to-be-defined`: Needs enrichment.
 4. `ai-implement`: already dispatched, not a candidate (its workflow run shows under Running).

@@ -12,7 +12,8 @@ import (
 const (
 	LabelNeedsEnrichment = "needs-enrichment"
 	LabelToBeDefined     = "❓ to-be-defined"
-	LabelParked          = "🧊 parked"
+	LabelParked          = "parked"
+	LabelParkedLegacy    = "🧊 parked"
 	LabelAIImplement     = "ai-implement"
 	LabelAIReviewAIMerge = "ai-review-ai-merge"
 	attemptPrefix        = "attempt:"
@@ -26,6 +27,13 @@ func hasLabel(labels []string, want string) bool {
 		}
 	}
 	return false
+}
+
+// IsParked reports whether the issue is parked, in either spelling. The
+// agent-workflow pipeline parks with the ASCII label (its ADR-016); bridge wrote
+// the emoji one until #367 and still reads it, but only ever writes LabelParked.
+func IsParked(labels []string) bool {
+	return hasLabel(labels, LabelParked) || hasLabel(labels, LabelParkedLegacy)
 }
 
 // Attempts reads the attempt:N label. Absent or malformed means zero attempts,
@@ -104,7 +112,7 @@ func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (b
 	if hasLabel(i.Labels, LabelToBeDefined) {
 		return false, "to-be-defined"
 	}
-	if hasLabel(i.Labels, LabelParked) {
+	if IsParked(i.Labels) {
 		return false, "parked"
 	}
 	if hasLabel(i.Labels, LabelAIImplement) {
