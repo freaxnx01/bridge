@@ -55,6 +55,20 @@ func TestFilterRemoteOnlyCaseInsensitiveOnOwner(t *testing.T) {
 	}
 }
 
+func TestFilterRemoteOnly_ArchivedRef_IsNeverACloneCandidate(t *testing.T) {
+	// ListRepos returns archived repos flagged rather than dropped (#292), so
+	// the fzf picker behind `bridge open -r` must drop them itself — otherwise
+	// it offers to clone a repo nav deliberately hides.
+	remote := []forge.RepoRef{
+		{Forge: "github", Owner: "me", Name: "active"},
+		{Forge: "github", Owner: "me", Name: "old", Archived: true},
+	}
+	got := filterRemoteOnly(nil, remote)
+	if len(got) != 1 || got[0].Name != "active" {
+		t.Errorf("archived ref must be dropped, active one kept: %+v", got)
+	}
+}
+
 func TestRemoteCloneDirsGithubPublic(t *testing.T) {
 	parent, target, err := remoteCloneDirs("/r", forge.RepoRef{Forge: "github", Owner: "me", Name: "bridge", Visibility: "public"})
 	if err != nil {

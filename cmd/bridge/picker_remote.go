@@ -223,7 +223,7 @@ func pickRepoOrRemote(local []core.Repo, remote []forge.RepoRef) (PickerChoice, 
 	return PickerChoice{}, false, errors.New("picker: chosen entry not in list")
 }
 
-// filterRemoteOnly drops remote refs whose forge+owner+name matches a local
+// filterRemoteOnly drops archived remote refs and those whose forge+owner+name matches a local
 // repo. Comparison is case-insensitive on all three components: the local
 // owner is derived from the on-disk path while the remote owner comes from the
 // forge API, so their casing can differ for the same repo.
@@ -234,7 +234,8 @@ func filterRemoteOnly(local []core.Repo, remote []forge.RepoRef) []forge.RepoRef
 	}
 	out := make([]forge.RepoRef, 0, len(remote))
 	for _, r := range remote {
-		if have[repoIdentity(r.Forge, r.Owner, r.Name)] {
+		// Archived repos come back flagged (#292); never offer one to clone.
+		if r.Archived || have[repoIdentity(r.Forge, r.Owner, r.Name)] {
 			continue
 		}
 		out = append(out, r)
