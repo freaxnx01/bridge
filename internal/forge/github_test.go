@@ -1065,12 +1065,12 @@ func TestGithubRemoveLabel(t *testing.T) {
 		{
 			name:       "success with colon-separated label",
 			statusCode: http.StatusNoContent,
-			label:      "failed:infra",
+			label:      "ai:failed",
 		},
 		{
 			name:       "404 treated as success",
 			statusCode: http.StatusNotFound,
-			label:      "attempt:1",
+			label:      "ai:partial",
 		},
 	}
 

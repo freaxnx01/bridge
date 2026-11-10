@@ -7,24 +7,6 @@ import (
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
-func TestAttempts(t *testing.T) {
-	cases := []struct {
-		labels []string
-		want   int
-	}{
-		{nil, 0},
-		{[]string{"feat"}, 0},
-		{[]string{"attempt:1"}, 1},
-		{[]string{"feat", "attempt:2"}, 2},
-		{[]string{"attempt:notanumber"}, 0},
-	}
-	for _, c := range cases {
-		if got := Attempts(c.labels); got != c.want {
-			t.Errorf("Attempts(%v) = %d, want %d", c.labels, got, c.want)
-		}
-	}
-}
-
 func TestIsParked(t *testing.T) {
 	cases := []struct {
 		labels []string
@@ -119,9 +101,9 @@ func TestEligible(t *testing.T) {
 		{"parked (pipeline ASCII)",
 			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"parked"}}, "", nil,
 			false, "parked"},
-		{"attempt budget spent",
-			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"attempt:2"}}, "", nil,
-			false, "attempts exhausted"},
+		{"a stale attempt label means nothing — the pipeline owns the attempt cap",
+			forge.Issue{Number: 41, Body: "d\n## Implementation Plan\n- step", Labels: []string{"attempt:5"}}, "", nil,
+			true, ""},
 		{"has open PR", base, "v2 search",
 			[]forge.PullRequest{{Number: 90, Body: "Closes #41"}},
 			false, "open PR"},

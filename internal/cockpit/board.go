@@ -170,7 +170,7 @@ func gate(b *columns, rd RepoData, i forge.Issue, active string) []dispatch.Cand
 		return []dispatch.Candidate{{Issue: i, Owner: rd.Owner, Repo: rd.Name, MilestoneDue: milestoneDue(rd.Milestones, i.Milestone)}}
 	}
 	switch reason {
-	case "outside active milestone", "attempts exhausted", "open PR":
+	case "outside active milestone", "open PR":
 		b.held = append(b.held, dated{card(i, repoName(rd), reason), i.Created})
 	case "no implementation plan", "empty body":
 		// Not ready, but fixable by enriching: surface it with the reason.
