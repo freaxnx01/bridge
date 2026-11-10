@@ -5,8 +5,12 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
+
+	"github.com/freaxnx01/bridge/internal/forge"
 )
 
 func TestListRemoteADO(t *testing.T) {
@@ -133,5 +137,36 @@ func TestListRemoteJSON(t *testing.T) {
 	}
 	if len(out.Remote) == 0 {
 		t.Errorf("expected remote repos")
+	}
+}
+
+func TestListRemote_ArchivedRefInCache_IsNotListed(t *testing.T) {
+	// ListRepos returns archived repos flagged rather than dropped (#292), so
+	// the cache now holds them; `list -r` must keep printing only active ones,
+	// as it did before that change.
+	cacheDir := t.TempDir()
+	cache := forge.RepoCache{UpdatedAt: time.Now(), Repos: []forge.RepoRef{
+		{Forge: "github", Owner: "me", Name: "active-repo"},
+		{Forge: "github", Owner: "me", Name: "archived-repo", Archived: true},
+	}}
+	if err := forge.WriteRepoCache(filepath.Join(cacheDir, "bridge", "remote.list"), cache); err != nil {
+		t.Fatal(err)
+	}
+	root := writeFakeRepos(t)
+	for _, args := range [][]string{{"list", "-r"}, {"list", "-r", "--json"}} {
+		cmd := bridgeCmd(args...)
+		cmd.Env = append(os.Environ(), "BRIDGE_REPOS_ROOT="+root, "XDG_CACHE_HOME="+cacheDir)
+		var sout stringBuf
+		cmd.Stdout = &sout
+		cmd.Stderr = os.Stderr
+		if err := cmd.Run(); err != nil {
+			t.Fatalf("%v: run: %v", args, err)
+		}
+		if !strings.Contains(sout.String(), "active-repo") {
+			t.Errorf("%v: active repo missing:\n%s", args, sout.String())
+		}
+		if strings.Contains(sout.String(), "archived-repo") {
+			t.Errorf("%v: archived repo must not be listed:\n%s", args, sout.String())
+		}
 	}
 }
