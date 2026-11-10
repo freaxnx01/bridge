@@ -1716,3 +1716,28 @@ func TestUpdatePicker_LegendOpen_CtrlCStillQuitsWithFilterSet(t *testing.T) {
 		t.Errorf("ctrl+c with the legend open should still quit, not clear the filter")
 	}
 }
+
+func TestUpdate_RemoteMsgShrinksPicker_ClampsPickerSel(t *testing.T) {
+	// The remote cache arrives after the local rows: its archived set can hide
+	// the row the cursor is on. An unclamped pickerSel then indexes past the
+	// end of visibleRepos() and enter panics.
+	flowhub := core.Repo{Forge: "github", Owner: "freaxnx01", Name: "FlowHub-CAS-AISE"}
+	bridgeDup := remoteRows([]forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: "bridge"}})
+	archived := archivedKeys([]forge.RepoRef{{Forge: "github", Owner: "freaxnx01", Name: flowhub.Name, Archived: true}})
+	msgs := map[string]tea.Msg{
+		"remoteMsg":            remoteMsg{archived: archived},
+		"partial remoteErrMsg": remoteErrMsg{err: errFake, rows: bridgeDup, archived: archived},
+	}
+	for name, msg := range msgs {
+		t.Run(name, func(t *testing.T) {
+			m := archivedModel()
+			m.archived = nil
+			m.pickerSel = 1 // on FlowHub-CAS-AISE, about to be hidden
+			out, _ := m.Update(msg)
+			got := out.(Model)
+			if n := len(got.visibleRepos()); got.pickerSel >= n {
+				t.Errorf("pickerSel = %d with %d visible rows, want it clamped", got.pickerSel, n)
+			}
+		})
+	}
+}

@@ -38,6 +38,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.archived = msg.archived
 		m.remoteState = loadOK
 		m = m.normalizeForgeFilter()
+		// The archived set can hide the row under the cursor.
+		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
 		return m, m.issueCountCmds(msg.rows)
 	case remoteErrMsg:
 		if len(msg.rows) > 0 {
@@ -47,6 +49,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.archived = msg.archived
 			m.remoteState = loadPartial
 			m = m.normalizeForgeFilter()
+			m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
 			return m, m.issueCountCmds(msg.rows)
 		}
 		// remoteState alone reports this: the Repos panel title renders
