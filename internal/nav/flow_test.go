@@ -331,3 +331,39 @@ func TestFlow_ForgeBar_Golden(t *testing.T) {
 	}})
 	assertGolden(t, "picker_forge_bar", s.frame())
 }
+
+func TestFlow_FilterSurvivesDashRoundTripThenClearKeyClears(t *testing.T) {
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			s := newSession(t, Config{})
+			s.send(reposMsg{rows: []repoRow{
+				{label: "github/public/dashonly", repo: coreRepo("dashonly", t.TempDir())},
+				{label: "github/public/other", repo: coreRepo("other", t.TempDir())},
+			}})
+			// The picker starts with the filter focused, so type directly.
+			for _, r := range "dashonly" {
+				s.key(string(r))
+			}
+			s.key("enter") // single match -> dashboard
+			if s.m.screen != screenDash {
+				t.Fatalf("screen = %d, want screenDash after enter on a single match", s.m.screen)
+			}
+
+			s.key("esc") // back to the picker, focus lands on focusList
+			if s.m.screen != screenPicker {
+				t.Fatalf("screen = %d, want screenPicker after esc from the dashboard", s.m.screen)
+			}
+			if s.m.filter.Value() != "dashonly" {
+				t.Fatalf("filter = %q, want it preserved across the round trip", s.m.filter.Value())
+			}
+
+			s.send(k.msg) // the new behaviour: clear it
+			if s.m.filter.Value() != "" {
+				t.Errorf("filter = %q, want empty after %s in the picker", s.m.filter.Value(), k.name)
+			}
+			if !strings.Contains(s.frame(), "other") {
+				t.Errorf("clearing the filter should reveal every repo again:\n%s", s.frame())
+			}
+		})
+	}
+}

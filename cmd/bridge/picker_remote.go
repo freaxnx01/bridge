@@ -343,11 +343,7 @@ func cloneRemoteRepo(ref forge.RepoRef) (string, error) {
 	// Inline credential helper per forge: lets git read the PAT/token from
 	// the env that direnv injects, without ever writing it to .git/config.
 	// Mirrors the bash _bridge_git_clone_in pattern.
-	gitArgs := []string{}
-	if helper := gitauth.CredentialHelper(ref.Forge); helper != "" {
-		gitArgs = append(gitArgs, "-c", helper)
-	}
-	gitArgs = append(gitArgs, "clone", url, targetDir)
+	gitArgs := append(gitauth.CredentialArgs(ref.Forge), "clone", url, targetDir)
 	cmd := exec.Command("direnv", append([]string{"exec", execDir, "git"}, gitArgs...)...)
 	cmd.Stdout = os.Stderr
 	cmd.Stderr = os.Stderr

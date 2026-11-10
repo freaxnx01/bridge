@@ -61,7 +61,7 @@ func TestReposHandler_Detail_ReturnsRepoDetail(t *testing.T) {
 	h := &ReposHandler{
 		Discover: func() ([]core.Repo, error) { return fakeRepos(), nil },
 		Issues: func(_ context.Context, _, _, _ string) ([]forge.Issue, error) {
-			return []forge.Issue{{Title: "open bug"}}, nil
+			return []forge.Issue{{Title: "open bug", Body: "a long issue body"}}, nil
 		},
 	}
 	r := httptest.NewRequest(http.MethodGet, "/api/repos/alice/myrepo", nil)
@@ -80,6 +80,11 @@ func TestReposHandler_Detail_ReturnsRepoDetail(t *testing.T) {
 	}
 	if len(got.Issues) != 1 || got.Issues[0].Title != "open bug" {
 		t.Errorf("got issues = %+v", got.Issues)
+	}
+	// FlowHub's catalogue polls this endpoint for titles and labels; issue
+	// bodies would bloat every response.
+	if got.Issues[0].Body != "" {
+		t.Errorf("Body = %q, want empty", got.Issues[0].Body)
 	}
 }
 

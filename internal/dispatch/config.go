@@ -14,7 +14,16 @@ func DefaultConfig() Config {
 			PerRepo:               1,
 			MaxDispatchesPerNight: 5,
 		},
-		Schedule: Schedule{DispatchAt: "22:00", RetryUntil: "06:00"},
+		Schedule: Schedule{Windows: []Window{
+			{Span: Span{From: "18:00", To: "07:00"}, BudgetRung: false},
+			{Span: Span{From: "07:00", To: "18:00"}, BudgetRung: true},
+		}},
+		Budget: Budget{
+			WindowHours:     5,
+			WindowBudgetUSD: 12.0,
+			DaytimeCap:      0.80,
+			MeanRunCostUSD:  2.0,
+		},
 	}
 }
 
@@ -42,4 +51,27 @@ func (c Config) LimitFor(repo string) int {
 		return n
 	}
 	return c.Limits.PerRepo
+}
+
+// DefaultLane is where a repo lands when no configured lane matches. It
+// reproduces the pre-lane behaviour exactly: the top-level schedule and
+// limits, and the single ai-implement label.
+func DefaultLane() Lane {
+	return Lane{Name: "default", Repos: []string{"*"}}
+}
+
+// EffectiveLabels returns the labels a dispatch in this lane applies, in one
+// AddLabels call. An autonomous lane carries the ai-merge gate label alongside
+// the trigger; every other lane applies the trigger alone, which is what
+// bridge did before lanes existed. An explicit list always wins — applying a
+// gate label to a repo that has not wired the matching workflow input is inert
+// at best, so bridge never guesses one.
+func (l Lane) EffectiveLabels() []string {
+	if len(l.Labels) > 0 {
+		return l.Labels
+	}
+	if l.Autonomous {
+		return []string{LabelAIImplement, LabelAIReviewAIMerge}
+	}
+	return []string{LabelAIImplement}
 }

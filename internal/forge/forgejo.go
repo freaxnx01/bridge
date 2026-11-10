@@ -203,10 +203,77 @@ func (c *ForgejoClient) SetTopics(ctx context.Context, owner, repo string, topic
 	return topics, nil
 }
 
+// forgejoLabelsPageSize is the page size requested per call to the repo labels
+// endpoint. Forgejo's server-default page size (commonly 30) is smaller than
+// this, so an explicit limit= is required on every call — the same house rule
+// forgejoCommentsPageSize documents. Without it an existing label past the
+// default page is missed, and since Forgejo does not enforce label-name
+// uniqueness the miss silently creates a duplicate on every capture.
+const forgejoLabelsPageSize = 50
+
+// ensureLabelIDs resolves each name to its label ID on owner/repo, creating any
+// label that does not exist. Forgejo/Gitea's CreateIssueOption.labels is a list
+// of label *ids*, so this lookup is mandatory here, not merely defensive.
+func (c *ForgejoClient) ensureLabelIDs(ctx context.Context, owner, repo string, names []string) ([]int64, error) {
+	if len(names) == 0 {
+		return nil, nil
+	}
+	basePath := "/api/v1/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo) + "/labels"
+
+	byName := make(map[string]int64)
+	for page := 1; page <= maxLabelPages; page++ {
+		var existing []struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		path := fmt.Sprintf("%s?limit=%d&page=%d", basePath, forgejoLabelsPageSize, page)
+		if err := c.get(ctx, path, &existing); err != nil {
+			return nil, fmt.Errorf("list labels %s/%s: %w", owner, repo, err)
+		}
+		for _, l := range existing {
+			if _, seen := byName[l.Name]; !seen {
+				byName[l.Name] = l.ID
+			}
+		}
+		if len(existing) < forgejoLabelsPageSize {
+			break
+		}
+	}
+
+	ids := make([]int64, 0, len(names))
+	for _, name := range names {
+		if id, ok := byName[name]; ok {
+			ids = append(ids, id)
+			continue
+		}
+		var created struct {
+			ID   int64  `json:"id"`
+			Name string `json:"name"`
+		}
+		if err := c.post(ctx, basePath, map[string]any{"name": name, "color": "#ededed"}, &created); err != nil {
+			return nil, fmt.Errorf("create label %q on %s/%s: %w", name, owner, repo, err)
+		}
+		ids = append(ids, created.ID)
+	}
+	return ids, nil
+}
+
 // CreateIssue creates an issue on owner/repo via Forgejo/Gitea and returns the
-// minimal Issue.
-func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string) (Issue, error) {
+// minimal Issue. labels are names; they are resolved to ids (and created when
+// absent) before the create request, which carries them atomically. milestone
+// is a milestone id; 0 means none.
+func (c *ForgejoClient) CreateIssue(ctx context.Context, owner, repo, title, body string, labels []string, milestone int) (Issue, error) {
+	ids, err := c.ensureLabelIDs(ctx, owner, repo, labels)
+	if err != nil {
+		return Issue{}, err
+	}
 	req := map[string]any{"title": title, "body": body}
+	if len(ids) > 0 {
+		req["labels"] = ids
+	}
+	if milestone > 0 {
+		req["milestone"] = milestone
+	}
 	var raw struct {
 		Number    int       `json:"number"`
 		Title     string    `json:"title"`
@@ -277,6 +344,20 @@ func (c *ForgejoClient) UpdateIssue(ctx context.Context, owner, repo string, num
 	}, nil
 }
 
+// SetMilestone assigns milestone (Forgejo milestone id) to owner/repo#number;
+// 0 clears it. The returned Issue's Milestone is the title the forge reports
+// after the change ("" when cleared).
+func (c *ForgejoClient) SetMilestone(ctx context.Context, owner, repo string, number, milestone int) (Issue, error) {
+	// Forgejo clears a milestone with 0, so the key is always sent.
+	req := map[string]any{"milestone": milestone}
+	var raw milestonePatchResponse
+	path := fmt.Sprintf("/api/v1/repos/%s/%s/issues/%d", owner, repo, number)
+	if err := c.patch(ctx, path, req, &raw); err != nil {
+		return Issue{}, err
+	}
+	return raw.toIssue("forgejo", owner+"/"+repo), nil
+}
+
 // AddLabels adds labels to owner/repo#number and returns the issue's full
 // label set after the call.
 func (c *ForgejoClient) AddLabels(ctx context.Context, owner, repo string, number int, labels []string) ([]string, error) {
@@ -311,9 +392,19 @@ func (c *ForgejoClient) CommentIssue(ctx context.Context, owner, repo string, nu
 }
 
 func (c *ForgejoClient) ListRepos(ctx context.Context, owner string) ([]RepoRef, error) {
+	// Page until an empty page: the server's MAX_RESPONSE_ITEMS can cap pages
+	// below the requested limit, so a short page doesn't mean the last one.
 	var raw []fjRepo
-	if err := c.get(ctx, "/api/v1/users/"+url.PathEscape(owner)+"/repos?limit=50", &raw); err != nil {
-		return nil, err
+	for page := 1; page <= maxRepoPages; page++ {
+		var batch []fjRepo
+		path := fmt.Sprintf("/api/v1/users/%s/repos?limit=50&page=%d", url.PathEscape(owner), page)
+		if err := c.get(ctx, path, &batch); err != nil {
+			return nil, err
+		}
+		if len(batch) == 0 {
+			break
+		}
+		raw = append(raw, batch...)
 	}
 	out := make([]RepoRef, 0, len(raw))
 	for _, r := range raw {
@@ -519,20 +610,57 @@ func (c *ForgejoClient) listTreeRecursive(ctx context.Context, owner, repo, path
 	return entries, tree.Truncated, nil
 }
 
+// ListMilestones lists owner/repo's milestones in the given state (open,
+// closed or all, passed through verbatim), across pages. Number carries the
+// Forgejo milestone id, which is what the issues API takes.
+func (c *ForgejoClient) ListMilestones(ctx context.Context, owner, repo, state string) ([]Milestone, error) {
+	const pageSize = 50
+	out := make([]Milestone, 0)
+	for page := 1; page <= maxMilestonePages; page++ {
+		var raw []milestoneWire
+		path := fmt.Sprintf("/api/v1/repos/%s/%s/milestones?state=%s&limit=%d&page=%d", owner, repo, url.QueryEscape(state), pageSize, page)
+		if err := c.get(ctx, path, &raw); err != nil {
+			return nil, err
+		}
+		for _, m := range raw {
+			out = append(out, m.toMilestone(m.ID))
+		}
+		if len(raw) < pageSize {
+			break
+		}
+	}
+	return out, nil
+}
+
 type fjIssue struct {
 	Number  int    `json:"number"`
 	Title   string `json:"title"`
+	Body    string `json:"body"`
 	HTMLURL string `json:"html_url"`
 	Labels  []struct {
 		Name string `json:"name"`
 	} `json:"labels"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
 	UpdatedAt   time.Time `json:"updated_at"`
 	PullRequest any       `json:"pull_request"`
 }
 
 func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, "")
+}
+
+// ListOpenIssuesInMilestone lists owner/repo's open issues in the milestone
+// with the given Forgejo id, filtered server-side.
+func (c *ForgejoClient) ListOpenIssuesInMilestone(ctx context.Context, owner, repo string, milestone int) ([]Issue, error) {
+	return c.listOpenIssues(ctx, owner, repo, fmt.Sprintf("&milestones=%d", milestone))
+}
+
+// listOpenIssues lists open issues; extraQuery is appended to the query string.
+func (c *ForgejoClient) listOpenIssues(ctx context.Context, owner, repo, extraQuery string) ([]Issue, error) {
 	var raw []fjIssue
-	if err := c.get(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues?state=open&type=issues&limit=50", &raw); err != nil {
+	if err := c.get(ctx, "/api/v1/repos/"+owner+"/"+repo+"/issues?state=open&type=issues&limit=50"+extraQuery, &raw); err != nil {
 		return nil, err
 	}
 	out := make([]Issue, 0, len(raw))
@@ -544,10 +672,14 @@ func (c *ForgejoClient) ListOpenIssues(ctx context.Context, owner, repo string) 
 		for _, l := range i.Labels {
 			labels = append(labels, l.Name)
 		}
+		milestone := ""
+		if i.Milestone != nil {
+			milestone = i.Milestone.Title
+		}
 		out = append(out, Issue{
 			Forge: "forgejo", Repo: owner + "/" + repo,
-			Number: i.Number, Title: i.Title, URL: i.HTMLURL,
-			Labels: labels, Updated: i.UpdatedAt,
+			Number: i.Number, Title: i.Title, Body: i.Body, URL: i.HTMLURL,
+			Labels: labels, Milestone: milestone, Updated: i.UpdatedAt,
 		})
 	}
 	return out, nil

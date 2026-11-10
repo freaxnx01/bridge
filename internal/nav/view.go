@@ -319,6 +319,15 @@ func (m Model) viewPicker() string {
 	if m.forgeSubfilterVisible() {
 		hint += " · ctrl+f forge"
 	}
+	if m.filter.Value() != "" {
+		// Only advertised while there is something to clear. With an empty
+		// filter those two keys quit (update.go:413-427), so the segment would
+		// invite the user to end the session, and the footer has no room to
+		// spare either: hintLine/footerLine and the maxVisible budget above all
+		// bake in a single hint row, which 15 more columns of fixed text push
+		// into a soft wrap on a narrow terminal.
+		hint += " · esc/^c clear"
+	}
 	hint += " · q quit"
 	sections = append(sections, m.hintLine(hint))
 	return strings.Join(sections, "\n")
@@ -494,6 +503,10 @@ func (m Model) viewModal() string {
 	return panel(m.width, "New worktree", body)
 }
 
+// trunc clips plain (unstyled) text to at most n display columns, ending in
+// "…" when it cuts. It walks runes, so a multi-byte rune (an em dash in a
+// commit subject, an accented letter) is never split and a wide rune never
+// overruns n.
 func trunc(s string, n int) string {
 	if lipgloss.Width(s) <= n {
 		return s
@@ -501,29 +514,44 @@ func trunc(s string, n int) string {
 	if n <= 1 {
 		return "…"
 	}
-	return s[:n-1] + "…"
+	var b strings.Builder
+	used := 0
+	for _, r := range s {
+		rw := lipgloss.Width(string(r))
+		if used+rw > n-1 {
+			break
+		}
+		b.WriteRune(r)
+		used += rw
+	}
+	return b.String() + "…"
 }
 
+// detailPanelChrome is the rows a detail panel spends outside its body: the
+// rounded border top and bottom, the title line, and the blank line under it.
+const detailPanelChrome = 4
+
 // detailColumn renders the three stacked detail panels for the highlighted
-// worktree, or a hint when the "+ create" row is selected. minH stretches the
-// column to at least that total height (the last panel absorbs the slack) so it
-// bottom-aligns with the worktree list; minH <= 0 renders at natural height.
+// worktree, or a hint when the "+ create" row is selected, in exactly minH
+// rows. Row caps come from minH, not m.height: Branches and Recent commits get
+// a third of the body rows each, and Git status gets whatever remains, so a
+// worktree with a lot of data windows its panels instead of growing the frame
+// (#364). Every line is clipped to the panel's inner width, so one item is
+// always one row.
 func (m Model) detailColumn(w, minH int) string {
 	path := m.selectedWorktreePath()
 	if path == "" {
 		hint := stMuted.Render("select a worktree to see its branches, commits & status")
 		return stretchPanel(w, minH, "Details", hint)
 	}
-	per := (m.height - 14) / 3
-	if per < 3 {
-		per = 3
-	}
+	per := max(1, (minH-3*detailPanelChrome)/3)
+	inner := w - 4 // rounded border + Padding(0, 1), as noteFileBody uses
 	d := m.details[path]
-	branches := panel(w, "Branches", m.branchesBody(d, per))
-	commits := panel(w, "Recent commits", m.commitsBody(d, per))
-	statusBody := m.statusBody(d, per)
+	branches := panel(w, "Branches", m.branchesBody(d, per, inner))
+	commits := panel(w, "Recent commits", m.commitsBody(d, per, inner))
 	statusH := minH - lipgloss.Height(branches) - lipgloss.Height(commits)
-	status := stretchPanel(w, statusH, "Git status", statusBody)
+	statusMax := max(1, statusH-detailPanelChrome)
+	status := stretchPanel(w, statusH, "Git status", m.statusBody(d, statusMax, inner))
 	return lipgloss.JoinVertical(lipgloss.Left, branches, commits, status)
 }
 
@@ -691,7 +719,7 @@ func (m Model) panelState(state loadState) (text string, ok bool) {
 	}
 }
 
-func (m Model) branchesBody(d *worktreeDetails, max int) string {
+func (m Model) branchesBody(d *worktreeDetails, max, inner int) string {
 	if d == nil {
 		return m.spin.View() + " loading…"
 	}
@@ -705,13 +733,14 @@ func (m Model) branchesBody(d *worktreeDetails, max int) string {
 	shown, more := windowList(len(d.branches), max)
 	for i := 0; i < shown; i++ {
 		br := d.branches[i]
+		name := trunc(br.name, inner-2) // 2 = the "* " / "+ " / "  " marker
 		switch {
 		case br.current:
-			b.WriteString(stAccent.Render("* " + br.name))
+			b.WriteString(stAccent.Render("* " + name))
 		case br.inWorktree:
-			b.WriteString(stOk.Render("+ " + br.name))
+			b.WriteString(stOk.Render("+ " + name))
 		default:
-			b.WriteString(stText.Render("  " + br.name))
+			b.WriteString(stText.Render("  " + name))
 		}
 		b.WriteString("\n")
 	}
@@ -721,7 +750,7 @@ func (m Model) branchesBody(d *worktreeDetails, max int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (m Model) commitsBody(d *worktreeDetails, max int) string {
+func (m Model) commitsBody(d *worktreeDetails, max, inner int) string {
 	if d == nil {
 		return m.spin.View() + " loading…"
 	}
@@ -735,7 +764,8 @@ func (m Model) commitsBody(d *worktreeDetails, max int) string {
 	shown, more := windowList(len(d.commits), max)
 	for i := 0; i < shown; i++ {
 		c := d.commits[i]
-		b.WriteString(stWarn.Render(c.sha) + " " + stText.Render(c.subject) + "\n")
+		subject := trunc(c.subject, inner-lipgloss.Width(c.sha)-1)
+		b.WriteString(stWarn.Render(c.sha) + " " + stText.Render(subject) + "\n")
 	}
 	if more > 0 {
 		b.WriteString(stMuted.Render(fmt.Sprintf("… +%d more", more)))
@@ -743,7 +773,7 @@ func (m Model) commitsBody(d *worktreeDetails, max int) string {
 	return strings.TrimRight(b.String(), "\n")
 }
 
-func (m Model) statusBody(d *worktreeDetails, max int) string {
+func (m Model) statusBody(d *worktreeDetails, max, inner int) string {
 	if d == nil {
 		return m.spin.View() + " loading…"
 	}
@@ -757,7 +787,8 @@ func (m Model) statusBody(d *worktreeDetails, max int) string {
 	shown, more := windowList(len(d.status), max)
 	for i := 0; i < shown; i++ {
 		f := d.status[i]
-		b.WriteString(stBad.Render(f.code) + " " + stText.Render(f.path) + "\n")
+		path := trunc(f.path, inner-lipgloss.Width(f.code)-1)
+		b.WriteString(stBad.Render(f.code) + " " + stText.Render(path) + "\n")
 	}
 	if more > 0 {
 		b.WriteString(stMuted.Render(fmt.Sprintf("… +%d more", more)))

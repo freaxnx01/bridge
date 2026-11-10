@@ -1,7 +1,7 @@
 # bridge dispatch — cross-repo autonomous dispatcher
 
 **Date:** 2026-07-27
-**Status:** Design approved, not implemented
+**Status:** Design approved; partially implemented (`internal/dispatch` exists, retry-only mode open in #253). Amended 2026-09-21 — see [Amendment 1](#amendment-1-2026-09-21--autonomy-lanes)
 **Scope:** Subsystem 1 of 3 in the end-to-end HITL dev workflow (dispatcher · notification channel · planning layer)
 
 ## Problem
@@ -78,6 +78,11 @@ date — no new state, no bridge UI required.
 
 The nightly cadence gives this a useful property: everything enriched during the day
 has a multi-hour window in which it can still be parked before 22:00.
+
+> **Caveat found 2026-09-21 (#303).** This gate is negative: it only holds if every
+> intake path stamps `needs-enrichment`. Capture-created issues observed that day
+> carried no labels and were therefore eligible as filed, including one with an
+> empty body. Amendment 1 makes intake fail closed.
 
 ### Ordering
 
@@ -251,3 +256,46 @@ The cycle is one legible 24 hours: enriched today → built tonight → reviewed
 morning. Human time concentrates in enrichment (which determines PR quality) and
 review (which is adversarial and deserves a fresh brain). Dispatch cost approaches
 zero: the operator approves policy, not individual dispatches.
+
+---
+
+## Amendment 1 (2026-09-21) — autonomy lanes
+
+**Context.** The original design makes a human `/enrich` the sole approval and
+bounds all work by review capacity. For repos whose output is low-stakes and
+self-deploying (browser games on Pages), both constraints cost more than they
+protect: the operator reviews trivial game fixes, and 23 hours a day go unused.
+The same day, #303 showed the approval gate fails open for capture-created issues.
+
+**Decision.** Two lanes, chosen per repo by config (`dispatch.json`, #304).
+
+| | auto | hitl |
+|---|---|---|
+| Scope (initial) | `game-*` repos with an automated test workflow and `ai-review-ai-merge: true` in `agent.yml` | everything else |
+| Enrichment | quick mode, headless (`/autopilot`, freaxnx01/agent-workflow#373) | `/enrich` by the operator |
+| Tick | continuous (e.g. 30 min), 24h | 22:00 + retry ticks, as above |
+| Labels applied | `ai-implement` + `ai-review-ai-merge`, one call | `ai-implement` + `ai-review-human-merge`, one call |
+| Bound | `per_repo: 1`, daily dispatch cap, budget | caps as above |
+| Merge | AI | operator |
+
+A repo configured for `auto` that does not meet the scope conditions falls back to
+`hitl`, visibly in `--dry-run`.
+
+**Invariants that survive the amendment.**
+
+- No issue is dispatchable without an enrichment step having run on it — the auto
+  lane changes *who* enriches, not *whether*.
+- Intake fails closed: an unlabeled or empty issue is never dispatchable (#303).
+- One-way doors always go to a human (`needs-human`), in every lane. Headless quick
+  mode also routes any `[low]`-confidence assumption to a human until async review of
+  assumptions is proven (freaxnx01/agent-workflow#252).
+- bridge schedules; agent-workflow decides how. No LLM in bridge.
+
+**Sequencing.** #303 first. Then `/autopilot` (agent-workflow#373) as the v1 enrich
+lane, run from a systemd timer. Then #304 moves lane policy into bridge; a later phase
+moves enrichment scheduling into bridge too and retires the standalone timer.
+
+**Consequences.** Regressions reach production without human review in the auto lane;
+the repo's test workflow and `git revert` are the safety net. The morning review batch
+shrinks to hitl work plus anything the auto lane routed to `needs-human`. A repo leaves
+the auto lane by editing `dispatch.json`, with no code change. Resolves #216.

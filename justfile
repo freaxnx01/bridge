@@ -28,6 +28,14 @@ sync:
 # Sync current branch with remote, then rebuild + reinstall bridge.
 sync-build: sync build
 
+# Install + enable the Telegram admin session as a systemd user service (boot start + watchdog).
+[unix]
+admin-install:
+    ln -sfn "{{justfile_directory()}}/admin/bridge-admin.service" "$HOME/.config/systemd/user/bridge-admin.service"
+    systemctl --user daemon-reload
+    systemctl --user enable --now bridge-admin.service
+    systemctl --user --no-pager status bridge-admin.service | head -5
+
 # Run Go + shim tests.
 test:
     make all

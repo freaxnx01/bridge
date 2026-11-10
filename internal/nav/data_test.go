@@ -43,7 +43,8 @@ func TestBuildFetchCmd_TokenForgeWithDirenv_RoutesThroughDirenvWithHelper(t *tes
 	const path = "/repos/ado/Proj/repo"
 	cmd := buildFetchCmd(path, "ado", true)
 
-	want := []string{"direnv", "exec", path, "git", "-c", gitauth.CredentialHelper("ado"), "-C", path, "fetch", "--quiet"}
+	want := append([]string{"direnv", "exec", path, "git"}, gitauth.CredentialArgs("ado")...)
+	want = append(want, "-C", path, "fetch", "--quiet")
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Errorf("args = %v, want %v", cmd.Args, want)
 	}
@@ -52,11 +53,12 @@ func TestBuildFetchCmd_TokenForgeWithDirenv_RoutesThroughDirenvWithHelper(t *tes
 	}
 }
 
-func TestBuildFetchCmd_TokenForgeWithoutDirenv_FallsBackToPlainGit(t *testing.T) {
-	const path = "/repos/ado/Proj/repo"
-	cmd := buildFetchCmd(path, "ado", false)
+func TestBuildFetchCmd_TokenForgeWithoutDirenv_PlainGitKeepsHelper(t *testing.T) {
+	const path = "/repos/git-forgejo/owner/repo"
+	cmd := buildFetchCmd(path, "forgejo", false)
 
-	want := []string{"git", "-C", path, "fetch", "--quiet"}
+	want := append([]string{"git"}, gitauth.CredentialArgs("forgejo")...)
+	want = append(want, "-C", path, "fetch", "--quiet")
 	if !reflect.DeepEqual(cmd.Args, want) {
 		t.Errorf("args = %v, want %v", cmd.Args, want)
 	}

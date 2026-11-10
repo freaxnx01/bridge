@@ -221,7 +221,8 @@ func TestTmuxSafe(t *testing.T) {
 	cases := []struct{ in, want string }{
 		{"bridge", "bridge"},
 		{"public/bridge", "public-bridge"},
-		{"owner/Repo.Name", "owner-Repo.Name"},
+		{"owner/Repo.Name", "owner-Repo_Name"},
+		{"freaxnx01.github.io", "freaxnx01_github_io"},
 		{"", "repo"},
 	}
 	for _, c := range cases {

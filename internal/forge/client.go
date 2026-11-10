@@ -118,6 +118,17 @@ type TreeEntry struct {
 // backstop against unbounded API calls.
 const maxCommentPages = 20
 
+// maxLabelPages bounds the repo-label pagination loop in each client's
+// ensure-label helper, the same safety backstop maxCommentPages is. A repo
+// with more labels than this pages can hold is pathological; the loop stops
+// rather than calling the API forever.
+const maxLabelPages = 10
+
+// maxRepoPages bounds the owner repo-listing pagination loop, the same safety
+// backstop as maxCommentPages: at Forgejo's default 50 items per page it
+// covers 1000 repos before the loop gives up.
+const maxRepoPages = 20
+
 // Comment is a single issue comment.
 type Comment struct {
 	ID      int       `json:"id"`
@@ -126,19 +137,129 @@ type Comment struct {
 	Created time.Time `json:"created,omitempty"`
 }
 
-// Milestone is an open milestone. DueOn is the zero time when unset.
+// Milestone is a repo milestone. Number is the value the forge's issues API
+// takes: GitHub's milestone number, Forgejo's milestone id. DueOn is zero when unset.
 type Milestone struct {
-	Number int       `json:"number"`
-	Title  string    `json:"title"`
-	DueOn  time.Time `json:"due_on,omitempty"`
+	Number       int       `json:"number"`
+	Title        string    `json:"title"`
+	State        string    `json:"state,omitempty"`
+	DueOn        time.Time `json:"due_on,omitzero"`
+	OpenIssues   int       `json:"open_issues"`
+	ClosedIssues int       `json:"closed_issues"`
 }
 
-// PullRequest is an open pull request. Body is needed to resolve "Closes #N".
+// milestonePatchResponse is the slice of a PATCHed issue SetMilestone reads
+// back, shared by both forges. Milestone is nil when none is set.
+type milestonePatchResponse struct {
+	Number    int       `json:"number"`
+	Title     string    `json:"title"`
+	State     string    `json:"state"`
+	HTMLURL   string    `json:"html_url"`
+	UpdatedAt time.Time `json:"updated_at"`
+	Milestone *struct {
+		Title string `json:"title"`
+	} `json:"milestone"`
+}
+
+// toIssue maps the response to an Issue on the given forge and repo.
+func (r milestonePatchResponse) toIssue(forgeName, repo string) Issue {
+	is := Issue{
+		Forge: forgeName, Repo: repo,
+		Number: r.Number, Title: r.Title, State: r.State,
+		URL: r.HTMLURL, Updated: r.UpdatedAt,
+	}
+	if r.Milestone != nil {
+		is.Milestone = r.Milestone.Title
+	}
+	return is
+}
+
+// maxMilestonePages bounds the milestone pagination loop in each client's
+// ListMilestones, the same safety backstop as maxLabelPages.
+const maxMilestonePages = 10
+
+// milestoneWire is the milestone JSON shared by both forges; ID is Forgejo's
+// key, Number GitHub's.
+type milestoneWire struct {
+	ID           int        `json:"id"`
+	Number       int        `json:"number"`
+	Title        string     `json:"title"`
+	State        string     `json:"state"`
+	DueOn        *time.Time `json:"due_on"`
+	OpenIssues   int        `json:"open_issues"`
+	ClosedIssues int        `json:"closed_issues"`
+}
+
+// toMilestone maps the wire form; number is the forge-specific issues-API value.
+func (m milestoneWire) toMilestone(number int) Milestone {
+	ms := Milestone{
+		Number: number, Title: m.Title, State: m.State,
+		OpenIssues: m.OpenIssues, ClosedIssues: m.ClosedIssues,
+	}
+	if m.DueOn != nil {
+		ms.DueOn = *m.DueOn
+	}
+	return ms
+}
+
+// PullRequest is a pull request. Body is needed to resolve "Closes #N".
+// MergeableState and ChangedFiles are only populated by the single-PR endpoint.
 type PullRequest struct {
-	Number int    `json:"number"`
-	Title  string `json:"title"`
-	Body   string `json:"body"`
-	Draft  bool   `json:"draft"`
+	Number         int       `json:"number"`
+	Title          string    `json:"title"`
+	Body           string    `json:"body,omitempty"`
+	Draft          bool      `json:"draft"`
+	State          string    `json:"state,omitempty"`
+	Author         string    `json:"author,omitempty"`
+	HeadRef        string    `json:"head_ref,omitempty"`
+	HeadSHA        string    `json:"head_sha,omitempty"`
+	BaseRef        string    `json:"base_ref,omitempty"`
+	URL            string    `json:"url,omitempty"`
+	Created        time.Time `json:"created,omitempty"`
+	Updated        time.Time `json:"updated,omitempty"`
+	Merged         bool      `json:"merged,omitempty"`
+	MergeableState string    `json:"mergeable_state,omitempty"`
+	ChangedFiles   int       `json:"changed_files,omitempty"`
+}
+
+// PRFile is one file changed by a pull request.
+type PRFile struct {
+	Path      string `json:"path"`
+	Additions int    `json:"additions"`
+	Deletions int    `json:"deletions"`
+}
+
+// CheckRun is a check-run on a commit. Conclusion is empty until the run
+// completes. App is the reporting app's slug (e.g. "github-actions").
+type CheckRun struct {
+	Name       string `json:"name"`
+	Status     string `json:"status"`
+	Conclusion string `json:"conclusion,omitempty"`
+	App        string `json:"app,omitempty"`
+}
+
+// CommitStatus is the latest legacy commit status for one context.
+type CommitStatus struct {
+	Context     string `json:"context"`
+	State       string `json:"state"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url,omitempty"`
+}
+
+// WorkflowRun is one GitHub Actions run. Actor is who the run is attributed
+// to; TriggeringActor is who actually caused it (they differ on re-runs and
+// bot-triggered events).
+type WorkflowRun struct {
+	Name            string    `json:"name"`
+	Event           string    `json:"event"`
+	Status          string    `json:"status"`
+	Conclusion      string    `json:"conclusion,omitempty"`
+	Actor           string    `json:"actor"`
+	TriggeringActor string    `json:"triggering_actor"`
+	HeadBranch      string    `json:"head_branch,omitempty"`
+	HeadSHA         string    `json:"head_sha"`
+	Created         time.Time `json:"created"`
+	URL             string    `json:"url"`
 }
 
 type Client interface {

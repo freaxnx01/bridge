@@ -51,6 +51,28 @@ func (Tmux) LaunchArgvNested(slot, dir string, agent agents.AgentSpec) ([]string
 	return []string{"sh", "-c", body}, nil
 }
 
+// LaunchArgvDetached returns argv that creates the session in the background
+// if it doesn't exist yet and returns immediately — no attach, no
+// switch-client. For non-interactive callers (the Telegram admin session via
+// `bridge launch`) that have no terminal to hand over.
+func (Tmux) LaunchArgvDetached(slot, dir string, agent agents.AgentSpec) ([]string, error) {
+	if slot == "" {
+		return nil, errors.New("launcher: empty slot")
+	}
+	if dir == "" {
+		return nil, errors.New("launcher: empty dir")
+	}
+	if agent.Bin == "" {
+		return nil, errors.New("launcher: agent has no Bin")
+	}
+	innerParts := append([]string{agent.Bin}, agent.Args...)
+	body := fmt.Sprintf(
+		"tmux has-session -t %s 2>/dev/null || tmux new-session -d -s %s -c %s %s",
+		shellQuote(slot), shellQuote(slot), shellQuote(dir), joinShellQuoted(innerParts),
+	)
+	return []string{"sh", "-c", body}, nil
+}
+
 func (Tmux) AttachArgv(slot string) []string {
 	return []string{"tmux", "attach-session", "-t", slot}
 }

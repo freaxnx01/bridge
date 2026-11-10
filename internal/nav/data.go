@@ -210,20 +210,21 @@ func gitFetchCmd(path, forgeName string) tea.Cmd {
 }
 
 // buildFetchCmd assembles the `git fetch` invocation for a worktree. For forges
-// that authenticate with a PAT/token (ado, github) it runs through
+// that authenticate with a PAT/token (ado, github, forgejo) it runs through
 // `direnv exec <path> git -c <helper> …` so the credential helper reads the
-// token direnv injects from the repo's .envrc — mirroring the clone path — and
-// falls back to plain git when direnv is unavailable. It always sets
+// token direnv injects from the repo's .envrc — mirroring the clone path. When
+// direnv is unavailable (e.g. Windows) it runs plain git with the same helper,
+// which then reads the token from the process env. It always sets
 // GIT_TERMINAL_PROMPT=0 so a missing or invalid credential fails fast instead of
 // leaking an interactive password prompt into the Bubble Tea UI.
 func buildFetchCmd(path, forgeName string, direnvAvailable bool) *exec.Cmd {
-	fetchArgs := []string{"-C", path, "fetch", "--quiet"}
+	credArgs := gitauth.CredentialArgs(forgeName)
+	gitArgs := append(credArgs, "-C", path, "fetch", "--quiet")
 	var cmd *exec.Cmd
-	if helper := gitauth.CredentialHelper(forgeName); helper != "" && direnvAvailable {
-		args := append([]string{"exec", path, "git", "-c", helper}, fetchArgs...)
-		cmd = exec.Command("direnv", args...)
+	if credArgs != nil && direnvAvailable {
+		cmd = exec.Command("direnv", append([]string{"exec", path, "git"}, gitArgs...)...)
 	} else {
-		cmd = exec.Command("git", fetchArgs...)
+		cmd = exec.Command("git", gitArgs...)
 	}
 	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
 	return cmd

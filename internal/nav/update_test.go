@@ -3,6 +3,7 @@ package nav
 import (
 	"context"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1418,5 +1419,212 @@ func TestUpdatePicker_R_FilterFocused_StillTypesIntoFilter(t *testing.T) {
 	}
 	if fetched {
 		t.Error("bare r in the filter must not trigger a forge fetch")
+	}
+}
+
+// clearKeys are the picker keys that clear a non-empty filter and quit on an
+// empty one (#282).
+var clearKeys = []struct {
+	name string
+	msg  tea.KeyMsg
+}{
+	{"esc", tea.KeyMsg{Type: tea.KeyEsc}},
+	{"ctrl+c", tea.KeyMsg{Type: tea.KeyCtrlC}},
+}
+
+// isQuit reports whether cmd is the quit command. It type-asserts rather than
+// comparing messages with ==, which panics on an uncomparable dynamic type —
+// and the commands it is handed include arbitrary textinput ones.
+func isQuit(cmd tea.Cmd) bool {
+	if cmd == nil {
+		return false
+	}
+	_, ok := cmd().(tea.QuitMsg)
+	return ok
+}
+
+func TestUpdatePicker_ClearKey_ClearsNonEmptyFilter(t *testing.T) {
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			m := initialModel(Config{}) // starts on focusFilter
+			m.localRepos = []repoRow{{label: "github/public/bridge"}, {label: "github/public/agent-os"}}
+			m.filter.SetValue("workflow")
+			m.pickerSel = 3
+
+			out, cmd := m.Update(k.msg)
+			got := out.(Model)
+
+			if got.filter.Value() != "" {
+				t.Errorf("filter = %q, want empty after %s", got.filter.Value(), k.name)
+			}
+			if got.pickerSel != 0 {
+				t.Errorf("pickerSel = %d, want 0 after clearing the filter", got.pickerSel)
+			}
+			if cmd != nil {
+				t.Errorf("%s that clears the filter must not return a command (it would quit)", k.name)
+			}
+		})
+	}
+}
+
+func TestUpdatePicker_ClearKey_SecondPressQuitsAfterClearing(t *testing.T) {
+	// The property that justifies overloading ctrl+c: the picker stays
+	// escapable, so the same key twice in a row clears and then leaves.
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			m := initialModel(Config{})
+			m.filter.SetValue("workflow")
+
+			out, cmd := m.Update(k.msg)
+			if cmd != nil {
+				t.Fatalf("the first %s should clear the filter, not quit", k.name)
+			}
+
+			_, cmd = out.(Model).Update(k.msg)
+
+			if !isQuit(cmd) {
+				t.Errorf("a second %s should quit now that the filter is empty", k.name)
+			}
+		})
+	}
+}
+
+func TestUpdatePicker_ClearKey_EmptyFilterQuitsFromEveryFocus(t *testing.T) {
+	// focusFilter is the start focus, where ctrl+c used to be a dead key.
+	for _, k := range clearKeys {
+		for _, pf := range []focus{focusFilter, focusList} {
+			t.Run(fmt.Sprintf("%s/focus=%d", k.name, pf), func(t *testing.T) {
+				m := initialModel(Config{})
+				m.pickerFocus = pf
+
+				_, cmd := m.Update(k.msg)
+
+				if !isQuit(cmd) {
+					t.Errorf("%s with an empty filter should quit from focus %d", k.name, pf)
+				}
+			})
+		}
+	}
+}
+
+func TestUpdatePicker_ClearKey_ClearsFromFocusList(t *testing.T) {
+	// The focus you land on when returning from the dashboard (update.go:636),
+	// where the filter is not focused: the case issue #282 reports.
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			m := initialModel(Config{})
+			m.localRepos = []repoRow{{label: "github/public/bridge"}}
+			m.filter.SetValue("workflow")
+			m.pickerFocus = focusList
+
+			out, cmd := m.Update(k.msg)
+			got := out.(Model)
+
+			if got.filter.Value() != "" {
+				t.Errorf("filter = %q, want empty after %s from focusList", got.filter.Value(), k.name)
+			}
+			if got.pickerFocus != focusList {
+				t.Errorf("pickerFocus = %d, want focusList (clearing must not move focus)", got.pickerFocus)
+			}
+			if cmd != nil {
+				t.Errorf("%s that clears the filter must not quit", k.name)
+			}
+		})
+	}
+}
+
+func TestUpdatePicker_ClearKey_WhitespaceOnlyFilterCountsAsSet(t *testing.T) {
+	// A lone space leaves the list unfiltered but hides Recent
+	// (recentVisible tests == "" at update.go:400), so the key must clear it.
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			m := initialModel(Config{})
+			m.filter.SetValue("   ")
+
+			out, cmd := m.Update(k.msg)
+			got := out.(Model)
+
+			if got.filter.Value() != "" {
+				t.Errorf("filter = %q, want empty after %s on a whitespace-only value", got.filter.Value(), k.name)
+			}
+			if cmd != nil {
+				t.Errorf("%s on a whitespace-only filter should clear, not quit", k.name)
+			}
+		})
+	}
+}
+
+func TestUpdatePicker_ClearKey_KeepsForgeFilter(t *testing.T) {
+	for _, k := range clearKeys {
+		t.Run(k.name, func(t *testing.T) {
+			m := initialModel(Config{})
+			m.filter.SetValue("workflow")
+			m.forgeFilter = "github"
+
+			out, _ := m.Update(k.msg)
+			got := out.(Model)
+
+			if got.forgeFilter != "github" {
+				t.Errorf("forgeFilter = %q, want %q: the forge scope is independent of the text filter", got.forgeFilter, "github")
+			}
+		})
+	}
+}
+
+func TestUpdatePicker_Q_StillQuitsOnFirstPressWithFilterSet(t *testing.T) {
+	// esc/ctrl+c gaining a second meaning must not make the picker hard to
+	// leave: q from a non-filter focus still quits immediately.
+	m := initialModel(Config{})
+	m.filter.SetValue("workflow")
+	m.pickerFocus = focusList
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+
+	if !isQuit(cmd) {
+		t.Errorf("q from focusList should quit on the first press")
+	}
+}
+
+func TestUpdatePicker_Q_StillTypesIntoFocusedFilter(t *testing.T) {
+	m := initialModel(Config{}) // focusFilter
+	m.filter.SetValue("se")
+
+	out, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("q")})
+	got := out.(Model)
+
+	if isQuit(cmd) {
+		t.Fatalf("q typed into the focused filter must not quit")
+	}
+	if got.filter.Value() != "seq" {
+		t.Errorf("filter = %q, want %q", got.filter.Value(), "seq")
+	}
+}
+
+func TestUpdatePicker_LegendOpen_EscClosesLegendNotFilter(t *testing.T) {
+	// The legend intercept (update.go:250-257) runs ahead of updatePicker.
+	m := initialModel(Config{})
+	m.filter.SetValue("workflow")
+	m.showLegend = true
+
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyEsc})
+	got := out.(Model)
+
+	if got.showLegend {
+		t.Errorf("esc with the legend open should close the legend")
+	}
+	if got.filter.Value() != "workflow" {
+		t.Errorf("filter = %q, want %q: the legend's esc must not reach the filter", got.filter.Value(), "workflow")
+	}
+}
+
+func TestUpdatePicker_LegendOpen_CtrlCStillQuitsWithFilterSet(t *testing.T) {
+	m := initialModel(Config{})
+	m.filter.SetValue("workflow")
+	m.showLegend = true
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyCtrlC})
+
+	if !isQuit(cmd) {
+		t.Errorf("ctrl+c with the legend open should still quit, not clear the filter")
 	}
 }
