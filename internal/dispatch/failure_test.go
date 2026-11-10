@@ -126,6 +126,9 @@ func TestNextAction(t *testing.T) {
 		{name: "row 20: no decision on a failure", labels: failed,
 			run: failure("transient", "", 1), hasRun: true,
 			want: Action{ActionHuman, "unknown: transient"}},
+		{name: "row 20: failure without a class", labels: failed,
+			run: failure("", "stop", 1), hasRun: true,
+			want: Action{ActionHuman, "no failure class"}},
 	}
 
 	// Rows 14/15: the pipeline said it would retry. Exactly staleRetryAfter old

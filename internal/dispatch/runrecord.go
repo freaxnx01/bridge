@@ -67,6 +67,11 @@ func ParseRunMarker(body string) (RunRecord, bool) {
 	if !strings.HasPrefix(line, markerPrefix) || !strings.HasSuffix(line, markerSuffix) {
 		return RunRecord{}, false
 	}
+	// A line too short to hold both affixes satisfies both checks by overlapping
+	// them (`<!-- ai-run: -->` shares its space), so measure before slicing.
+	if len(line) < len(markerPrefix)+len(markerSuffix) {
+		return RunRecord{}, false
+	}
 	raw := line[len(markerPrefix) : len(line)-len(markerSuffix)]
 
 	var m runMarker

@@ -229,7 +229,7 @@ wins.
 | 17 | class `transient` or `rate_limit`, decision `stop`, attempt absent | Human | `<class>, no attempt cap` |
 | 18 | class `task_failure`, decision `stop` | Human | `task_failure` |
 | 19 | class `api_auth`, `model_not_found` or `bug` | Human | `<class>` |
-| 20 | anything else (unknown class, no decision on a failure) | Human | `unknown: <class>` |
+| 20 | anything else (unknown class, no decision on a failure) | Human | `unknown: <class>`, or `no failure class` when the marker carries none |
 
 Notes:
 

@@ -39,6 +39,8 @@ func TestParseRunMarker(t *testing.T) {
 		{"version missing", marker(`{"class":"bug"}`), false, RunRecord{}},
 		{"malformed json", marker(`{"v":1,`), false, RunRecord{}},
 		{"prefix without spaces", "## run\n<!--ai-run:" + fullMarkerJSON + "-->", false, RunRecord{}},
+		// Short enough that the prefix and the suffix overlap on the one space.
+		{"empty marker line", "## run\n<!-- ai-run: -->", false, RunRecord{}},
 		{"no marker at all", "## ai-implement parked\n\nAttempt cap reached.", false, RunRecord{}},
 		{"unknown field is ignored", marker(`{"v":1,"class":"bug","future":1}`), true,
 			RunRecord{Class: "bug"}},

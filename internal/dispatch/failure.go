@@ -136,6 +136,9 @@ func runAction(r RunRecord, now time.Time) Action {
 	case "api_auth", "model_not_found", "bug":
 		return Action{ActionHuman, r.Class}
 	}
+	if r.Class == "" {
+		return Action{ActionHuman, "no failure class"}
+	}
 	return Action{ActionHuman, "unknown: " + r.Class}
 }
 
