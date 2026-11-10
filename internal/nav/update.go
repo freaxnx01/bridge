@@ -460,13 +460,13 @@ func (m Model) updatePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	case "ctrl+a":
 		// Picker-global like ctrl+f: the picker opens with the filter focused,
-		// where a bare letter key would be typed instead of bound.
-		if len(m.archived) == 0 {
+		// where a bare letter key would be typed instead of bound. With nothing
+		// archived it falls through, so the filter keeps it as line-start.
+		if len(m.archived) > 0 {
+			m.showArchived = !m.showArchived
+			m = m.clampPickerCursors()
 			return m, nil
 		}
-		m.showArchived = !m.showArchived
-		m.pickerSel = clampInt(m.pickerSel, 0, len(m.visibleRepos())-1)
-		return m, nil
 	case "ctrl+r":
 		// Picker-global twin of the focusList 'r' below, so refresh is reachable
 		// from focusFilter — where the picker starts and a bare 'r' has to stay

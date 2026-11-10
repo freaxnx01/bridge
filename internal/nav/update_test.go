@@ -1786,3 +1786,18 @@ func TestUpdate_RemoteMsgShrinksRecent_ClampsRecentSel(t *testing.T) {
 		t.Errorf("recentSel = %d with %d Recent rows, want it clamped", got.recentSel, n)
 	}
 }
+
+func TestUpdatePicker_CtrlA_NothingArchived_ReachesFilterAsLineStart(t *testing.T) {
+	// With nothing to reveal, ctrl+a must not be swallowed: the filter is a
+	// readline-style input where it moves the cursor to the start of the line.
+	m := archivedModel()
+	m.archived = nil
+	m.pickerFocus = focusFilter
+	m.filter.Focus()
+	m.filter.SetValue("flow")
+	m.filter.CursorEnd()
+	out, _ := m.Update(tea.KeyMsg{Type: tea.KeyCtrlA})
+	if pos := out.(Model).filter.Position(); pos != 0 {
+		t.Errorf("filter cursor = %d after ctrl+a, want 0 (line start)", pos)
+	}
+}
