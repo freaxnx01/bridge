@@ -183,7 +183,7 @@ func runDoctorChecks() []checkResult {
 			name:      "repo-meta.json cache",
 			status:    statusWarn,
 			detail:    "not present — meta-keyword TAB fallback has no data",
-			remediate: "run `bridge sync` (or similar) to populate; basename completion still works",
+			remediate: "run `bridge list -r --refresh` to populate; basename completion still works",
 		})
 	}
 
