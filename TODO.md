@@ -182,3 +182,6 @@ session summaries, auto-labeling, WebUI panels — see issue tracker for these).
 ### bridge-bot (Telegram admin session, `@agent_dev_ctl_bot`)
 
 - [ ] How to call `/usage` + `/clear`, or other slash cmds from the chat so they are executed in the CC CLI session?
+
+## Inbox
+- [ ] Local golangci-lint on srvdmsk8s01 is built with go1.25 but go.mod targets go 1.26.11, so `golangci-lint run` fails ("Go language version (go1.25) used to build golangci-lint is lower than the targeted Go version"). Rebuild/upgrade golangci-lint with go ≥1.26 (seen 2026-11-11 while enriching #366).
