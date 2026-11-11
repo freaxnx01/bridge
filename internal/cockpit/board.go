@@ -71,7 +71,9 @@ type Board struct {
 	Errors           []SourceError        `json:"errors"`
 }
 
-// RepoData is the collected state of one repo.
+// RepoData is the collected state of one repo. Comments holds the run-report
+// thread of each inbox candidate whose comments have been read at least once,
+// keyed by issue number; CommentErrs holds the last fetch error per issue.
 type RepoData struct {
 	Forge, Owner, Name, Path string
 	Wired                    bool
@@ -79,6 +81,8 @@ type RepoData struct {
 	PRs                      []forge.PullRequest
 	Milestones               []forge.Milestone
 	Runs                     []forge.WorkflowRun
+	Comments                 map[int][]forge.Comment
+	CommentErrs              map[int]string
 }
 
 // Input is everything BuildBoard needs.
