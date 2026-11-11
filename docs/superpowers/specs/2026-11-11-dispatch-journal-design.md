@@ -53,8 +53,10 @@ enabled on 2026-11-11 with a systemd drop-in that forces `--dry-run`.
      it.
    - `lanes_in_window` lists the names of the lanes whose window covers `now`,
      with `default` included when the implicit default lane does. It is
-     computed from config alone, so paused and out-of-window records have it
-     without a network call. It is empty when the config could not be read.
+     computed from config alone, without a network call. An out-of-window
+     record has an empty list. It is also empty on a paused record (the pause
+     gate runs before the schedule is resolved) and when the config could not
+     be read.
    - `repos` lists `owner/name` for each repo fetched.
    - `retry_only` is set on `--retry-only` ticks (#253).
    - Each decision has `owner`, `repo`, `issue`, `title`, `kind`
