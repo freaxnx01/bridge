@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"maps"
 	"slices"
@@ -28,6 +29,26 @@ const (
 	sourceSessions = "sessions"
 )
 
+// SSE event names the collector publishes, one per payload it serves.
+const (
+	EventPipeline = "pipeline-updated"
+	EventInbox    = "inbox-updated"
+)
+
+// ErrUnknownRepo means the requested repo is not a wired GitHub repo in the
+// collector's last snapshot.
+var ErrUnknownRepo = errors.New("unknown repo")
+
+// ErrNotCandidate means the requested issue is not an inbox candidate of that
+// repo in the collector's last snapshot.
+var ErrNotCandidate = errors.New("not an inbox candidate")
+
+// detailTTL bounds how often an issue detail costs a live forge read: a thread
+// read this recently is served from the cache instead. The runs tick already
+// re-reads a repo within about a minute of a run ending, so the panel stays
+// current, and a page looping the open endpoint cannot burn the REST quota.
+const detailTTL = time.Minute
+
 // Sources are the data providers the Collector polls. All funcs must be non-nil.
 type Sources struct {
 	Repos      func() ([]core.Repo, error)
@@ -36,8 +57,11 @@ type Sources struct {
 	PRs        func(ctx context.Context, r core.Repo) ([]forge.PullRequest, error)
 	Milestones func(ctx context.Context, r core.Repo) ([]forge.Milestone, error)
 	Runs       func(ctx context.Context, r core.Repo) ([]forge.WorkflowRun, error)
-	Sessions   func(ctx context.Context) ([]agentview.Session, error)
-	Paused     func() bool
+	// Issue reads one issue plus its full comment thread — the inbox's run
+	// markers, and the live issue detail.
+	Issue    func(ctx context.Context, r core.Repo, number int) (forge.Issue, []forge.Comment, error)
+	Sessions func(ctx context.Context) ([]agentview.Session, error)
+	Paused   func() bool
 }
 
 // Intervals are the refresh periods per source. A zero interval disables the ticker.
@@ -54,12 +78,17 @@ type Collector struct {
 	src      Sources
 	iv       Intervals
 	now      func() time.Time
-	onChange func()
+	onChange func(event string)
 
 	// issuesBusy / runsBusy coalesce overlapping CollectIssues / CollectRuns
 	// calls (ticker vs. refresh): a second call while one runs returns at once.
 	issuesBusy atomic.Bool
 	runsBusy   atomic.Bool
+
+	// cacheMu guards the comment cache alone: it is filled from the per-repo
+	// fan-out goroutines, which run without mu.
+	cacheMu  sync.Mutex
+	comments map[issueKey]cachedComments
 
 	mu          sync.Mutex
 	repos       []RepoData
@@ -68,12 +97,31 @@ type Collector struct {
 	errs        map[string]SourceError
 	board       Board
 	boardJSON   []byte
+	inbox       Inbox
+	inboxJSON   []byte
 }
 
-// NewCollector builds a Collector. onChange may be nil.
-func NewCollector(src Sources, iv Intervals, now func() time.Time, onChange func()) *Collector {
+// issueKey identifies one issue across repos.
+type issueKey struct {
+	repo   string // "owner/name"
+	number int
+}
+
+// cachedComments is one issue's thread plus the Updated it was read at: a new
+// comment moves Updated, so an unchanged Updated means an unchanged thread.
+// readAt is when the read happened, which is what detailTTL is measured against.
+type cachedComments struct {
+	updated  time.Time
+	readAt   time.Time
+	comments []forge.Comment
+}
+
+// NewCollector builds a Collector. onChange may be nil; it is called with the
+// name of the payload that changed (EventPipeline, EventInbox).
+func NewCollector(src Sources, iv Intervals, now func() time.Time, onChange func(event string)) *Collector {
 	c := &Collector{
 		src: src, iv: iv, now: now, onChange: onChange,
+		comments:    map[issueKey]cachedComments{},
 		collectedAt: map[string]time.Time{}, errs: map[string]SourceError{},
 	}
 	c.mu.Lock()
@@ -157,6 +205,62 @@ func (c *Collector) Board() Board {
 	return b
 }
 
+// Inbox returns a copy of the latest inbox.
+func (c *Collector) Inbox() Inbox {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	ib := c.inbox
+	ib.Cards = slices.Clone(ib.Cards)
+	ib.Waiting = slices.Clone(ib.Waiting)
+	ib.Parked = slices.Clone(ib.Parked)
+	ib.Errors = maps.Clone(ib.Errors)
+	return ib
+}
+
+// IssueDetail reads one issue and its run history, live when the cached thread
+// is older than detailTTL, so an open detail reflects a report that landed
+// since the last tick. The issue must be an inbox candidate of a wired GitHub
+// repo in the last snapshot: the detail is the inbox's own detail, and the
+// endpoint serving it reads nothing the inbox does not already list.
+func (c *Collector) IssueDetail(ctx context.Context, owner, name string, number int) (IssueDetail, error) {
+	r, issue, err := c.candidateIssue(owner, name, number)
+	if err != nil {
+		return IssueDetail{}, err
+	}
+	repo := repoKey(r)
+	k := issueKey{repo, number}
+	if comments, ok := c.freshComments(k, c.now()); ok {
+		return BuildIssueDetail(repo, issue, comments), nil
+	}
+	live, comments, err := c.src.Issue(ctx, r, number)
+	if err != nil {
+		return IssueDetail{}, fmt.Errorf("issue %s#%d: %w", repo, number, err)
+	}
+	c.storeComments(k, live.Updated, comments)
+	return BuildIssueDetail(repo, live, comments), nil
+}
+
+// candidateIssue returns the repo plus its snapshot issue when owner/name is a
+// wired GitHub repo holding number as an inbox candidate, else ErrUnknownRepo
+// or ErrNotCandidate.
+func (c *Collector) candidateIssue(owner, name string, number int) (core.Repo, forge.Issue, error) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	for _, rd := range c.repos {
+		if rd.Owner != owner || rd.Name != name || rd.Forge != "github" || !rd.Wired {
+			continue
+		}
+		r := core.Repo{Forge: rd.Forge, Owner: rd.Owner, Name: rd.Name, Path: rd.Path}
+		for _, i := range rd.Issues {
+			if i.Number == number && isInboxCandidate(i.Labels) {
+				return r, i, nil
+			}
+		}
+		return core.Repo{}, forge.Issue{}, fmt.Errorf("%w: %s/%s#%d", ErrNotCandidate, owner, name, number)
+	}
+	return core.Repo{}, forge.Issue{}, fmt.Errorf("%w: %s/%s", ErrUnknownRepo, owner, name)
+}
+
 // CollectIssues refreshes issues for every repo, plus PRs and milestones for
 // wired GitHub repos that have a Ready/Held candidate.
 func (c *Collector) CollectIssues(ctx context.Context) {
@@ -194,6 +298,7 @@ func (c *Collector) CollectIssues(ctx context.Context) {
 	c.repos = next
 	c.collectedAt[sourceIssues] = c.now()
 	c.mu.Unlock()
+	c.pruneComments(next)
 	c.publish()
 }
 
@@ -218,28 +323,46 @@ func (c *Collector) CollectRuns(ctx context.Context) {
 	}
 	c.mu.Unlock()
 
-	type runsResult struct {
-		runs []forge.WorkflowRun
-		err  error
-	}
 	results := fanOut(todo, func(r core.Repo) runsResult {
 		runs, err := c.src.Runs(ctx, r)
 		return runsResult{runs, err}
 	})
 
 	c.mu.Lock()
-	idx = c.repoIndexLocked()
+	finished := c.applyRunsLocked(todo, results)
+	c.collectedAt[sourceRuns] = c.now()
+	c.mu.Unlock()
+	c.publish()
+	// A run that just ended has posted its report: read it now rather than at
+	// the next 10-minute issues tick.
+	for _, r := range finished {
+		c.CollectRepo(ctx, r.Owner, r.Name)
+	}
+}
+
+type runsResult struct {
+	runs []forge.WorkflowRun
+	err  error
+}
+
+// applyRunsLocked merges the fetched runs into the snapshot and returns the
+// repos whose in-flight run for an inbox candidate has just ended.
+func (c *Collector) applyRunsLocked(todo []core.Repo, results []runsResult) []core.Repo {
+	idx := c.repoIndexLocked()
+	before := make(map[string]map[string]bool, len(todo))
+	for _, r := range todo {
+		before[repoKey(r)] = inFlightRunURLs(idx[repoKey(r)])
+	}
 	fetched := map[string]bool{}
 	for i, r := range todo {
-		fetched[repoKey(r)] = true
-		src := "runs " + repoKey(r)
-		rd := idx[repoKey(r)]
+		k := repoKey(r)
+		fetched[k] = true
 		if results[i].err != nil {
-			c.setErrLocked(src, results[i].err)
+			c.setErrLocked("runs "+k, results[i].err)
 			continue
 		}
-		delete(c.errs, src)
-		if rd != nil {
+		delete(c.errs, "runs "+k)
+		if rd := idx[k]; rd != nil {
 			rd.Runs = results[i].runs
 		}
 	}
@@ -249,9 +372,43 @@ func (c *Collector) CollectRuns(ctx context.Context) {
 			delete(c.errs, "runs "+k)
 		}
 	}
-	c.collectedAt[sourceRuns] = c.now()
-	c.mu.Unlock()
-	c.publish()
+	return finishedRepos(todo, before, idx)
+}
+
+// finishedRepos returns the repos holding a run URL that was in flight for an
+// inbox candidate before the swap and is not afterwards.
+func finishedRepos(todo []core.Repo, before map[string]map[string]bool, idx map[string]*RepoData) []core.Repo {
+	var out []core.Repo
+	for _, r := range todo {
+		still := inFlightRunURLs(idx[repoKey(r)])
+		for url := range before[repoKey(r)] {
+			if !still[url] {
+				out = append(out, r)
+				break
+			}
+		}
+	}
+	return out
+}
+
+// inFlightRunURLs returns the URLs of the repo's runs that are in flight for
+// one of its inbox candidates.
+func inFlightRunURLs(rd *RepoData) map[string]bool {
+	out := map[string]bool{}
+	if rd == nil {
+		return out
+	}
+	for _, i := range rd.Issues {
+		if !isInboxCandidate(i.Labels) {
+			continue
+		}
+		for _, r := range rd.Runs {
+			if isIssueRunFor(i, r) {
+				out[r.URL] = true
+			}
+		}
+	}
+	return out
 }
 
 // CollectSessions refreshes the local agent sessions.
@@ -338,7 +495,10 @@ func (c *Collector) fetchIssues(ctx context.Context, r core.Repo) repoResult {
 		return repoResult{err: err}
 	}
 	rd.Issues = issues
-	if rd.Forge == "github" && rd.Wired && hasCandidate(issues) {
+	if rd.Forge != "github" || !rd.Wired {
+		return repoResult{data: rd}
+	}
+	if hasCandidate(issues) {
 		if rd.PRs, err = c.src.PRs(ctx, r); err != nil {
 			return repoResult{err: fmt.Errorf("prs: %w", err)}
 		}
@@ -346,7 +506,99 @@ func (c *Collector) fetchIssues(ctx context.Context, r core.Repo) repoResult {
 			return repoResult{err: fmt.Errorf("milestones: %w", err)}
 		}
 	}
+	rd.Comments, rd.CommentErrs = c.fetchComments(ctx, r, issues)
 	return repoResult{data: rd}
+}
+
+// fetchComments reads the comment thread of every inbox candidate, skipping an
+// issue whose Updated has not moved since the cached read. A failure is per
+// issue and never fails the repo: the stale thread stays and the error shows on
+// the card, so a card cannot silently disappear.
+func (c *Collector) fetchComments(ctx context.Context, r core.Repo, issues []forge.Issue) (map[int][]forge.Comment, map[int]string) {
+	out := map[int][]forge.Comment{}
+	var errs map[int]string
+	for _, i := range issues {
+		if !isInboxCandidate(i.Labels) {
+			continue
+		}
+		k := issueKey{repoKey(r), i.Number}
+		if cached, ok := c.cachedComments(k, i.Updated); ok {
+			out[i.Number] = cached
+			continue
+		}
+		_, comments, err := c.src.Issue(ctx, r, i.Number)
+		if err != nil {
+			errs = recordCommentErr(errs, i.Number, err)
+			if stale, ok := c.staleComments(k); ok {
+				out[i.Number] = stale
+			}
+			continue
+		}
+		c.storeComments(k, i.Updated, comments)
+		out[i.Number] = comments
+	}
+	return out, errs
+}
+
+func recordCommentErr(errs map[int]string, number int, err error) map[int]string {
+	if errs == nil {
+		errs = map[int]string{}
+	}
+	errs[number] = err.Error()
+	return errs
+}
+
+// cachedComments returns the cached thread when it was read at this Updated.
+func (c *Collector) cachedComments(k issueKey, updated time.Time) ([]forge.Comment, bool) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	e, ok := c.comments[k]
+	if !ok || !e.updated.Equal(updated) {
+		return nil, false
+	}
+	return e.comments, true
+}
+
+// freshComments returns the cached thread when it was read less than detailTTL
+// ago, whatever Updated it was read at.
+func (c *Collector) freshComments(k issueKey, now time.Time) ([]forge.Comment, bool) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	e, ok := c.comments[k]
+	if !ok || now.Sub(e.readAt) >= detailTTL {
+		return nil, false
+	}
+	return e.comments, true
+}
+
+// staleComments returns the cached thread whatever Updated it was read at.
+func (c *Collector) staleComments(k issueKey) ([]forge.Comment, bool) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	e, ok := c.comments[k]
+	return e.comments, ok
+}
+
+// storeComments caches a thread under the Updated it was read at. A failed
+// read never gets here, so the next tick retries it.
+func (c *Collector) storeComments(k issueKey, updated time.Time, comments []forge.Comment) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	c.comments[k] = cachedComments{updated: updated, readAt: c.now(), comments: comments}
+}
+
+// pruneComments drops the threads of issues that are no longer inbox
+// candidates, so a closed or relabelled issue stops costing memory.
+func (c *Collector) pruneComments(repos []RepoData) {
+	live := map[issueKey]bool{}
+	for _, rd := range repos {
+		for number := range rd.Comments {
+			live[issueKey{repoName(rd), number}] = true
+		}
+	}
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	maps.DeleteFunc(c.comments, func(k issueKey, _ cachedComments) bool { return !live[k] })
 }
 
 func baseRepoData(r core.Repo, wired bool) RepoData {
@@ -415,20 +667,26 @@ func hasAIImplement(issues []forge.Issue) bool {
 	return slices.ContainsFunc(issues, func(i forge.Issue) bool { return hasAny(i.Labels, dispatch.LabelAIImplement) })
 }
 
-// publish rebuilds the board and fires onChange (outside the lock) when its
-// content, ignoring CollectedAt, changed.
+// publish rebuilds board and inbox and fires onChange (outside the lock) once
+// per payload whose content, ignoring CollectedAt, changed.
 func (c *Collector) publish() {
 	c.mu.Lock()
-	changed := c.rebuildLocked()
+	board, inbox := c.rebuildLocked()
 	c.mu.Unlock()
-	if changed && c.onChange != nil {
-		c.onChange()
+	if c.onChange == nil {
+		return
+	}
+	if board {
+		c.onChange(EventPipeline)
+	}
+	if inbox {
+		c.onChange(EventInbox)
 	}
 }
 
-// rebuildLocked recomputes the board and reports whether it differs from the
-// previous one apart from CollectedAt.
-func (c *Collector) rebuildLocked() bool {
+// rebuildLocked recomputes board and inbox and reports, per payload, whether
+// it differs from the previous one apart from CollectedAt.
+func (c *Collector) rebuildLocked() (board, inbox bool) {
 	b := BuildBoard(Input{Repos: slices.Clone(c.repos), Sessions: c.sessions, DispatchPaused: c.src.Paused()})
 	b.IntervalsSeconds = map[string]int{
 		sourceIssues:   int(c.iv.Issues / time.Second),
@@ -442,9 +700,22 @@ func (c *Collector) rebuildLocked() bool {
 		b.Errors = []SourceError{}
 	}
 	raw, err := json.Marshal(b)
-	changed := err != nil || !bytes.Equal(raw, c.boardJSON)
+	board = err != nil || !bytes.Equal(raw, c.boardJSON)
 	c.boardJSON = raw
 	b.CollectedAt = maps.Clone(c.collectedAt)
 	c.board = b
+	return board, c.rebuildInboxLocked()
+}
+
+// rebuildInboxLocked recomputes the inbox and reports whether it changed. The
+// clock is read on every rebuild so a marker going stale (a retry that never
+// reported) surfaces on the next tick, with no new data needed.
+func (c *Collector) rebuildInboxLocked() bool {
+	ib := BuildInbox(InboxInput{Repos: slices.Clone(c.repos), Now: c.now()})
+	raw, err := json.Marshal(ib)
+	changed := err != nil || !bytes.Equal(raw, c.inboxJSON)
+	c.inboxJSON = raw
+	ib.CollectedAt = c.collectedAt[sourceIssues]
+	c.inbox = ib
 	return changed
 }

@@ -248,9 +248,11 @@ type CommitStatus struct {
 
 // WorkflowRun is one GitHub Actions run. Actor is who the run is attributed
 // to; TriggeringActor is who actually caused it (they differ on re-runs and
-// bot-triggered events).
+// bot-triggered events). DisplayTitle is what GitHub shows for the run — the
+// issue title for an `issues` event, the workflow name for a manual dispatch.
 type WorkflowRun struct {
 	Name            string    `json:"name"`
+	DisplayTitle    string    `json:"display_title,omitempty"`
 	Event           string    `json:"event"`
 	Status          string    `json:"status"`
 	Conclusion      string    `json:"conclusion,omitempty"`

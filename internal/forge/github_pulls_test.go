@@ -97,6 +97,7 @@ func TestGithubListWorkflowRuns_FiltersAndMapsActors(t *testing.T) {
 	var uri string
 	srv := serveJSON(t, `{"total_count":1,"workflow_runs":[
 	  {"name":"agent","event":"issues","status":"completed","conclusion":"success",
+	   "display_title":"fix(nav): x",
 	   "actor":{"login":"freaxnx01"},"triggering_actor":{"login":"github-actions[bot]"},
 	   "head_branch":"ai/41","head_sha":"abc","created_at":"2026-10-01T10:00:00Z",
 	   "html_url":"https://github.com/o/r/actions/runs/1"}]}`, &uri)
@@ -113,6 +114,9 @@ func TestGithubListWorkflowRuns_FiltersAndMapsActors(t *testing.T) {
 	}
 	if runs[0].Name != "agent" || runs[0].Event != "issues" || runs[0].HeadBranch != "ai/41" || runs[0].Created.IsZero() {
 		t.Errorf("run fields: %+v", runs[0])
+	}
+	if runs[0].DisplayTitle != "fix(nav): x" {
+		t.Errorf("DisplayTitle = %q, want %q", runs[0].DisplayTitle, "fix(nav): x")
 	}
 }
 

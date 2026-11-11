@@ -3,6 +3,7 @@ package cockpit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -14,29 +15,104 @@ import (
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
-// fakeWorld backs Sources with maps and call counters.
+// fakeWorld backs Sources with maps and call counters. The single-issue maps
+// (comments, issueErr, detailIssue, detailCalls) are keyed "owner/name#number".
 type fakeWorld struct {
-	mu         sync.Mutex
-	repos      []core.Repo
-	wired      map[string]bool
-	issues     map[string][]forge.Issue
-	issuesErr  map[string]error
-	runs       map[string][]forge.WorkflowRun
-	prCalls    map[string]int
-	msCalls    map[string]int
-	runCalls   map[string]int
-	issueCalls map[string]int
-	sessions   []agentview.Session
-	sessErr    error
-	paused     bool
+	mu          sync.Mutex
+	repos       []core.Repo
+	wired       map[string]bool
+	issues      map[string][]forge.Issue
+	issuesErr   map[string]error
+	runs        map[string][]forge.WorkflowRun
+	comments    map[string][]forge.Comment
+	issueErr    map[string]error
+	detailIssue map[string]forge.Issue
+	prCalls     map[string]int
+	msCalls     map[string]int
+	runCalls    map[string]int
+	issueCalls  map[string]int
+	detailCalls map[string]int
+	sessions    []agentview.Session
+	sessErr     error
+	paused      bool
 }
 
 func newWorld(repos ...core.Repo) *fakeWorld {
 	return &fakeWorld{
 		repos: repos, wired: map[string]bool{}, issues: map[string][]forge.Issue{},
 		issuesErr: map[string]error{}, runs: map[string][]forge.WorkflowRun{},
-		prCalls: map[string]int{}, msCalls: map[string]int{}, runCalls: map[string]int{}, issueCalls: map[string]int{},
+		comments: map[string][]forge.Comment{}, issueErr: map[string]error{},
+		detailIssue: map[string]forge.Issue{},
+		prCalls:     map[string]int{}, msCalls: map[string]int{}, runCalls: map[string]int{},
+		issueCalls: map[string]int{}, detailCalls: map[string]int{},
 	}
+}
+
+// issueKeyOf is the key of the single-issue maps.
+func issueKeyOf(r core.Repo, number int) string { return fmt.Sprintf("%s#%d", key(r), number) }
+
+// set stores a value under lock; the collector reads these from its fan-out
+// goroutines, so the test must not write them bare.
+func (w *fakeWorld) set(f func()) {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	f()
+}
+
+func (w *fakeWorld) calls(m map[string]int, k string) int {
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	return m[k]
+}
+
+// clock is a manually advanced time source the collector may read concurrently.
+type clock struct {
+	mu sync.Mutex
+	t  time.Time
+}
+
+func newClock(t time.Time) *clock { return &clock{t: t} }
+
+func (c *clock) now() time.Time {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.t
+}
+
+func (c *clock) advance(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.t = c.t.Add(d)
+}
+
+// events records the SSE event names the collector published.
+type events struct {
+	mu   sync.Mutex
+	seen []string
+}
+
+func (e *events) on(name string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.seen = append(e.seen, name)
+}
+
+func (e *events) count(name string) int {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	n := 0
+	for _, s := range e.seen {
+		if s == name {
+			n++
+		}
+	}
+	return n
+}
+
+func (e *events) reset() {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.seen = nil
 }
 
 func key(r core.Repo) string { return r.Owner + "/" + r.Name }
@@ -76,9 +152,33 @@ func (w *fakeWorld) sources() Sources {
 			w.runCalls[key(r)]++
 			return w.runs[key(r)], nil
 		},
+		Issue: func(_ context.Context, r core.Repo, number int) (forge.Issue, []forge.Comment, error) {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			k := issueKeyOf(r, number)
+			w.detailCalls[k]++
+			if err := w.issueErr[k]; err != nil {
+				return forge.Issue{}, nil, err
+			}
+			return w.issueLocked(r, number), w.comments[k], nil
+		},
 		Sessions: func(context.Context) ([]agentview.Session, error) { return w.sessions, w.sessErr },
 		Paused:   func() bool { return w.paused },
 	}
+}
+
+// issueLocked is what a live GetIssue reports: the detailIssue override when
+// the test set one, otherwise the listed issue.
+func (w *fakeWorld) issueLocked(r core.Repo, number int) forge.Issue {
+	if i, ok := w.detailIssue[issueKeyOf(r, number)]; ok {
+		return i
+	}
+	for _, i := range w.issues[key(r)] {
+		if i.Number == number {
+			return i
+		}
+	}
+	return forge.Issue{}
 }
 
 func gh(n int, labels ...string) forge.Issue {
@@ -175,7 +275,11 @@ func TestCollector_OnChange_FiresOnlyOnContentChange(t *testing.T) {
 	var calls int
 	now := t0
 	clock := func() time.Time { now = now.Add(time.Minute); return now }
-	c := NewCollector(w.sources(), DefaultIntervals(), clock, func() { calls++ })
+	c := NewCollector(w.sources(), DefaultIntervals(), clock, func(ev string) {
+		if ev == EventPipeline {
+			calls++
+		}
+	})
 	ctx := context.Background()
 
 	c.CollectIssues(ctx)
@@ -368,4 +472,311 @@ func TestCollector_ConcurrentCollectRuns_Coalesce(t *testing.T) {
 	}
 	close(release)
 	<-done
+}
+
+// botMarker is a run report comment by the only trusted author.
+func botMarker(body string, at time.Time) forge.Comment {
+	return forge.Comment{ID: 1, Author: "github-actions[bot]", Created: at,
+		Body: "## ai-implement run\n\n<!-- ai-run: " + body + " -->"}
+}
+
+func TestCollector_CollectIssues_CommentsOnlyForWiredGithubCandidates(t *testing.T) {
+	fj := core.Repo{Forge: "forgejo", Owner: "o", Name: "f", Path: "/r/f"}
+	w := newWorld(ghRepo("a"), ghRepo("unwired"), fj)
+	w.wired["o/a"], w.wired["o/f"] = true, true
+	w.issues["o/a"] = []forge.Issue{gh(1, "feat"), gh(2, dispatch.LabelAIFailed)}
+	w.issues["o/unwired"] = []forge.Issue{gh(3, dispatch.LabelAIFailed)}
+	w.issues["o/f"] = []forge.Issue{gh(4, dispatch.LabelAIFailed)}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	w.mu.Lock()
+	defer w.mu.Unlock()
+	want := map[string]int{"o/a#2": 1}
+	if len(w.detailCalls) != len(want) || w.detailCalls["o/a#2"] != 1 {
+		t.Errorf("detailCalls = %v, want %v", w.detailCalls, want)
+	}
+}
+
+func TestCollector_CollectIssues_UnchangedUpdated_SkipsCommentFetch(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed)}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+	ctx := context.Background()
+
+	c.CollectIssues(ctx)
+	c.CollectIssues(ctx)
+	if got := w.calls(w.detailCalls, "o/a#2"); got != 1 {
+		t.Fatalf("detail calls = %d, want 1 (cached on unchanged Updated)", got)
+	}
+
+	w.set(func() { w.issues["o/a"] = []forge.Issue{bumped(gh(2, dispatch.LabelAIFailed), time.Hour)} })
+	c.CollectIssues(ctx)
+	if got := w.calls(w.detailCalls, "o/a#2"); got != 2 {
+		t.Errorf("detail calls after Updated bump = %d, want 2", got)
+	}
+}
+
+// bumped returns i with Updated moved forward, the way a new comment moves it.
+func bumped(i forge.Issue, d time.Duration) forge.Issue {
+	i.Updated = i.Updated.Add(d)
+	return i
+}
+
+func TestCollector_CommentFetchFails_KeepsStaleAndRetries(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed)}
+	w.comments["o/a#2"] = []forge.Comment{
+		botMarker(`{"v":1,"class":"task_failure","decision":"stop","attempt":2}`, t0),
+	}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+	ctx := context.Background()
+
+	c.CollectIssues(ctx)
+	if got := c.Inbox().Cards; len(got) != 1 || got[0].Reason != "task_failure" {
+		t.Fatalf("cards after first fetch = %+v, want one task_failure card", got)
+	}
+
+	w.set(func() {
+		w.issues["o/a"] = []forge.Issue{bumped(gh(2, dispatch.LabelAIFailed), time.Hour)}
+		w.issueErr["o/a#2"] = errors.New("boom")
+	})
+	c.CollectIssues(ctx)
+	ib := c.Inbox()
+	if len(ib.Cards) != 1 {
+		t.Fatalf("cards after failed fetch = %+v, want the stale card kept", ib.Cards)
+	}
+	if ib.Errors["comments o/a#2"] == "" {
+		t.Errorf("Errors = %v, want a comments o/a#2 entry", ib.Errors)
+	}
+
+	w.set(func() { delete(w.issueErr, "o/a#2") })
+	c.CollectIssues(ctx)
+	if got := w.calls(w.detailCalls, "o/a#2"); got != 3 {
+		t.Errorf("detail calls = %d, want 3 (retried despite unchanged Updated)", got)
+	}
+	if got := c.Inbox().Errors; len(got) != 0 {
+		t.Errorf("Errors after recovery = %v, want none", got)
+	}
+}
+
+func TestCollector_CommentFetchFails_NoCache_IssueNotShown(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed)}
+	w.issueErr["o/a#2"] = errors.New("boom")
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	ib := c.Inbox()
+	if len(ib.Cards) != 0 || len(ib.Waiting) != 0 {
+		t.Errorf("cards=%+v waiting=%+v, want both empty", ib.Cards, ib.Waiting)
+	}
+	if ib.Errors["comments o/a#2"] == "" {
+		t.Errorf("Errors = %v, want a comments o/a#2 entry", ib.Errors)
+	}
+}
+
+func TestCollector_Inbox_EventFiresOnlyOnInboxChange(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(1)}
+	var ev events
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, ev.on)
+	ctx := context.Background()
+
+	c.CollectIssues(ctx)
+	ev.reset()
+
+	w.set(func() { w.issues["o/a"] = []forge.Issue{gh(1, dispatch.LabelAIFailed)} })
+	c.CollectIssues(ctx)
+	if got := ev.count(EventInbox); got != 1 {
+		t.Fatalf("%s events = %d, want 1", EventInbox, got)
+	}
+
+	ev.reset()
+	c.CollectIssues(ctx)
+	if got := ev.count(EventInbox); got != 0 {
+		t.Errorf("%s events on an unchanged inbox = %d, want 0", EventInbox, got)
+	}
+}
+
+func TestCollector_Inbox_StaleRetryCrossesThreshold_FiresInboxEvent(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed)}
+	w.comments["o/a#2"] = []forge.Comment{
+		botMarker(`{"v":1,"class":"transient","decision":"retry","attempt":1}`, t0),
+	}
+	clk := newClock(t0.Add(3 * time.Hour))
+	var ev events
+	c := NewCollector(w.sources(), DefaultIntervals(), clk.now, ev.on)
+	ctx := context.Background()
+
+	c.CollectIssues(ctx)
+	if got := c.Inbox().Waiting; len(got) != 1 || got[0].Reason != "pipeline retrying" {
+		t.Fatalf("waiting at the threshold = %+v, want one 'pipeline retrying'", got)
+	}
+
+	clk.advance(time.Second)
+	ev.reset()
+	c.CollectSessions(ctx)
+
+	if got := ev.count(EventInbox); got != 1 {
+		t.Errorf("%s events = %d, want 1", EventInbox, got)
+	}
+	cards := c.Inbox().Cards
+	if len(cards) != 1 || cards[0].Reason != "retry never reported" {
+		t.Errorf("cards = %+v, want one 'retry never reported'", cards)
+	}
+}
+
+func TestCollector_CollectRuns_InFlightRunFinished_RefreshesRepo(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(1, dispatch.LabelAIImplement)}
+	w.runs["o/a"] = []forge.WorkflowRun{{Event: "issues", Status: "in_progress", DisplayTitle: "t", URL: "u1"}}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+	ctx := context.Background()
+
+	c.CollectIssues(ctx)
+	c.CollectRuns(ctx)
+	if got := w.calls(w.issueCalls, "o/a"); got != 1 {
+		t.Fatalf("issue calls while the run is going = %d, want 1", got)
+	}
+
+	w.set(func() {
+		w.runs["o/a"] = []forge.WorkflowRun{{Event: "issues", Status: "completed", DisplayTitle: "t", URL: "u1"}}
+	})
+	c.CollectRuns(ctx)
+
+	if got := w.calls(w.issueCalls, "o/a"); got != 2 {
+		t.Errorf("issue calls after the run finished = %d, want 2 (repo refreshed)", got)
+	}
+}
+
+func TestCollector_CollectRuns_UnrelatedRunFinished_NoRefresh(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(1, dispatch.LabelAIImplement)}
+	w.runs["o/a"] = []forge.WorkflowRun{{Event: "issues", Status: "in_progress", DisplayTitle: "other", URL: "u1"}}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+	ctx := context.Background()
+
+	c.CollectIssues(ctx)
+	c.CollectRuns(ctx)
+	w.set(func() {
+		w.runs["o/a"] = []forge.WorkflowRun{{Event: "issues", Status: "completed", DisplayTitle: "other", URL: "u1"}}
+	})
+	c.CollectRuns(ctx)
+
+	if got := w.calls(w.issueCalls, "o/a"); got != 1 {
+		t.Errorf("issue calls = %d, want 1 (the run was never this issue's)", got)
+	}
+}
+
+func TestCollector_IssueDetail_Table(t *testing.T) {
+	fj := core.Repo{Forge: "forgejo", Owner: "o", Name: "f", Path: "/r/f"}
+	newCollector := func(t *testing.T) (*Collector, *fakeWorld, *clock) {
+		t.Helper()
+		w := newWorld(ghRepo("a"), ghRepo("unwired"), fj)
+		w.wired["o/a"], w.wired["o/f"] = true, true
+		w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed), gh(3)}
+		w.detailIssue["o/a#2"] = forge.Issue{Number: 2, Title: "live title", URL: "u", Labels: []string{"ai:failed"}}
+		w.comments["o/a#2"] = []forge.Comment{
+			botMarker(`{"v":1,"class":"rate_limit","decision":"retry"}`, t0),
+			botMarker(`{"v":1,"class":"task_failure","decision":"stop"}`, t0.Add(time.Hour)),
+		}
+		clk := newClock(t0)
+		c := NewCollector(w.sources(), DefaultIntervals(), clk.now, nil)
+		c.CollectIssues(context.Background())
+		return c, w, clk
+	}
+
+	t.Run("unknown repo", func(t *testing.T) {
+		c, _, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "nope", 1); !errors.Is(err, ErrUnknownRepo) {
+			t.Errorf("err = %v, want ErrUnknownRepo", err)
+		}
+	})
+	t.Run("non-github forge", func(t *testing.T) {
+		c, _, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "f", 1); !errors.Is(err, ErrUnknownRepo) {
+			t.Errorf("err = %v, want ErrUnknownRepo", err)
+		}
+	})
+	t.Run("unwired github repo", func(t *testing.T) {
+		c, _, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "unwired", 1); !errors.Is(err, ErrUnknownRepo) {
+			t.Errorf("err = %v, want ErrUnknownRepo", err)
+		}
+	})
+	t.Run("issue that is not an inbox candidate", func(t *testing.T) {
+		c, w, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "a", 3); !errors.Is(err, ErrNotCandidate) {
+			t.Errorf("err = %v, want ErrNotCandidate", err)
+		}
+		if got := w.calls(w.detailCalls, "o/a#3"); got != 0 {
+			t.Errorf("detail calls for a non-candidate = %d, want 0 (no forge read)", got)
+		}
+	})
+	t.Run("issue the snapshot does not list", func(t *testing.T) {
+		c, _, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "a", 99); !errors.Is(err, ErrNotCandidate) {
+			t.Errorf("err = %v, want ErrNotCandidate", err)
+		}
+	})
+	t.Run("cached thread within the TTL", func(t *testing.T) {
+		c, w, clk := newCollector(t)
+		before := w.calls(w.detailCalls, "o/a#2")
+		clk.advance(detailTTL - time.Second)
+
+		d, err := c.IssueDetail(context.Background(), "o", "a", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := w.calls(w.detailCalls, "o/a#2"); got != before {
+			t.Errorf("detail calls = %d, want %d (served from the cache)", got, before)
+		}
+		if len(d.Runs) != 2 || d.Runs[0].Class != "task_failure" {
+			t.Errorf("Runs = %+v, want 2, newest first", d.Runs)
+		}
+	})
+	t.Run("live read once the TTL passed", func(t *testing.T) {
+		c, w, clk := newCollector(t)
+		before := w.calls(w.detailCalls, "o/a#2")
+		clk.advance(detailTTL)
+
+		d, err := c.IssueDetail(context.Background(), "o", "a", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := w.calls(w.detailCalls, "o/a#2"); got != before+1 {
+			t.Errorf("detail calls = %d, want %d (one live read)", got, before+1)
+		}
+		if d.Issue.Title != "live title" || d.Issue.Repo != "o/a" {
+			t.Errorf("Issue = %+v, want the live title", d.Issue)
+		}
+		if len(d.Runs) != 2 || d.Runs[0].Class != "task_failure" {
+			t.Errorf("Runs = %+v, want 2, newest first", d.Runs)
+		}
+	})
+	t.Run("source error", func(t *testing.T) {
+		c, w, clk := newCollector(t)
+		boom := errors.New("boom")
+		w.set(func() { w.issueErr["o/a#2"] = boom })
+		clk.advance(detailTTL)
+
+		_, err := c.IssueDetail(context.Background(), "o", "a", 2)
+		if !errors.Is(err, boom) {
+			t.Fatalf("err = %v, want it to wrap the source error", err)
+		}
+		if errors.Is(err, ErrUnknownRepo) || errors.Is(err, ErrNotCandidate) {
+			t.Errorf("err = %v, want it not to read as a not-found error", err)
+		}
+	})
 }

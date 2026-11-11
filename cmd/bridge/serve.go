@@ -235,13 +235,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(restDeps(toolDeps, serveAllowWrites))))
 	apiMux.Handle("/api/agents", agentsH)
 
-	collector := cockpit.NewCollector(cockpitSources(cachedClients(clientForMCP(reposRoots()))), cockpit.DefaultIntervals(), time.Now, func() {
-		hub.Broadcast(web.Event{Type: "pipeline-updated"})
+	collector := cockpit.NewCollector(cockpitSources(cachedClients(clientForMCP(reposRoots()))), cockpit.DefaultIntervals(), time.Now, func(ev string) {
+		hub.Broadcast(web.Event{Type: ev})
 	})
 	go collector.Run(ctx)
 	pipelineH := pipelineHandler(ctx, collector, reposWithMeta)
 	origins := newOriginAllowlist(servePort, os.Getenv("BRIDGE_COCKPIT_ORIGINS"))
 	guarded := requireTokenConfigured(apiToken, requireBearer(apiToken, requireSameOrigin(origins, pipelineH)))
+	inboxH := &api.InboxHandler{Inbox: collector.Inbox, Detail: collector.IssueDetail}
+	apiMux.Handle("/api/inbox", inboxH) // read-only, open like GET /api/pipeline
+	// The issue detail. Open too, but it is the only open endpoint that can
+	// reach the forge, so the collector answers it from its comment cache
+	// within detailTTL and only for issues the inbox already lists — a page
+	// looping it cannot burn the token's REST quota or read anything else.
+	apiMux.Handle("/api/inbox/", inboxH)
 	apiMux.Handle("/api/pipeline", pipelineH) // GET only; the handler answers other methods with 405
 	apiMux.Handle("/api/pipeline/refresh", guarded)
 	apiMux.Handle("/api/pipeline/enrich", guarded)

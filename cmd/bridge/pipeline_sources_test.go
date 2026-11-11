@@ -33,6 +33,26 @@ func TestCockpitSources_NoClientForOwner_ReportsError(t *testing.T) {
 	}
 }
 
+func TestCockpitSources_Issue_NoClientForOwner_ReportsError(t *testing.T) {
+	src := cockpitSources(func(string, string) forge.Client { return nil })
+	ctx := context.Background()
+
+	repos := []struct {
+		name string
+		repo core.Repo
+	}{
+		{"github", core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"}},
+		{"non-github", core.Repo{Forge: "forgejo", Owner: "freax", Name: "org"}},
+	}
+	for _, r := range repos {
+		t.Run(r.name, func(t *testing.T) {
+			if _, _, err := src.Issue(ctx, r.repo, 1); !errors.Is(err, errNoForgeClient) {
+				t.Fatalf("err = %v, want errNoForgeClient", err)
+			}
+		})
+	}
+}
+
 func TestCockpitSources_NonGithubRepo_NoPRsWithoutError(t *testing.T) {
 	src := cockpitSources(func(string, string) forge.Client { return nil })
 	r := core.Repo{Forge: "forgejo", Owner: "freax", Name: "org"}

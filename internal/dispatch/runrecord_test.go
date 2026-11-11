@@ -1,6 +1,9 @@
 package dispatch
 
 import (
+	"encoding/json"
+	"maps"
+	"slices"
 	"testing"
 	"time"
 
@@ -119,5 +122,129 @@ func TestLatestRun(t *testing.T) {
 				t.Errorf("Posted = %v, want %v", got.Posted, c.wantPosted)
 			}
 		})
+	}
+}
+
+// runsCase is one input to Runs plus the record order it must produce, shared
+// by TestRuns and TestLatestRun_EqualsLastOfRuns so the two contracts cannot
+// drift apart.
+type runsCase struct {
+	name     string
+	comments []forge.Comment
+	// wantClasses and wantPosted are the records Runs must return, oldest first.
+	wantClasses []string
+	wantPosted  []time.Time
+}
+
+func runsCases() []runsCase {
+	t0 := time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC)
+	bot := func(id int, created time.Time, body string) forge.Comment {
+		return forge.Comment{ID: id, Author: pipelineReportAuthor, Body: body, Created: created}
+	}
+	markerFor := func(class string) string { return marker(`{"v":1,"class":"` + class + `"}`) }
+
+	return []runsCase{
+		{name: "no comments"},
+		{
+			name: "out of order markers come back oldest first",
+			comments: []forge.Comment{
+				bot(3, t0.Add(2*time.Hour), markerFor("bug")),
+				bot(1, t0, markerFor("transient")),
+				bot(2, t0.Add(time.Hour), markerFor("rate_limit")),
+			},
+			wantClasses: []string{"transient", "rate_limit", "bug"},
+			wantPosted:  []time.Time{t0, t0.Add(time.Hour), t0.Add(2 * time.Hour)},
+		},
+		{
+			name: "equal Created keeps slice order",
+			comments: []forge.Comment{
+				bot(1, t0, markerFor("bug")),
+				bot(2, t0, markerFor("transient")),
+			},
+			wantClasses: []string{"bug", "transient"},
+			wantPosted:  []time.Time{t0, t0},
+		},
+		{
+			name: "a marker from another author is excluded",
+			comments: []forge.Comment{
+				bot(1, t0, markerFor("bug")),
+				{ID: 2, Author: "someone", Body: markerFor("transient"), Created: t0.Add(time.Hour)},
+			},
+			wantClasses: []string{"bug"},
+			wantPosted:  []time.Time{t0},
+		},
+		{
+			name: "a pipeline comment without a marker is excluded",
+			comments: []forge.Comment{
+				bot(1, t0, "## ai-implement parked\n\nAttempt cap reached."),
+			},
+		},
+	}
+}
+
+func TestRuns(t *testing.T) {
+	for _, c := range runsCases() {
+		t.Run(c.name, func(t *testing.T) {
+			got := Runs(c.comments)
+			if got == nil {
+				t.Fatal("Runs returned nil, want a non-nil slice")
+			}
+			if len(got) != len(c.wantClasses) {
+				t.Fatalf("len = %d, want %d (%+v)", len(got), len(c.wantClasses), got)
+			}
+			for i, r := range got {
+				if r.Class != c.wantClasses[i] {
+					t.Errorf("[%d].Class = %q, want %q", i, r.Class, c.wantClasses[i])
+				}
+				if !r.Posted.Equal(c.wantPosted[i]) {
+					t.Errorf("[%d].Posted = %v, want %v", i, r.Posted, c.wantPosted[i])
+				}
+			}
+		})
+	}
+}
+
+func TestLatestRun_EqualsLastOfRuns(t *testing.T) {
+	for _, c := range runsCases() {
+		t.Run(c.name, func(t *testing.T) {
+			all := Runs(c.comments)
+			got, ok := LatestRun(c.comments)
+			if len(all) == 0 {
+				if ok || got != (RunRecord{}) {
+					t.Fatalf("LatestRun = (%+v, %v), want (zero, false)", got, ok)
+				}
+				return
+			}
+			if !ok {
+				t.Fatalf("LatestRun ok = false, want true")
+			}
+			if want := all[len(all)-1]; got != want {
+				t.Errorf("LatestRun = %+v, want %+v (last of Runs)", got, want)
+			}
+		})
+	}
+}
+
+func TestRunRecord_MarshalJSON_LowerCamelKeys(t *testing.T) {
+	r := RunRecord{
+		Attempt: 2, Counts: true, RetryAttempt: 1, Class: "task_failure", Decision: "stop",
+		Status: "ai:failed", Subtype: "gate_failed", Agent: "claude", Model: "claude-opus-5",
+		Turns: 60, CostUSD: 2.341, PR: 42, RunURL: "https://x/runs/1",
+		Posted: time.Date(2026, 11, 10, 9, 0, 0, 0, time.UTC),
+	}
+	raw, err := json.Marshal(r)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var got map[string]any
+	if err := json.Unmarshal(raw, &got); err != nil {
+		t.Fatal(err)
+	}
+	want := []string{"attempt", "counts", "retryAttempt", "class", "decision", "status",
+		"subtype", "agent", "model", "turns", "costUsd", "pr", "runUrl", "posted"}
+	keys := slices.Sorted(maps.Keys(got))
+	slices.Sort(want)
+	if !slices.Equal(keys, want) {
+		t.Errorf("keys = %v, want %v", keys, want)
 	}
 }

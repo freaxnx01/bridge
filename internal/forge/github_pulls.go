@@ -85,11 +85,12 @@ func (c *GithubClient) ListCommitStatuses(ctx context.Context, owner, repo, sha 
 }
 
 type ghWorkflowRun struct {
-	Name       string `json:"name"`
-	Event      string `json:"event"`
-	Status     string `json:"status"`
-	Conclusion string `json:"conclusion"`
-	Actor      struct {
+	Name         string `json:"name"`
+	DisplayTitle string `json:"display_title"`
+	Event        string `json:"event"`
+	Status       string `json:"status"`
+	Conclusion   string `json:"conclusion"`
+	Actor        struct {
 		Login string `json:"login"`
 	} `json:"actor"`
 	TriggeringActor struct {
@@ -121,7 +122,7 @@ func (c *GithubClient) ListWorkflowRuns(ctx context.Context, owner, repo, branch
 	out := make([]WorkflowRun, 0, len(raw.WorkflowRuns))
 	for _, r := range raw.WorkflowRuns {
 		out = append(out, WorkflowRun{
-			Name: r.Name, Event: r.Event, Status: r.Status, Conclusion: r.Conclusion,
+			Name: r.Name, DisplayTitle: r.DisplayTitle, Event: r.Event, Status: r.Status, Conclusion: r.Conclusion,
 			Actor: r.Actor.Login, TriggeringActor: r.TriggeringActor.Login,
 			HeadBranch: r.HeadBranch, HeadSHA: r.HeadSHA, Created: r.CreatedAt, URL: r.HTMLURL,
 		})
