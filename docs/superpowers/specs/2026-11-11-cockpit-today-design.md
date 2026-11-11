@@ -202,23 +202,23 @@ get folded into its design. It gets its own `/ui:brainstorm` → `/ui:flow`.
 | #201 ideas from another tool | **Keep**; comment that idea 8 (precise danger-zone copy) is applied in the confirm dialogs here. |
 | #320 weekly usage bound | Dependency of the quota line, via #371. |
 
-## Proposed new issues (sequenced)
+## Issues (sequenced, filed 2026-11-11, milestone Cockpit Today unless noted)
 
-1. **`feat(dispatch): write a per-tick dispatch journal`** — Every `bridge
+1. (#379) **`feat(dispatch): write a per-tick dispatch journal`** — Every `bridge
    dispatch` tick (live and dry-run) appends one record with its decisions and
    reasons, including empty ticks. Unblocks reviewing the observation week
    outside `journalctl`. *Depends on:* none (#367 merged); coordinate with
    #253 (same tick path). *Milestone:* AutoDispatch.
-2. **`feat(serve): GET /api/digest — digest of dispatch and pipeline activity since a timestamp`**
+2. (#380) **`feat(serve): GET /api/digest — digest of dispatch and pipeline activity since a timestamp`**
    — Joins journal, run markers and PR state per issue. Computes expected vs.
    seen ticks and flags inert ticks. No per-request forge fan-out. *Depends on:*
    1, #368 (issue/run collector). *Milestone:* Cockpit Today (new).
-3. **`feat(webui): extend the Inbox with the overnight digest`** — Adds to
+3. (#381) **`feat(webui): extend the Inbox with the overnight digest`** — Adds to
    #368's start page the summary strip, tick health banner, Done / Still going
    / Didn't happen sections, the journal view and every state in the
    wireframe. Needs you is #368's card list. *Depends on:* 2, #368 UI.
    *Milestone:* Cockpit Today.
-4. **`feat(serve): merge agent PRs from the cockpit behind a head-SHA guard`**
+4. (#382) **`feat(serve): merge agent PRs from the cockpit behind a head-SHA guard`**
    — Merge card (summary, review verdict, files) + guarded `POST` that
    re-checks head, checks, draft and mergeability. Adds a `merge` kind to
    #368's `BuildInbox`: today a successful run (`ai:done`) is `ActionNone` and
@@ -227,22 +227,22 @@ get folded into its design. It gets its own `/ui:brainstorm` → `/ui:flow`.
    Urgency group 1 (work waits for review). Not part of #374 (Retry,
    Retry with, Park); it reuses #374's confirm/guard pattern. *Depends on:* 3.
    *Milestone:* Cockpit Today.
-5. **`feat(webui): read-only PR diff in the merge card`** — Lazy per-click diff
+5. (#383) **`feat(webui): read-only PR diff in the merge card`** — Lazy per-click diff
    endpoint + collapsed per-file view, cached per head SHA. *Depends on:* 4.
    *Milestone:* Cockpit Today.
-6. **`feat(webui): show the usage quota line in the Today header`** —
+6. (#384) **`feat(webui): show the usage quota line in the Today header`** —
    Renders #371's meter (weekly + 5 h, #320) in the summary strip. *Depends
    on:* #371, 3. *Milestone:* Cockpit Today.
-7. **`feat(webui): clear a stuck enrichment lock from the board`** — "Stuck
+7. (#385) **`feat(webui): clear a stuck enrichment lock from the board`** — "Stuck
    enriching" cards get *Clear lock* / *Clear & re-enrich* (confirmed, guarded).
    Seen live on 2026-11-11: BI-ArchiveUploader #612/#614 held a dead lock for
    20 days. *Depends on:* #368 (cockpit rework). *Milestone:* Cockpit Today.
-8. **`feat(review): add a machine-readable verdict marker to the AI review comment`**
+8. (freaxnx01/agent-workflow#593) **`feat(review): add a machine-readable verdict marker to the AI review comment`**
    (repo: freaxnx01/agent-workflow) — Same idea as ADR-021 for the review
    comment (verdict, head SHA, blocking count), so 4 does not parse prose.
    *Depends on:* none; 4 can ship on the regex fallback. *Milestone:*
    agent-workflow's choice.
-9. **`feat(webui): drill-down from all repos to issue (repos → milestone → issue)`**
+9. (#386) **`feat(webui): drill-down from all repos to issue (repos → milestone → issue)`**
    — Roadmap placeholder for the next design. Folds #215/#242 in. *Depends on:*
    #368 issue detail. *Milestone:* Roadmap.
 
