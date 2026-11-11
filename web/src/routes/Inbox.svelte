@@ -13,10 +13,16 @@
   const cards = $derived(data?.cards ?? []);
   const waiting = $derived(data?.waiting ?? []);
   const parked = $derived(data?.parked ?? []);
-  const errors = $derived(Object.keys(data?.errors ?? {}));
+  const errors = $derived(Object.entries(data?.errors ?? {}));
 
   function cardKey(card) {
     return `${card.repo}#${card.number}`;
+  }
+
+  // The payload keys a failed comment read "comments owner/name#5", like the
+  // board's source errors; the warning line already says what failed.
+  function issueRef(key) {
+    return key.replace(/^comments /, '');
   }
 </script>
 
@@ -61,8 +67,8 @@
         {/each}
       </ul>
     {/if}
-    {#each errors as key (key)}
-      <p class="warn" role="status">⚠ Could not read comments: {key}</p>
+    {#each errors as [key, message] (key)}
+      <p class="warn" role="status">⚠ Could not read comments: {issueRef(key)} — {message}</p>
     {/each}
   </section>
 

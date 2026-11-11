@@ -39,6 +39,16 @@ const (
 // collector's last snapshot.
 var ErrUnknownRepo = errors.New("unknown repo")
 
+// ErrNotCandidate means the requested issue is not an inbox candidate of that
+// repo in the collector's last snapshot.
+var ErrNotCandidate = errors.New("not an inbox candidate")
+
+// detailTTL bounds how often an issue detail costs a live forge read: a thread
+// read this recently is served from the cache instead. The runs tick already
+// re-reads a repo within about a minute of a run ending, so the panel stays
+// current, and a page looping the open endpoint cannot burn the REST quota.
+const detailTTL = time.Minute
+
 // Sources are the data providers the Collector polls. All funcs must be non-nil.
 type Sources struct {
 	Repos      func() ([]core.Repo, error)
@@ -99,8 +109,10 @@ type issueKey struct {
 
 // cachedComments is one issue's thread plus the Updated it was read at: a new
 // comment moves Updated, so an unchanged Updated means an unchanged thread.
+// readAt is when the read happened, which is what detailTTL is measured against.
 type cachedComments struct {
 	updated  time.Time
+	readAt   time.Time
 	comments []forge.Comment
 }
 
@@ -205,30 +217,48 @@ func (c *Collector) Inbox() Inbox {
 	return ib
 }
 
-// IssueDetail reads one issue and its run history live, so an open detail
-// reflects a report that landed since the last tick. The repo must be a wired
-// GitHub repo of the last snapshot.
+// IssueDetail reads one issue and its run history, live when the cached thread
+// is older than detailTTL, so an open detail reflects a report that landed
+// since the last tick. The issue must be an inbox candidate of a wired GitHub
+// repo in the last snapshot: the detail is the inbox's own detail, and the
+// endpoint serving it reads nothing the inbox does not already list.
 func (c *Collector) IssueDetail(ctx context.Context, owner, name string, number int) (IssueDetail, error) {
-	r, ok := c.wiredGithubRepo(owner, name)
-	if !ok {
-		return IssueDetail{}, fmt.Errorf("%w: %s/%s", ErrUnknownRepo, owner, name)
-	}
-	issue, comments, err := c.src.Issue(ctx, r, number)
+	r, issue, err := c.candidateIssue(owner, name, number)
 	if err != nil {
-		return IssueDetail{}, fmt.Errorf("issue %s/%s#%d: %w", owner, name, number, err)
+		return IssueDetail{}, err
 	}
-	return BuildIssueDetail(owner+"/"+name, issue, comments), nil
+	repo := repoKey(r)
+	k := issueKey{repo, number}
+	if comments, ok := c.freshComments(k, c.now()); ok {
+		return BuildIssueDetail(repo, issue, comments), nil
+	}
+	live, comments, err := c.src.Issue(ctx, r, number)
+	if err != nil {
+		return IssueDetail{}, fmt.Errorf("issue %s#%d: %w", repo, number, err)
+	}
+	c.storeComments(k, live.Updated, comments)
+	return BuildIssueDetail(repo, live, comments), nil
 }
 
-func (c *Collector) wiredGithubRepo(owner, name string) (core.Repo, bool) {
+// candidateIssue returns the repo plus its snapshot issue when owner/name is a
+// wired GitHub repo holding number as an inbox candidate, else ErrUnknownRepo
+// or ErrNotCandidate.
+func (c *Collector) candidateIssue(owner, name string, number int) (core.Repo, forge.Issue, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, rd := range c.repos {
-		if rd.Owner == owner && rd.Name == name && rd.Forge == "github" && rd.Wired {
-			return core.Repo{Forge: rd.Forge, Owner: rd.Owner, Name: rd.Name, Path: rd.Path}, true
+		if rd.Owner != owner || rd.Name != name || rd.Forge != "github" || !rd.Wired {
+			continue
 		}
+		r := core.Repo{Forge: rd.Forge, Owner: rd.Owner, Name: rd.Name, Path: rd.Path}
+		for _, i := range rd.Issues {
+			if i.Number == number && isInboxCandidate(i.Labels) {
+				return r, i, nil
+			}
+		}
+		return core.Repo{}, forge.Issue{}, fmt.Errorf("%w: %s/%s#%d", ErrNotCandidate, owner, name, number)
 	}
-	return core.Repo{}, false
+	return core.Repo{}, forge.Issue{}, fmt.Errorf("%w: %s/%s", ErrUnknownRepo, owner, name)
 }
 
 // CollectIssues refreshes issues for every repo, plus PRs and milestones for
@@ -373,7 +403,7 @@ func inFlightRunURLs(rd *RepoData) map[string]bool {
 			continue
 		}
 		for _, r := range rd.Runs {
-			if inFlight(i, []forge.WorkflowRun{r}) {
+			if isIssueRunFor(i, r) {
 				out[r.URL] = true
 			}
 		}
@@ -529,6 +559,18 @@ func (c *Collector) cachedComments(k issueKey, updated time.Time) ([]forge.Comme
 	return e.comments, true
 }
 
+// freshComments returns the cached thread when it was read less than detailTTL
+// ago, whatever Updated it was read at.
+func (c *Collector) freshComments(k issueKey, now time.Time) ([]forge.Comment, bool) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	e, ok := c.comments[k]
+	if !ok || now.Sub(e.readAt) >= detailTTL {
+		return nil, false
+	}
+	return e.comments, true
+}
+
 // staleComments returns the cached thread whatever Updated it was read at.
 func (c *Collector) staleComments(k issueKey) ([]forge.Comment, bool) {
 	c.cacheMu.Lock()
@@ -542,7 +584,7 @@ func (c *Collector) staleComments(k issueKey) ([]forge.Comment, bool) {
 func (c *Collector) storeComments(k issueKey, updated time.Time, comments []forge.Comment) {
 	c.cacheMu.Lock()
 	defer c.cacheMu.Unlock()
-	c.comments[k] = cachedComments{updated: updated, comments: comments}
+	c.comments[k] = cachedComments{updated: updated, readAt: c.now(), comments: comments}
 }
 
 // pruneComments drops the threads of issues that are no longer inbox

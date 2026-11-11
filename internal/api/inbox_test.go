@@ -81,13 +81,20 @@ func TestInboxHandler_GetDetail_PassesOwnerRepoNumber(t *testing.T) {
 	}
 }
 
-func TestInboxHandler_DetailUnknownRepo_404(t *testing.T) {
-	h, _ := newInboxFixture(cockpit.Inbox{}, cockpit.IssueDetail{}, cockpit.ErrUnknownRepo)
+func TestInboxHandler_DetailNotFound_404(t *testing.T) {
+	for name, err := range map[string]error{
+		"unknown repo":  cockpit.ErrUnknownRepo,
+		"not candidate": cockpit.ErrNotCandidate,
+	} {
+		t.Run(name, func(t *testing.T) {
+			h, _ := newInboxFixture(cockpit.Inbox{}, cockpit.IssueDetail{}, err)
 
-	w := doReq(h, http.MethodGet, "/api/inbox/o/r/1", "")
+			w := doReq(h, http.MethodGet, "/api/inbox/o/r/1", "")
 
-	if w.Code != http.StatusNotFound {
-		t.Errorf("status = %d, want 404", w.Code)
+			if w.Code != http.StatusNotFound {
+				t.Errorf("status = %d, want 404", w.Code)
+			}
+		})
 	}
 }
 

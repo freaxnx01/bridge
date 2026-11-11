@@ -204,11 +204,14 @@ func withCommentErrs(errs map[string]string, rd RepoData) map[string]string {
 // ActionNone.
 func isInboxCandidate(labels []string) bool { return hasAny(labels, inboxLabels...) }
 
-// inFlight reports whether a workflow run is going for this issue. A run names
-// its issue only by display title, which for an `issues` event is the title.
+// inFlight reports whether a workflow run is going for this issue.
 func inFlight(i forge.Issue, runs []forge.WorkflowRun) bool {
-	return slices.ContainsFunc(runs, func(r forge.WorkflowRun) bool {
-		return r.Event == "issues" && (r.Status == "queued" || r.Status == "in_progress") &&
-			r.DisplayTitle == i.Title
-	})
+	return slices.ContainsFunc(runs, func(r forge.WorkflowRun) bool { return isIssueRunFor(i, r) })
+}
+
+// isIssueRunFor reports whether the run is in flight for this issue. A run names
+// its issue only by display title, which for an `issues` event is the title.
+func isIssueRunFor(i forge.Issue, r forge.WorkflowRun) bool {
+	return r.Event == "issues" && (r.Status == "queued" || r.Status == "in_progress") &&
+		r.DisplayTitle == i.Title
 }

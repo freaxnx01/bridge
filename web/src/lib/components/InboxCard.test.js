@@ -75,6 +75,6 @@ describe('InboxCard', () => {
   it('renders a title containing markup as literal text', () => {
     render(InboxCard, { card: card({ title: 'fix: <b>x</b>' }), now: NOW, onopen: () => {} })
     expect(screen.getByText('fix: <b>x</b>')).toBeTruthy()
-    expect(document.querySelector('.card b')).toBeNull()
+    expect(document.querySelector('.inbox-card b')).toBeNull()
   })
 })

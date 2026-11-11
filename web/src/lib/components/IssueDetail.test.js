@@ -88,6 +88,44 @@ describe('IssueDetail', () => {
     expect(onclose).toHaveBeenCalledTimes(2)
   })
 
+  it('reloads when it is pointed at another issue', async () => {
+    const f = vi.fn(async (path) => ({
+      ok: true,
+      status: 200,
+      statusText: 'OK',
+      json: async () =>
+        path.endsWith('/412')
+          ? detail([run({ class: 'task_failure' })])
+          : { issue: { repo: 'freaxnx01/bridge', number: 500, title: 'other', url: 'u', labels: [] }, runs: [] },
+    }))
+    vi.stubGlobal('fetch', f)
+    const { rerender } = render(IssueDetail, { repo: 'freaxnx01/bridge', number: 412, onclose: () => {} })
+    await waitFor(() => expect(document.querySelectorAll('.run')).toHaveLength(1))
+
+    await rerender({ repo: 'freaxnx01/bridge', number: 500, onclose: () => {} })
+
+    expect(await screen.findByText('No run reports.')).toBeTruthy()
+    expect(screen.getByRole('dialog', { name: 'bridge#500' })).toBeTruthy()
+    expect(screen.getByText('other')).toBeTruthy()
+    expect(document.querySelectorAll('.run')).toHaveLength(0)
+  })
+
+  it('clears a failed load when it is pointed at another issue', async () => {
+    const f = vi.fn(async (path) =>
+      path.endsWith('/412')
+        ? { ok: false, status: 502, statusText: 'Bad Gateway' }
+        : { ok: true, status: 200, statusText: 'OK', json: async () => detail([]) },
+    )
+    vi.stubGlobal('fetch', f)
+    const { rerender } = render(IssueDetail, { repo: 'freaxnx01/bridge', number: 412, onclose: () => {} })
+    await screen.findByText('Could not load issue.')
+
+    await rerender({ repo: 'freaxnx01/bridge', number: 500, onclose: () => {} })
+
+    expect(await screen.findByText('No run reports.')).toBeTruthy()
+    expect(screen.queryByText('Could not load issue.')).toBeNull()
+  })
+
   it('names the dialog after the issue', async () => {
     stubDetail(detail([]))
     render(IssueDetail, { repo: 'freaxnx01/bridge', number: 412, onclose: () => {} })

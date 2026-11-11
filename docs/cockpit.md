@@ -50,7 +50,8 @@ A card shows `repo#n`, the title, the reason, and — when the issue has a marke
 — `agent · model · cost · #attempt`, plus Issue / PR / Run links. Its age is the
 marker's `posted`, or the issue's `updated` when there is none. Tapping a card or
 a waiting line opens the issue detail: every trusted marker on the issue, newest
-first, fetched live. Esc or ← closes it.
+first, read live unless the collector already read that thread in the last
+minute. Esc or ← closes it.
 
 ### Freshness
 
@@ -99,6 +100,10 @@ while the old data stays on the board. To spare the GitHub rate limit:
 
 - PRs and milestones are fetched only for wired repos that have at least one gate candidate (an issue not carrying any of the labels above).
 - Workflow runs are fetched only for repos that have an `ai-implement` issue.
+- The issue detail re-reads a thread at most once a minute; inside that window
+  it is answered from the collector's comment cache. The endpoint is open, so
+  without the window any page the operator visits could loop it and exhaust the
+  token's hourly REST quota.
 
 ## API
 
@@ -147,7 +152,10 @@ never `null`; `errors` is omitted when empty. `collectedAt` is the issues tick's
 
 ### `GET /api/inbox/{owner}/{repo}/{number}`
 
-One issue plus its full run history, newest first, read live:
+One issue plus its full run history, newest first. The issue must be one of the
+collector's inbox candidates — the endpoint is open, so it reads nothing the
+inbox does not already list. The thread is read live unless it was read less
+than a minute ago (see Refresh intervals and rate limits):
 
 ```json
 {"issue": {"repo": "owner/name", "number": 412, "title": "", "url": "", "labels": []},
@@ -157,7 +165,7 @@ One issue plus its full run history, newest first, read live:
 | Status | Meaning |
 |---|---|
 | 400 | `number` is not a positive integer |
-| 404 | Malformed path, or the repo is not a wired GitHub repo the collector knows |
+| 404 | Malformed path, the repo is not a wired GitHub repo the collector knows, or the issue is not one of its inbox candidates |
 | 405 | Wrong method (`Allow: GET`) |
 | 502 | The forge call failed; the detail is in the server log, never in the body |
 

@@ -46,7 +46,7 @@ func (h *InboxHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 func (h *InboxHandler) detail(w http.ResponseWriter, r *http.Request, owner, repo string, number int) {
 	d, err := h.Detail(r.Context(), owner, repo, number)
 	switch {
-	case errors.Is(err, cockpit.ErrUnknownRepo):
+	case errors.Is(err, cockpit.ErrUnknownRepo), errors.Is(err, cockpit.ErrNotCandidate):
 		writeError(w, http.StatusNotFound, "not found")
 	case err != nil:
 		// The forge's own message can carry a token or a repo a reader may not

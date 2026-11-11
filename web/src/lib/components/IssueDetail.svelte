@@ -1,5 +1,4 @@
 <script>
-  import { onMount } from 'svelte';
   import { shortRef, prUrl } from '../inbox.js';
   import { ageSeconds, formatAge } from '../freshness.js';
   import { loadIssueDetail } from '../stores/inbox.js';
@@ -13,12 +12,25 @@
   const ref = $derived(shortRef({ repo, number }));
   const labels = $derived((detail?.issue?.labels ?? []).join(', '));
 
-  onMount(async () => {
-    try {
-      detail = await loadIssueDetail(repo, number);
-    } catch {
-      failed = true;
-    }
+  // The panel stays mounted while another card is opened, so the load follows
+  // the props: an in-flight load of the issue just left must not land on the
+  // one now shown, and its failure must not stick to it either.
+  $effect(() => {
+    const wanted = { repo, number };
+    detail = null;
+    failed = false;
+    let current = true;
+    loadIssueDetail(wanted.repo, wanted.number).then(
+      (loaded) => {
+        if (current) detail = loaded;
+      },
+      () => {
+        if (current) failed = true;
+      },
+    );
+    return () => {
+      current = false;
+    };
   });
 
   function onKeydown(event) {

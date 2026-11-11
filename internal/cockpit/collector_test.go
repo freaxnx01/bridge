@@ -681,44 +681,82 @@ func TestCollector_CollectRuns_UnrelatedRunFinished_NoRefresh(t *testing.T) {
 
 func TestCollector_IssueDetail_Table(t *testing.T) {
 	fj := core.Repo{Forge: "forgejo", Owner: "o", Name: "f", Path: "/r/f"}
-	newCollector := func(t *testing.T) (*Collector, *fakeWorld) {
+	newCollector := func(t *testing.T) (*Collector, *fakeWorld, *clock) {
 		t.Helper()
 		w := newWorld(ghRepo("a"), ghRepo("unwired"), fj)
 		w.wired["o/a"], w.wired["o/f"] = true, true
-		w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed)}
+		w.issues["o/a"] = []forge.Issue{gh(2, dispatch.LabelAIFailed), gh(3)}
 		w.detailIssue["o/a#2"] = forge.Issue{Number: 2, Title: "live title", URL: "u", Labels: []string{"ai:failed"}}
 		w.comments["o/a#2"] = []forge.Comment{
 			botMarker(`{"v":1,"class":"rate_limit","decision":"retry"}`, t0),
 			botMarker(`{"v":1,"class":"task_failure","decision":"stop"}`, t0.Add(time.Hour)),
 		}
-		c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+		clk := newClock(t0)
+		c := NewCollector(w.sources(), DefaultIntervals(), clk.now, nil)
 		c.CollectIssues(context.Background())
-		return c, w
+		return c, w, clk
 	}
 
 	t.Run("unknown repo", func(t *testing.T) {
-		c, _ := newCollector(t)
+		c, _, _ := newCollector(t)
 		if _, err := c.IssueDetail(context.Background(), "o", "nope", 1); !errors.Is(err, ErrUnknownRepo) {
 			t.Errorf("err = %v, want ErrUnknownRepo", err)
 		}
 	})
 	t.Run("non-github forge", func(t *testing.T) {
-		c, _ := newCollector(t)
+		c, _, _ := newCollector(t)
 		if _, err := c.IssueDetail(context.Background(), "o", "f", 1); !errors.Is(err, ErrUnknownRepo) {
 			t.Errorf("err = %v, want ErrUnknownRepo", err)
 		}
 	})
 	t.Run("unwired github repo", func(t *testing.T) {
-		c, _ := newCollector(t)
+		c, _, _ := newCollector(t)
 		if _, err := c.IssueDetail(context.Background(), "o", "unwired", 1); !errors.Is(err, ErrUnknownRepo) {
 			t.Errorf("err = %v, want ErrUnknownRepo", err)
 		}
 	})
-	t.Run("wired github repo", func(t *testing.T) {
-		c, _ := newCollector(t)
+	t.Run("issue that is not an inbox candidate", func(t *testing.T) {
+		c, w, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "a", 3); !errors.Is(err, ErrNotCandidate) {
+			t.Errorf("err = %v, want ErrNotCandidate", err)
+		}
+		if got := w.calls(w.detailCalls, "o/a#3"); got != 0 {
+			t.Errorf("detail calls for a non-candidate = %d, want 0 (no forge read)", got)
+		}
+	})
+	t.Run("issue the snapshot does not list", func(t *testing.T) {
+		c, _, _ := newCollector(t)
+		if _, err := c.IssueDetail(context.Background(), "o", "a", 99); !errors.Is(err, ErrNotCandidate) {
+			t.Errorf("err = %v, want ErrNotCandidate", err)
+		}
+	})
+	t.Run("cached thread within the TTL", func(t *testing.T) {
+		c, w, clk := newCollector(t)
+		before := w.calls(w.detailCalls, "o/a#2")
+		clk.advance(detailTTL - time.Second)
+
 		d, err := c.IssueDetail(context.Background(), "o", "a", 2)
 		if err != nil {
 			t.Fatal(err)
+		}
+		if got := w.calls(w.detailCalls, "o/a#2"); got != before {
+			t.Errorf("detail calls = %d, want %d (served from the cache)", got, before)
+		}
+		if len(d.Runs) != 2 || d.Runs[0].Class != "task_failure" {
+			t.Errorf("Runs = %+v, want 2, newest first", d.Runs)
+		}
+	})
+	t.Run("live read once the TTL passed", func(t *testing.T) {
+		c, w, clk := newCollector(t)
+		before := w.calls(w.detailCalls, "o/a#2")
+		clk.advance(detailTTL)
+
+		d, err := c.IssueDetail(context.Background(), "o", "a", 2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := w.calls(w.detailCalls, "o/a#2"); got != before+1 {
+			t.Errorf("detail calls = %d, want %d (one live read)", got, before+1)
 		}
 		if d.Issue.Title != "live title" || d.Issue.Repo != "o/a" {
 			t.Errorf("Issue = %+v, want the live title", d.Issue)
@@ -728,15 +766,17 @@ func TestCollector_IssueDetail_Table(t *testing.T) {
 		}
 	})
 	t.Run("source error", func(t *testing.T) {
-		c, w := newCollector(t)
+		c, w, clk := newCollector(t)
 		boom := errors.New("boom")
 		w.set(func() { w.issueErr["o/a#2"] = boom })
+		clk.advance(detailTTL)
+
 		_, err := c.IssueDetail(context.Background(), "o", "a", 2)
 		if !errors.Is(err, boom) {
 			t.Fatalf("err = %v, want it to wrap the source error", err)
 		}
-		if errors.Is(err, ErrUnknownRepo) {
-			t.Errorf("err = %v, want it not to read as ErrUnknownRepo", err)
+		if errors.Is(err, ErrUnknownRepo) || errors.Is(err, ErrNotCandidate) {
+			t.Errorf("err = %v, want it not to read as a not-found error", err)
 		}
 	})
 }
