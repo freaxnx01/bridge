@@ -80,8 +80,9 @@ comment fetch.
 
 ### Comments (run markers)
 
-- New source `Comments func(ctx, r core.Repo, number int) ([]forge.Comment, error)`
+- New source `Issue func(ctx, r core.Repo, number int) (forge.Issue, []forge.Comment, error)`
   on `cockpit.Sources`, backed by GitHub `GetIssue` (already paginates comments).
+  The live detail needs title and labels from the same call.
 - Cache per (repo, number) keyed by the issue's `Updated`: a new comment bumps
   `Updated`, so a candidate is re-fetched only when it changed. *(My call — keeps
   the 10-minute issues tick from costing one call per candidate.)*
@@ -133,8 +134,9 @@ type Inbox struct {
 func BuildInbox(in InboxInput) Inbox
 ```
 
-`RunRecord` needs JSON tags (lower-camel, matching the marker's field names
-where they exist) — added in this issue.
+`RunRecord` needs JSON tags — added in this issue, lower-camel like the rest of
+the cockpit API (`retryAttempt`, `costUsd`, `runUrl`, `posted`), not the
+marker's snake_case.
 
 Mapping from `NextAction`:
 
@@ -168,8 +170,9 @@ parks on purpose, both mean "known, not now". They show as a collapsed
   404 when the repo is not a wired GitHub repo known to the collector.
 - New `dispatch.Runs(comments []forge.Comment) []RunRecord` (all trusted markers,
   oldest first; `LatestRun` keeps its contract and may reuse it).
-- SSE: the collector publishes `inbox-updated` when the inbox JSON changed (same
-  pattern as `pipeline-updated`).
+- SSE: the collector publishes `inbox-updated` when the inbox JSON changed. The
+  collector's `onChange func()` becomes `onChange func(event string)` so it can
+  name the event; `pipeline-updated` keeps its current behaviour.
 
 ## UI
 
@@ -220,8 +223,7 @@ phone, side panel on desktop; Esc / back closes it.
 └──────────────────────────────┘
 ```
 
-Empty states: no cards → "Nothing needs you." (and the waiting list still shows);
-no wired repo → the same hint the board shows.
+Empty state: no cards → "Nothing needs you." (the waiting list still shows).
 
 ### Flow
 
@@ -248,9 +250,8 @@ stateDiagram-v2
   `inbox-updated`, poll fallback).
 - `App.svelte`: `area` defaults to `inbox`. `Header.svelte`: an enabled
   "Inbox" entry with a count badge, before "Pipeline".
-- Ages ("12m", "5h", "3d") come from a new `lib/age.js` helper — the board has
-  no relative-time helper to reuse (`running.js` only does run minutes). Links
-  open in a new tab.
+- Ages ("12m", "5h", "3d") reuse `ageSeconds` / `formatAge` from
+  `lib/freshness.js`. Links open in a new tab.
 
 ## Testing
 
