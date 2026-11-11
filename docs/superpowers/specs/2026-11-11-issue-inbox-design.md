@@ -16,9 +16,9 @@ This issue is the **read-only** inbox: data, inbox page, issue detail, links.
 Split out, each its own issue:
 
 - **Inbox write actions** — Retry, Retry with another agent/model, Park. They
-  share the re-dispatch path with #253 (`--retry-only`). Follow-up issue (new).
+  share the re-dispatch path with #253 (`--retry-only`). Follow-up: #374.
 - **Blocked interactive sessions** as cards — only Herdr knows "blocked" today,
-  and serve has no Herdr source. Follow-up issue (new).
+  and serve has no Herdr source. Follow-up: #375.
 - Unchanged from the original issue: in-UI diff review, usage meter (#371), plugin
   API.
 
@@ -275,4 +275,4 @@ stateDiagram-v2
 
 - #367 (merged): `NextAction`, `LatestRun`.
 - agent-workflow v2.2.0 (released): consumers emit the marker.
-- Follow-ups: inbox write actions (with #253), blocked sessions.
+- Follow-ups: #374 inbox write actions (with #253), #375 blocked sessions.
