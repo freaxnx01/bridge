@@ -1,10 +1,66 @@
-# Cockpit (WebUI) and the Pipeline board
+# Cockpit (WebUI), the Inbox and the Pipeline board
 
-The cockpit is the Svelte page served by `bridge serve` (port 7777). Its first
-panel is the **Pipeline board**: what is running, what is ready to dispatch, what
-is held, and what still needs enrichment, across all local clones. Design:
-[`docs/superpowers/specs/2026-10-24-bridge-cockpit-design.md`](superpowers/specs/2026-10-24-bridge-cockpit-design.md),
+The cockpit is the Svelte page served by `bridge serve` (port 7777). It opens on
+the **Inbox**: the issues that need a person, with everything that is merely
+running or retrying as a one-line status. The **Pipeline board** — what is
+running, what is ready to dispatch, what is held, and what still needs
+enrichment, across all local clones — is the second area, reachable from the
+header, which carries the Inbox card count as a badge. Design:
+[`docs/superpowers/specs/2026-10-24-bridge-cockpit-design.md`](superpowers/specs/2026-10-24-bridge-cockpit-design.md)
+and [`2026-11-11-issue-inbox-design.md`](superpowers/specs/2026-11-11-issue-inbox-design.md),
 wireframes and flows: [`docs/design/cockpit/`](design/cockpit/).
+
+## Inbox
+
+The unit of work is the **issue**. Since the pipeline posts a run marker on every
+run (agent-workflow ADR-021), bridge has one answer to "does this issue need a
+person?": `dispatch.NextAction` over the issue's latest marker. The Inbox is that
+answer on a page. It is read-only — Retry, Retry with and Park are a follow-up.
+
+### Candidates
+
+An open issue is an inbox candidate when its repo is a **wired GitHub repo**
+(the board's `Wired` rule) and it carries any of `ai-implement`, `ai:failed`,
+`ai:partial`, `ai:done`, `ai:paused`, `ai:review-blocked`, `ai:review-failed`,
+`ai:runner-blocked`, `ai:checks-blocked`, `parked`, `🧊 parked`. Anything else
+can only be `ActionNone`, so it is skipped without reading its comments. Forgejo
+and Azure DevOps have no run marker and never appear.
+
+### Where an issue lands
+
+| `NextAction` | Where |
+|---|---|
+| `ActionHuman`, reason `parked` | **Parked**, a folded group |
+| `ActionHuman`, any other reason | **Cards**, kind `human` (●) |
+| `ActionRetry` | **Cards**, kind `retry` (↻) |
+| `ActionWait` | **Running & waiting**, one line each |
+| `ActionNone` | not shown |
+
+The reasons are `Action.Reason` verbatim; the row-by-row mapping that produces
+them is in [`dispatch.md`](dispatch.md) ("When a run fails").
+
+Cards sort by urgency group, oldest first within a group:
+
+1. Work exists and waits for review: `review blocked`, `review failed`, `checks blocked`, `partial`.
+2. A run stopped: every other `human` reason except group 4.
+3. `retry` cards.
+4. No information: `no run marker`, `retry never reported`.
+
+A card shows `repo#n`, the title, the reason, and — when the issue has a marker
+— `agent · model · cost · #attempt`, plus Issue / PR / Run links. Its age is the
+marker's `posted`, or the issue's `updated` when there is none. Tapping a card or
+a waiting line opens the issue detail: every trusted marker on the issue, newest
+first, fetched live. Esc or ← closes it.
+
+### Freshness
+
+Comments are read only for candidates, and only when the issue's `updated` has
+moved since the last read — a new comment moves it, so an unchanged issue costs
+no call. A failed read keeps the stale thread (the card stays) and shows a
+`Could not read comments: …` line; the next tick retries it. When the runs tick
+sees a run that was in flight for a candidate finish, it re-reads that repo right
+away, so a fresh report shows within about a minute instead of at the next
+10-minute issues tick.
 
 ## Board columns
 
@@ -67,6 +123,44 @@ All JSON. `GET` is open (LAN), `POST` is guarded (see Auth).
 is set on Held cards. Empty sections are `[]`, never `null`. `issue`, `url`,
 `sessionId` and `cwd` are omitted when empty.
 
+### `GET /api/inbox`
+
+Open and read-only, like `GET /api/pipeline`.
+
+```json
+{
+  "cards": [{"repo": "owner/name", "number": 412, "title": "", "url": "",
+             "kind": "human|retry|wait|parked", "reason": "review blocked",
+             "since": "RFC3339",
+             "run": {"attempt": 2, "counts": true, "retryAttempt": 0,
+                     "class": "task_failure", "decision": "stop", "status": "ai:failed",
+                     "subtype": "", "agent": "claude", "model": "opus-5", "turns": 71,
+                     "costUsd": 3.1, "pr": 415, "runUrl": "", "posted": "RFC3339"}}],
+  "waiting": [InboxCard], "parked": [InboxCard],
+  "collectedAt": "RFC3339",
+  "errors": {"comments owner/name#5": "…"}
+}
+```
+
+`run` is omitted when the issue has no readable marker. Empty sections are `[]`,
+never `null`; `errors` is omitted when empty. `collectedAt` is the issues tick's.
+
+### `GET /api/inbox/{owner}/{repo}/{number}`
+
+One issue plus its full run history, newest first, read live:
+
+```json
+{"issue": {"repo": "owner/name", "number": 412, "title": "", "url": "", "labels": []},
+ "runs": [RunRecord]}
+```
+
+| Status | Meaning |
+|---|---|
+| 400 | `number` is not a positive integer |
+| 404 | Malformed path, or the repo is not a wired GitHub repo the collector knows |
+| 405 | Wrong method (`Allow: GET`) |
+| 502 | The forge call failed; the detail is in the server log, never in the body |
+
 ### `POST /api/pipeline/refresh`
 
 Triggers a background re-collect of all three sources. Returns `202` with no body.
@@ -91,14 +185,17 @@ enrich, in Ready for dispatch.
 
 ### SSE
 
-`GET /api/events` emits `pipeline-updated` whenever a source changes; the page
-then re-fetches `/api/pipeline`.
+`GET /api/events` emits `pipeline-updated` whenever the board changes and
+`inbox-updated` whenever the inbox changes; the page then re-fetches
+`/api/pipeline` or `/api/inbox`. Each event fires only when its own payload
+changed, so a board-only change does not wake the inbox and back.
 
 SSE fires only on content changes, so on a quiet board it goes silent. The page
 therefore also re-fetches `/api/pipeline` on a timer every `intervalsSeconds.sessions`
 seconds (at least 5 s, 5 s before the first load) to keep `collectedAt` current
 and avoid false stale warnings. Overlapping collects on the server (ticker vs.
 manual refresh) coalesce: a second call while one is running returns at once.
+The Inbox page polls `/api/inbox` every 60 s for the same reason.
 
 ## What the buttons run
 
@@ -123,6 +220,18 @@ rejected for any other agent.
 - The first sessions collect takes about 35 s.
 - Subagent visibility is not built yet.
 - A session card shows an "Open RC" link only when its sessionId looks like `session_…`.
+- A run names its issue only by display title, so a **pipeline retry** — a
+  `workflow_dispatch` run whose display title is the workflow name — cannot be
+  attributed to an issue. Such an issue's latest marker already says
+  `decision: retry`, which reads as "pipeline retrying", so the Inbox is still
+  right.
+- Two open issues with the **same title** in one repo both read as running while
+  one run is going, for the same reason.
+- Issues whose last run predates agent-workflow v2.2.0 carry no marker and read
+  "no run marker" (urgency group 4). There is no fallback parser for the visible
+  report: a pre-marker report carries neither class nor decision.
+- The Inbox is read-only. Retry, Retry with another agent/model and Park are a
+  follow-up (#374), as are blocked interactive sessions (#375).
 
 ## Rollout (operator steps)
 
