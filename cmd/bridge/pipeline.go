@@ -133,6 +133,18 @@ func cockpitSources(resolve clientResolver) cockpit.Sources {
 			}
 			return gh.ListWorkflowRuns(ctx, r.Owner, r.Name, "", "", runsPerRepo)
 		},
+		Issue: func(ctx context.Context, r core.Repo, number int) (forge.Issue, []forge.Comment, error) {
+			gh, err := githubOnly(resolve, r)
+			if err != nil {
+				return forge.Issue{}, nil, err
+			}
+			if gh == nil {
+				// Only GitHub posts run markers, so the inbox never asks for
+				// another forge's comments; saying so beats a nil, nil answer.
+				return forge.Issue{}, nil, fmt.Errorf("%w: %s is not github", errNoForgeClient, r.Forge)
+			}
+			return gh.GetIssue(ctx, r.Owner, r.Name, number)
+		},
 		Sessions: func(ctx context.Context) ([]agentview.Session, error) {
 			return agentview.List(ctx, agentview.ExecRunner{})
 		},

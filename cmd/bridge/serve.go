@@ -235,8 +235,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(restDeps(toolDeps, serveAllowWrites))))
 	apiMux.Handle("/api/agents", agentsH)
 
-	collector := cockpit.NewCollector(cockpitSources(cachedClients(clientForMCP(reposRoots()))), cockpit.DefaultIntervals(), time.Now, func() {
-		hub.Broadcast(web.Event{Type: "pipeline-updated"})
+	collector := cockpit.NewCollector(cockpitSources(cachedClients(clientForMCP(reposRoots()))), cockpit.DefaultIntervals(), time.Now, func(ev string) {
+		hub.Broadcast(web.Event{Type: ev})
 	})
 	go collector.Run(ctx)
 	pipelineH := pipelineHandler(ctx, collector, reposWithMeta)
