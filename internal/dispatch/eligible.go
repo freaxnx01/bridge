@@ -12,11 +12,10 @@ import (
 const (
 	LabelNeedsEnrichment = "needs-enrichment"
 	LabelToBeDefined     = "❓ to-be-defined"
-	LabelParked          = "🧊 parked"
+	LabelParked          = "parked"
+	LabelParkedLegacy    = "🧊 parked"
 	LabelAIImplement     = "ai-implement"
 	LabelAIReviewAIMerge = "ai-review-ai-merge"
-	attemptPrefix        = "attempt:"
-	failedPrefix         = "failed:"
 )
 
 func hasLabel(labels []string, want string) bool {
@@ -28,21 +27,11 @@ func hasLabel(labels []string, want string) bool {
 	return false
 }
 
-// Attempts reads the attempt:N label. Absent or malformed means zero attempts,
-// which is the safe direction: a corrupt label lets the issue run, it does not
-// silently strand it.
-func Attempts(labels []string) int {
-	for _, l := range labels {
-		if !strings.HasPrefix(l, attemptPrefix) {
-			continue
-		}
-		n, err := strconv.Atoi(strings.TrimPrefix(l, attemptPrefix))
-		if err != nil {
-			return 0
-		}
-		return n
-	}
-	return 0
+// IsParked reports whether the issue is parked, in either spelling. The
+// agent-workflow pipeline parks with the ASCII label (its ADR-016); bridge wrote
+// the emoji one until #367 and still reads it, but only ever writes LabelParked.
+func IsParked(labels []string) bool {
+	return hasLabel(labels, LabelParked) || hasLabel(labels, LabelParkedLegacy)
 }
 
 // ActiveMilestone is the open milestone with the earliest due date. A milestone
@@ -104,14 +93,11 @@ func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (b
 	if hasLabel(i.Labels, LabelToBeDefined) {
 		return false, "to-be-defined"
 	}
-	if hasLabel(i.Labels, LabelParked) {
+	if IsParked(i.Labels) {
 		return false, "parked"
 	}
 	if hasLabel(i.Labels, LabelAIImplement) {
 		return false, "already dispatched"
-	}
-	if Attempts(i.Labels) >= 2 {
-		return false, "attempts exhausted"
 	}
 	if !planHeadingRE.MatchString(i.Body) {
 		return false, "no implementation plan"

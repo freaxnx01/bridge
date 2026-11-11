@@ -146,7 +146,7 @@ func classifyIssues(b *columns, rd RepoData) []dispatch.Candidate {
 	active := dispatch.ActiveMilestone(rd.Milestones)
 	for _, i := range rd.Issues {
 		switch {
-		case hasAny(i.Labels, dispatch.LabelParked, LabelRoadmap):
+		case dispatch.IsParked(i.Labels) || hasAny(i.Labels, LabelRoadmap):
 		case hasAny(i.Labels, LabelEnrichmentOngoing):
 			b.running = append(b.running, RunningCard{
 				Kind: KindEnrichment, Repo: repoName(rd), Issue: i.Number, Title: i.Title,
@@ -170,7 +170,7 @@ func gate(b *columns, rd RepoData, i forge.Issue, active string) []dispatch.Cand
 		return []dispatch.Candidate{{Issue: i, Owner: rd.Owner, Repo: rd.Name, MilestoneDue: milestoneDue(rd.Milestones, i.Milestone)}}
 	}
 	switch reason {
-	case "outside active milestone", "attempts exhausted", "open PR":
+	case "outside active milestone", "open PR":
 		b.held = append(b.held, dated{card(i, repoName(rd), reason), i.Created})
 	case "no implementation plan", "empty body":
 		// Not ready, but fixable by enriching: surface it with the reason.
@@ -266,6 +266,6 @@ func hasAny(labels []string, wanted ...string) bool {
 // isGateCandidate reports whether an issue's labels pass classification rules
 // 1-4, i.e. it reaches the dispatch gate (a Ready or Held candidate).
 func isGateCandidate(labels []string) bool {
-	return !hasAny(labels, dispatch.LabelParked, LabelRoadmap, LabelEnrichmentOngoing,
+	return !dispatch.IsParked(labels) && !hasAny(labels, LabelRoadmap, LabelEnrichmentOngoing,
 		dispatch.LabelNeedsEnrichment, dispatch.LabelToBeDefined, dispatch.LabelAIImplement)
 }

@@ -67,12 +67,11 @@ An issue is eligible for dispatch if it passes these checks in order (this is th
 1. **Non-empty body** — The issue body must not be blank or whitespace-only. Checked before the label rules: an empty issue is unfit for dispatch for a reason that has nothing to do with its labels, and this is the backstop for any intake path that fails to stamp `needs-enrichment`. Reason string: `empty body`.
 2. **Not needs-enrichment** — The issue must NOT be labeled `needs-enrichment` (i.e. it must already have a clear task description or acceptance criteria). Issues carrying this label are skipped until enriched.
 3. **Not to-be-defined** — The issue must NOT be labeled `❓ to-be-defined`. Reason string: `to-be-defined`.
-4. **Not parked** — The issue must not be labeled `🧊 parked`. Parked issues are skipped and must be manually unparked by removing the label.
+4. **Not parked** — The issue must not be labeled `parked` (the legacy spelling `🧊 parked` is still read). The agent-workflow pipeline parks an issue when it reaches its attempt cap; a parked issue is skipped until the label is removed by hand. Reason string: `parked`.
 5. **Not already dispatched** — The issue must not already carry the `ai-implement` label. This guards against re-labeling/re-commenting an issue on every tick when a prior dispatch failed without producing a PR (see "When a run fails" below) — the open-PR check alone can't catch that case, since no PR exists.
-6. **Attempt budget** — The issue must not have an `attempt:N` label with N ≥ 2. A failed run increments the attempt counter; after 2 failed runs, the issue is parked and skipped.
-7. **Implementation plan** — The body must contain an `## Implementation Plan` heading, matched by `(?im)^#{2,6}\s*implementation plan\s*$`: h2 to h6, case-insensitive, nothing after the title on that line. Reason string: `no implementation plan`.
-8. **No open PR** — The issue must not have an open pull request that closes it (detected by matching closing keywords in the PR body: "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"). A hand-written PR never consumes a dispatch slot.
-9. **Milestone membership** — If the repo has an open milestone with a due date, the issue must belong to that milestone. Undated milestones are treated as inactive (setting a due date is how the operator marks a milestone active for dispatch).
+6. **Implementation plan** — The body must contain an `## Implementation Plan` heading, matched by `(?im)^#{2,6}\s*implementation plan\s*$`: h2 to h6, case-insensitive, nothing after the title on that line. Reason string: `no implementation plan`.
+7. **No open PR** — The issue must not have an open pull request that closes it (detected by matching closing keywords in the PR body: "close", "closes", "closed", "fix", "fixes", "fixed", "resolve", "resolves", "resolved"). A hand-written PR never consumes a dispatch slot.
+8. **Milestone membership** — If the repo has an open milestone with a due date, the issue must belong to that milestone. Undated milestones are treated as inactive (setting a due date is how the operator marks a milestone active for dispatch).
 
 The first failure reason is returned; dry-run uses this to explain every skip.
 
@@ -160,40 +159,105 @@ Bridge dispatch checks and creates these labels:
 | Label | Meaning | Set by |
 |---|---|---|
 | `needs-enrichment` | Issue lacks clear task description; skip until enriched | Bridge intake (`/api/capture/issue`, MCP `create_issue`) or manual |
-| `🧊 parked` | Issue exhausted the attempt budget; skip until manually unparked | Agent-workflow / future retry-tick component |
+| `parked` | Issue reached the pipeline's attempt cap; skip until manually unparked. Legacy spelling `🧊 parked` is still read, never written | Agent-workflow (`check-attempt-cap.sh`) |
 | `ai-implement` | Selected for dispatch; ready for the pipeline | Bridge dispatch (on selection) |
-| `attempt:1`, `attempt:2` | Attempt count; incremented after each failed substantive run | Agent-workflow / future retry-tick component |
-| `failed:api_auth` | Last run failed due to GitHub API auth error | Agent-workflow pipeline |
-| `failed:rate_limit` | Last run failed due to GitHub API rate limit | Agent-workflow pipeline |
-| `failed:infra` | Last run failed due to infrastructure error | Agent-workflow pipeline |
-| `failed:max_turns` | Last run hit the max-turn limit without producing a PR | Agent-workflow pipeline |
-| `failed:gate_failed` | Last run produced code but failed a pre-merge gate | Agent-workflow pipeline |
-| `failed:no_diff` | Last run produced no code changes | Agent-workflow pipeline |
+| `ai:done`, `ai:failed`, `ai:partial` | How the last run ended | Agent-workflow pipeline |
+| `ai:paused` | The pipeline paused the issue (e.g. out of credits); `pipeline-resume.sh` picks it up again | Agent-workflow pipeline |
+| `ai:review-blocked` | The review step could not run | Agent-workflow pipeline |
+| `ai:review-failed` | The review rejected the run's PR | Agent-workflow pipeline |
+| `ai:runner-blocked` | No runner could take the job | Agent-workflow pipeline |
+| `ai:checks-blocked` | The PR's checks could not complete | Agent-workflow pipeline |
 | `size:s`, `size:m`, `size:l` | Issue complexity estimate (small, medium, large) | Manual (operator) |
 
 ## When a run fails
 
-When the agent-workflow pipeline labels an issue with `failed:<bucket>`, the failure is categorized as either **transient** or **substantive**. The distinction determines how a retry-tick component (when built and wired) will handle retries.
+The agent-workflow pipeline is the single source of truth for how a run ended.
+It classifies the failure (`scripts/classify-failure.sh`), decides whether to
+retry, counts attempts against its own cap (`check-attempt-cap.sh`) and labels
+the issue `parked` when the cap is reached. Bridge reads that verdict and only
+decides whether a re-dispatch or a person is needed; it keeps no counter of its
+own. (Until #367 this document described `failed:*` and `attempt:N` labels and a
+2-attempt budget of bridge's own. Nothing ever wrote those labels, and a second
+counter could only disagree with the pipeline's cap, so both are gone.)
 
-### Transient failures (no attempt cost when retried)
+### The run marker
 
-Transient failures indicate a temporary environmental issue, not a problem with the issue itself:
-- `failed:api_auth` — GitHub API auth failure (bad/expired token, etc.)
-- `failed:rate_limit` — GitHub API rate limit hit
-- `failed:infra` — Infrastructure error (network timeout, service unavailable, etc.)
+Every run report comment the pipeline posts ends with a machine-readable marker
+(agent-workflow ADR-021):
 
-When a future retry-tick component is wired, transient failures will be retried immediately without incrementing the attempt counter.
+```text
+<!-- ai-run: {"v":1,"attempt":2,"counts":true,"retry_attempt":0,"class":"task_failure","decision":"stop","status":"ai:failed","turns":60,"cost_usd":2.34,"pr":42,"run_url":"…"} -->
+```
 
-### Substantive failures (count toward the 2-attempt budget)
+- `dispatch.ParseRunMarker` accepts it only as the comment's **last non-empty
+  line** and only at `"v":1`. Unknown fields are ignored — the pipeline adding a
+  field is not a version bump.
+- `dispatch.LatestRun` returns the newest marker posted by
+  **`github-actions[bot]`**, the identity the pipeline's "Post run report" step
+  uses. That is ADR-021's consumer trust rule: anyone can paste a marker into a
+  comment, so a marker from any other author is display-only text.
+- There is no fallback parser for older reports. A report that predates the
+  marker carries neither a class nor a retry decision, so "no marker" is handled
+  as its own state instead (rows 9–10 below).
 
-Substantive failures indicate a real problem with the issue or task definition:
-- `failed:max_turns` — Run hit the max-turn limit without producing a PR
-- `failed:gate_failed` — Run produced code but failed a pre-merge gate (linting, tests, etc.)
-- `failed:no_diff` — Run produced no code changes
+### The mapping
 
-When a future retry-tick component is wired, substantive failures will increment the attempt counter. After 2 failed substantive runs, the issue will be labeled `🧊 parked` and skipped by dispatch until manually unparked.
+`dispatch.NextAction(IssueState) Action` maps one issue's state onto four
+outcomes — **None** (nothing to do), **Wait** (the pipeline is still on it),
+**Retry** (a re-dispatch can fix it) and **Human** (a person has to look). It is
+pure: it reads nothing and writes no label or comment. The first matching row
+wins.
 
-**Status today:** The retry-tick logic is fully specified (`NextAction` in `internal/dispatch/failure.go` computes the label actions and retry decision), but it is not yet wired to an automated systemd timer or a `--retry-only` dispatch mode. For now, retries of any kind require manual `bridge dispatch now` runs.
+| # | Pipeline state | Kind | Reason |
+|---|---|---|---|
+| 1 | label `parked` or `🧊 parked` | Human | `parked` |
+| 2 | label `ai:paused` | Wait | `paused` |
+| 3 | a run is in flight | Wait | `running` |
+| 4 | label `ai:review-blocked` | Human | `review blocked` |
+| 5 | label `ai:review-failed` | Human | `review failed` |
+| 6 | label `ai:runner-blocked` | Human | `runner blocked` |
+| 7 | label `ai:checks-blocked` | Human | `checks blocked` |
+| 8 | no `ai-implement` and no `ai:done` / `ai:failed` / `ai:partial` | None | |
+| 9 | `ai-implement`, no marker, no status label | Wait | `no run report yet` |
+| 10 | no marker but a status label: `ai:done` → None; `ai:failed` / `ai:partial` → Human | None / Human | `no run marker` |
+| 11 | marker status `ai:done` | None | |
+| 12 | marker status `ai:partial` | Human | `partial` |
+| 13 | class `out_of_credits` (a pause class) | Wait | `paused` |
+| 14 | class `transient`, `rate_limit` or `task_failure`, decision `retry`, marker older than 3 h | Human | `retry never reported` |
+| 15 | class `transient`, `rate_limit` or `task_failure`, decision `retry` | Wait | `pipeline retrying` |
+| 16 | class `transient` or `rate_limit`, decision `stop`, attempt > 0 | Retry | `<class>, retries exhausted` |
+| 17 | class `transient` or `rate_limit`, decision `stop`, attempt absent | Human | `<class>, no attempt cap` |
+| 18 | class `task_failure`, decision `stop` | Human | `task_failure` |
+| 19 | class `api_auth`, `model_not_found` or `bug` | Human | `<class>` |
+| 20 | anything else (unknown class, no decision on a failure) | Human | `unknown: <class>`, or `no failure class` when the marker carries none |
+
+Notes:
+
+- **Row 16 is the only Retry.** It requires the attempt number the pipeline's cap
+  counted, because that cap is what bounds re-dispatching: once it is reached the
+  pipeline parks the issue and row 1 takes over. With the cap off (`max-attempts:
+  0`, a stub run, the pause gate) there is no bound, so row 17 asks a person.
+  Row 18 is Human for the same reason: the pipeline already retried the turn
+  budget once.
+- **Unknown is never Retry.** An unattended re-dispatch spends money, so anything
+  bridge cannot read goes to a person (rows 10 and 20).
+- **In flight is an input, not a label.** The pipeline creates `ai:running` but
+  never sets it, and `ai-implement`, the previous status label and the previous
+  marker all survive until the next report — so labels alone cannot tell a
+  re-dispatched run from the last finished one. The caller computes it from the
+  repo's queued and in-progress workflow runs.
+- **3 h** (`staleRetryAfter`) is how long a `decision: retry` may go without a
+  newer report. The pipeline's longest retry delay is 5 minutes plus one run, so
+  more than that means the retry was lost — a 403 on re-dispatch, or a run that
+  timed out and posted no report at all.
+- `agent_timeout` is not a pipeline class; a timed-out run posts no report and
+  lands in row 9, 10 or 14.
+- On Forgejo and Azure DevOps there is no marker at all, so a failure there is
+  always row 10.
+
+**Status today:** `NextAction` is computed but not yet called by a tick — #253
+wires it to a `--retry-only` dispatch mode. For now, retries of any kind require
+a manual `bridge dispatch now`.
 
 ## Config
 

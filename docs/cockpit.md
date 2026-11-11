@@ -12,7 +12,7 @@ wireframes and flows: [`docs/design/cockpit/`](design/cockpit/).
 |---|---|
 | Running | Pipeline workflow runs (queued / in progress), issues labelled `enrichment-ongoing`, and live agent sessions. The count covers active work only: idle sessions fold into **Idle sessions**, and an `enrichment-ongoing` issue unchanged for 6 h+ folds into **Stuck enriching** (a label a finished run never cleared). A pipeline run shows its runtime in minutes, orange from 30 min, red from 60 min |
 | Ready | Issues that pass `dispatch.Eligible`, in dispatch order |
-| Held | Otherwise eligible issues blocked by `outside active milestone`, `attempts exhausted` or `open PR` |
+| Held | Otherwise eligible issues blocked by `outside active milestone` or `open PR` |
 | Needs enrichment | Issues labelled `needs-enrichment` or `❓ to-be-defined` |
 
 "Ready" is exactly `dispatch.Eligible`. Since the dispatch change in this release
@@ -24,11 +24,11 @@ carry `.github/workflows/agent.yml` or `agent-implement.yml` ("wired").
 
 Classification is first match wins:
 
-1. `🧊 parked` or `roadmap`: ignored.
+1. `parked` (legacy `🧊 parked`) or `roadmap`: ignored.
 2. `enrichment-ongoing`: Running (kind `enrichment`).
 3. `needs-enrichment` or `❓ to-be-defined`: Needs enrichment.
 4. `ai-implement`: already dispatched, not a candidate (its workflow run shows under Running).
-5. Otherwise, on a wired GitHub repo: `dispatch.Eligible` decides. Eligible: Ready. Rejected with `outside active milestone`, `attempts exhausted` or `open PR`: Held. Rejected with `no implementation plan` or `empty body`: Needs enrichment, with that reason shown as a badge on the card (these can be enriched; Enrich accepts them). Any other rejection is dropped. On unwired or non-GitHub repos such issues are dropped.
+5. Otherwise, on a wired GitHub repo: `dispatch.Eligible` decides. Eligible: Ready. Rejected with `outside active milestone` or `open PR`: Held. Rejected with `no implementation plan` or `empty body`: Needs enrichment, with that reason shown as a badge on the card (these can be enriched; Enrich accepts them). Any other rejection is dropped. On unwired or non-GitHub repos such issues are dropped.
 
 ## Refresh intervals and rate limits
 

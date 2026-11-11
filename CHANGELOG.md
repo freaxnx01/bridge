@@ -42,6 +42,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- `bridge dispatch`: the retry decision follows the agent-workflow pipeline instead of bridge's own bookkeeping. `dispatch.NextAction` now reads the latest run's failure class, retry decision and attempt count from the pipeline's run marker (agent-workflow ADR-021, trusted only from `github-actions[bot]`) and maps them onto none / wait / retry / human with one documented table; a re-dispatch is only proposed for a transient or rate-limit run the pipeline's own attempt cap stopped, and anything unreadable asks a person instead. See `docs/dispatch.md` ("When a run fails"). (#367)
+
 - **Breaking:** `bridge dispatch` requires an `## Implementation Plan` heading in the issue body and treats `❓ to-be-defined` as unenriched, so previously dispatchable issues without a plan are now skipped.
 - `bridge dispatch`: the nightly cap now applies only while the covering window
   has `budget_rung: false`, and its counter resets at that window's own start
@@ -62,6 +64,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in the user's browser from reaching a mutating tool on `127.0.0.1`, and a
   stateless transport executes the tool on the first POST. (#313)
 
+### Removed
+
+- The `failed:*` and `attempt:N` labels, bridge's 2-attempt budget and the `attempts exhausted` eligibility reason (with the cockpit's Held badge for it). Nothing ever wrote those labels, and a second attempt counter could only disagree with the pipeline's cap, which parks the issue itself. (#367)
+
 ### Security
 
 - The pipeline write endpoints (`refresh`, `enrich`, `dispatch`) require an Origin from an explicit allowlist (`localhost`/`127.0.0.1` on the serve port plus `BRIDGE_COCKPIT_ORIGINS`) as well as the bearer token, defending against DNS rebinding and CSRF. They fail closed with `503` when `BRIDGE_API_TOKEN` is unset.
@@ -69,6 +75,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `bridge dispatch` no longer re-dispatches issues the pipeline parked: the pipeline parks with the ASCII label `parked`, while bridge recognised only `🧊 parked`, so every tick re-applied `ai-implement` and the pipeline's cap step parked the issue again with another comment. Both spellings are now read (in dispatch eligibility and on the cockpit board); bridge only ever writes `parked`. (#367)
 - Cockpit: has its own favicon instead of keeping Authentik's from the login redirect.
 - Cockpit: long issue titles no longer push the Ready column's buttons over Needs enrichment and its Enrich buttons off-screen.
 - Cockpit: Running counts only active work; idle sessions and `enrichment-ongoing` labels unchanged for 6 h+ fold into their own collapsed rows.
