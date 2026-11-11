@@ -72,4 +72,25 @@ describe('Inbox', () => {
     await renderInbox(null, '/api/inbox: 500 Internal Server Error')
     expect(screen.getByText(/500 Internal Server Error/)).toBeTruthy()
   })
+
+  it('opens the issue detail from a card and closes it on Escape', async () => {
+    await renderInbox({ cards: [card()], waiting: [], parked: [] })
+
+    await fireEvent.click(screen.getAllByRole('button')[0])
+    expect(await screen.findByRole('dialog', { name: 'bridge#412' })).toBeTruthy()
+
+    await fireEvent.keyDown(window, { key: 'Escape' })
+    expect(screen.queryByRole('dialog')).toBeNull()
+  })
+
+  it('opens the issue detail from a waiting line too', async () => {
+    await renderInbox({
+      cards: [],
+      waiting: [card({ number: 412, kind: 'wait', reason: 'running' })],
+      parked: [],
+    })
+
+    await fireEvent.click(screen.getByRole('button', { name: /bridge#412/ }))
+    expect(await screen.findByRole('dialog', { name: 'bridge#412' })).toBeTruthy()
+  })
 })

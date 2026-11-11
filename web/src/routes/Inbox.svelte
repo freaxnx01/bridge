@@ -1,5 +1,6 @@
 <script>
   import InboxCard from '../lib/components/InboxCard.svelte';
+  import IssueDetail from '../lib/components/IssueDetail.svelte';
   import WaitLine from '../lib/components/WaitLine.svelte';
   import { inbox, inboxError } from '../lib/stores/inbox.js';
   import { now } from '../lib/stores/now.js';
@@ -64,6 +65,10 @@
       <p class="warn" role="status">⚠ Could not read comments: {key}</p>
     {/each}
   </section>
+
+  {#if selected}
+    <IssueDetail repo={selected.repo} number={selected.number} onclose={() => (selected = null)} />
+  {/if}
 </div>
 
 <style>
