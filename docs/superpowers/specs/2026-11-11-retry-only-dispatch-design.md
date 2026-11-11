@@ -68,11 +68,14 @@ For each candidate:
 
 ## In flight — shared rule
 
-#368 (PR #378) adds `forge.WorkflowRun.DisplayTitle` and an in-flight rule in
-`internal/cockpit`: a run with `Event == "issues"`, status `queued` or
-`in_progress`, and `DisplayTitle == issue.Title`. This issue moves that rule to
-`func InFlight(i forge.Issue, runs []forge.WorkflowRun) bool` in package
-`dispatch`, and the cockpit calls it. Behaviour and documented limits unchanged.
+#368 (merged, a09dbe3) added `forge.WorkflowRun.DisplayTitle` and the in-flight
+rule in `internal/cockpit/inbox.go:208-217` (`inFlight`, `isIssueRunFor`): a run
+with `Event == "issues"`, status `queued` or `in_progress`, and
+`DisplayTitle == issue.Title`. This issue moves both to package `dispatch` as
+exported `InFlight(i forge.Issue, runs []forge.WorkflowRun) bool` and
+`IsIssueRunFor(i forge.Issue, r forge.WorkflowRun) bool`; the cockpit
+(`inbox.go`, `collector.go` `inFlightRunURLs`) calls them. Behaviour and
+documented limits unchanged; the cockpit's existing tests stay green unmodified.
 
 ## Ordering and caps
 
@@ -150,8 +153,7 @@ CHANGELOG.
 ## Dependencies
 
 - #367 (merged): `NextAction`, `LatestRun`.
-- #368 / PR #378: `DisplayTitle` and the in-flight rule this issue moves. **Dispatch
-  #253 after #378 merges.**
+- #368 (merged): `DisplayTitle` and the in-flight rule this issue moves.
 - agent-workflow v2.2.0 (released): run markers.
 - Linked, not fixed here: agent-workflow #351 (no `workflow_dispatch` in consumer
   stubs). #374 (inbox Retry) reuses `Redispatch`.
