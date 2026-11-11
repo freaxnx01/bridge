@@ -64,7 +64,8 @@ For each candidate:
    or that never starts, is retried again every 30 minutes until a cap bites.
    The guard only ever suppresses a retry, so a forged comment cannot cause one.)*
 5. Kind `ActionRetry` → selected for the retry pass with `Action.Reason`.
-   Anything else → listed as skipped with its kind/reason (dry-run output only).
+   Anything else → listed as a skipped retry row with its kind/reason (shown on
+   dry-run and live ticks alike, never applied).
 
 ## In flight — shared rule
 
@@ -128,13 +129,14 @@ unknown label on first use; no setup step.
   `--dry-run`, `--json`, `--auto`. Runs only the retry pass.
 - Without it, `--auto` and `now` run the retry pass, then the new-dispatch pass.
 - Output: each decision gains a kind (`dispatch` | `retry`); retries show their
-  reason. JSON adds `"kind"` and, for retries, `"reason"`.
+  reason. JSON adds `"kind"` and, for retries, `"retry_reason"` (`"reason"` is
+  already the skip reason, and a retry skipped by a cap needs both).
 - The `--auto` pause and window gates apply to the retry pass unchanged.
 
 ## Testing
 
-- `dispatch`: table tests for the candidate predicate (labels), `InFlight` (moved
-  tests + cockpit still green), the retry-pending guard, `Redispatch` call order
+- `dispatch`: table tests for the candidate predicate (labels), `InFlight` (new
+  tests — the cockpit had none for it; cockpit tests stay green unmodified), the retry-pending guard, `Redispatch` call order
   and stop-on-error for each of the 4 steps (fake `labelSwapper`).
 - `cmd/bridge` (httptest fake GitHub, existing pattern): a tick with one retry
   candidate (marker `rate_limit`/`stop`/`attempt:1`) performs exactly
