@@ -242,6 +242,9 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	pipelineH := pipelineHandler(ctx, collector, reposWithMeta)
 	origins := newOriginAllowlist(servePort, os.Getenv("BRIDGE_COCKPIT_ORIGINS"))
 	guarded := requireTokenConfigured(apiToken, requireBearer(apiToken, requireSameOrigin(origins, pipelineH)))
+	inboxH := &api.InboxHandler{Inbox: collector.Inbox, Detail: collector.IssueDetail}
+	apiMux.Handle("/api/inbox", inboxH)       // read-only, open like GET /api/pipeline
+	apiMux.Handle("/api/inbox/", inboxH)      // the issue detail
 	apiMux.Handle("/api/pipeline", pipelineH) // GET only; the handler answers other methods with 405
 	apiMux.Handle("/api/pipeline/refresh", guarded)
 	apiMux.Handle("/api/pipeline/enrich", guarded)
