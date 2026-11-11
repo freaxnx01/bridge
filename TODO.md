@@ -36,16 +36,17 @@ two post-review design amendments).
       outright. That may be correct (the operator *is* using the window) or may
       mean the reserve should be a share of a larger budget. Needs the `/usage`
       comparison above before changing a number.
-- [ ] **Install the dispatch timer — it has never been installed.** Checked
-      2026-09-20: only `bridge-mcp.service` and `bridge-serve.service` exist as
-      user units, and `systemctl --user list-timers bridge*` is empty. So this
-      is not a reinstall; it switches on autonomous dispatch for the first
-      time, and the pre-existing checklist below says dry-run only for the
-      first week. Steps: copy `docs/systemd/bridge-dispatch.{service,timer}` to
-      `~/.config/systemd/user/`, create `~/.config/bridge/dispatch.env` with
-      `GH_TOKEN=...`, then `systemctl --user daemon-reload && systemctl --user
-      enable --now bridge-dispatch.timer`. Deliberately left undone — needs an
-      explicit decision, not a default.
+- [x] **Install the dispatch timer** — done 2026-11-11 on srvdmsk8s01, in
+      **dry-run mode**: units in `~/.config/systemd/user/`, token in
+      `~/.config/bridge/dispatch.env`, and a drop-in
+      `bridge-dispatch.service.d/dry-run.conf` overriding `ExecStart` to
+      `bridge dispatch --auto --dry-run`. Decisions land in
+      `journalctl --user -u bridge-dispatch`. No `dispatch.json` yet (defaults).
+- [ ] **Go live with the dispatch timer** after a week of reviewed dry-run
+      ticks (from ~2026-11-18): delete the `dry-run.conf` drop-in, then
+      `systemctl --user daemon-reload`. Calibrate `budget.window_budget_usd`
+      first — at install the rung read $364–418 used vs $9.60 allowed
+      (~3800%), so every daytime (07–18) tick skips everything.
 - [x] Rebuild and install the binary carrying the rung — done 2026-09-20,
       `bridge v2.9.0-104-g0946f00`. The previously installed build predated
       the feature entirely.
