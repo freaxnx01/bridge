@@ -96,6 +96,8 @@ main { padding: 1rem; }
 .skeleton .card { height: 2.2rem; border-radius: 6px; background: linear-gradient(90deg, var(--border), transparent, var(--border)); opacity: 0.4; }
 .more { margin-top: 0.5rem; }
 .held { margin-top: 0.75rem; border-top: 1px dashed var(--border); padding-top: 0.5rem; }
+.skipped { margin-top: 1rem; color: var(--muted); font-size: 0.85em; }
+.skipped p { margin: 0.25rem 0; }
 .errors { margin-top: 1rem; background: var(--error-bg); color: var(--error); border-radius: 6px; padding: 0.25rem 0.75rem; }
 .errors p { margin: 0.25rem 0; }
 

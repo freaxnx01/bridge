@@ -77,6 +77,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- Cockpit: Azure DevOps clones no longer fill the error strip; the board shows one muted line per unsupported forge (`skipped` in `/api/pipeline`). (#366)
 - `bridge dispatch` no longer re-dispatches issues the pipeline parked: the pipeline parks with the ASCII label `parked`, while bridge recognised only `🧊 parked`, so every tick re-applied `ai-implement` and the pipeline's cap step parked the issue again with another comment. Both spellings are now read (in dispatch eligibility and on the cockpit board); bridge only ever writes `parked`. (#367)
 - Cockpit: has its own favicon instead of keeping Authentik's from the login redirect.
 - Cockpit: long issue titles no longer push the Ready column's buttons over Needs enrichment and its Enrich buttons off-screen.
