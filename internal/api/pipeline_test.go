@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/freaxnx01/bridge/internal/cockpit"
 )
@@ -249,5 +250,158 @@ func TestPipelineHandler_ConcurrentSameIssue_SecondGets409(t *testing.T) {
 	h.Dispatch = func(context.Context, LaunchRequest) (LaunchResult, error) { return LaunchResult{Slot: "s"}, nil }
 	if w := doReq(h, http.MethodPost, "/api/pipeline/dispatch", `{"repo":"o/r","number":5}`); w.Code != http.StatusOK {
 		t.Errorf("after release: %d", w.Code)
+	}
+}
+
+var clearNow = time.Date(2026, 11, 11, 12, 0, 0, 0, time.UTC)
+
+type clearFixture struct {
+	h       *PipelineHandler
+	cleared *[]LaunchRequest
+	enrich  *[]LaunchRequest
+}
+
+func newClearFixture() clearFixture {
+	var cleared, enriched []LaunchRequest
+	h := &PipelineHandler{
+		Now: func() time.Time { return clearNow },
+		Board: func() cockpit.Board {
+			return cockpit.Board{Running: []cockpit.RunningCard{
+				{Kind: cockpit.KindEnrichment, Repo: "o/r", Issue: 612, Since: clearNow.Add(-20 * 24 * time.Hour)},
+				{Kind: cockpit.KindEnrichment, Repo: "o/r", Issue: 613, Since: clearNow.Add(-time.Hour)},
+				{Kind: cockpit.KindEnrichment, Repo: "o/r", Issue: 614, Since: clearNow.Add(-StuckEnrichingAfter)},
+				{Kind: cockpit.KindPipeline, Repo: "o/r", Issue: 615, Since: clearNow.Add(-48 * time.Hour)},
+			}}
+		},
+		ClearLock: func(_ context.Context, req LaunchRequest) error {
+			cleared = append(cleared, req)
+			return nil
+		},
+		Enrich: func(_ context.Context, req LaunchRequest) (LaunchResult, error) {
+			enriched = append(enriched, req)
+			return LaunchResult{Slot: "enrich-612"}, nil
+		},
+	}
+	return clearFixture{h, &cleared, &enriched}
+}
+
+func TestPipelineHandler_ClearLock_StuckCard_ClearsAndReports(t *testing.T) {
+	f := newClearFixture()
+	w := doReq(f.h, http.MethodPost, "/api/pipeline/clear-lock", `{"repo":"o/r","number":612}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"cleared":true`) {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+	if len(*f.cleared) != 1 || (*f.cleared)[0] != (LaunchRequest{Repo: "o/r", Number: 612}) || len(*f.enrich) != 0 {
+		t.Fatalf("cleared=%v enriched=%v", *f.cleared, *f.enrich)
+	}
+}
+
+func TestPipelineHandler_Clear_NotStuckOrNotOnBoard_409(t *testing.T) {
+	cases := []struct {
+		name, body, want string
+	}{
+		{"fresh lock", `{"repo":"o/r","number":613}`, "not stuck"},
+		{"exactly at the threshold", `{"repo":"o/r","number":614}`, "not stuck"},
+		{"pipeline card is not an enrichment", `{"repo":"o/r","number":615}`, "not on the board"},
+		{"unknown issue", `{"repo":"o/r","number":1}`, "not on the board"},
+	}
+	for _, route := range []string{"/api/pipeline/clear-lock", "/api/pipeline/clear-reenrich"} {
+		for _, tc := range cases {
+			t.Run(route+" "+tc.name, func(t *testing.T) {
+				f := newClearFixture()
+				w := doReq(f.h, http.MethodPost, route, tc.body)
+				if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), tc.want) {
+					t.Fatalf("got %d %s", w.Code, w.Body)
+				}
+				if len(*f.cleared) != 0 || len(*f.enrich) != 0 {
+					t.Fatalf("acted on a card that is not stuck: cleared=%v enriched=%v", *f.cleared, *f.enrich)
+				}
+			})
+		}
+	}
+}
+
+func TestPipelineHandler_Clear_ForgeErrors_MapToStatus(t *testing.T) {
+	cases := []struct {
+		name string
+		err  error
+		code int
+	}{
+		{"unsupported forge", ErrUnsupportedForge, http.StatusUnprocessableEntity},
+		{"no token", fmt.Errorf("%w: github owner o", ErrNoToken), http.StatusUnprocessableEntity},
+		{"unknown repo", ErrUnknownRepo, http.StatusConflict},
+		{"forge call failed", errors.New("remove label: 403 Forbidden"), http.StatusBadGateway},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newClearFixture()
+			f.h.ClearLock = func(context.Context, LaunchRequest) error { return tc.err }
+			w := doReq(f.h, http.MethodPost, "/api/pipeline/clear-lock", `{"repo":"o/r","number":612}`)
+			if w.Code != tc.code {
+				t.Fatalf("status = %d, want %d (%s)", w.Code, tc.code, w.Body)
+			}
+			if strings.Contains(w.Body.String(), "403") {
+				t.Fatalf("forge detail leaked into the body: %s", w.Body)
+			}
+		})
+	}
+}
+
+func TestPipelineHandler_ClearReenrich_ClearsThenLaunches(t *testing.T) {
+	f := newClearFixture()
+	w := doReq(f.h, http.MethodPost, "/api/pipeline/clear-reenrich", `{"repo":"o/r","number":612}`)
+	if w.Code != http.StatusOK || !strings.Contains(w.Body.String(), `"slot":"enrich-612"`) {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+	if len(*f.cleared) != 1 || len(*f.enrich) != 1 {
+		t.Fatalf("cleared=%v enriched=%v", *f.cleared, *f.enrich)
+	}
+}
+
+func TestPipelineHandler_ClearReenrich_ClearFails_DoesNotLaunch(t *testing.T) {
+	f := newClearFixture()
+	f.h.ClearLock = func(context.Context, LaunchRequest) error { return errors.New("boom") }
+	w := doReq(f.h, http.MethodPost, "/api/pipeline/clear-reenrich", `{"repo":"o/r","number":612}`)
+	if w.Code != http.StatusBadGateway || len(*f.enrich) != 0 {
+		t.Fatalf("got %d, enriched=%v", w.Code, *f.enrich)
+	}
+}
+
+func TestPipelineHandler_ClearReenrich_LaunchFails_500(t *testing.T) {
+	f := newClearFixture()
+	f.h.Enrich = func(context.Context, LaunchRequest) (LaunchResult, error) { return LaunchResult{}, errors.New("boom") }
+	w := doReq(f.h, http.MethodPost, "/api/pipeline/clear-reenrich", `{"repo":"o/r","number":612}`)
+	if w.Code != http.StatusInternalServerError || !strings.Contains(w.Body.String(), "launch failed") || len(*f.cleared) != 1 {
+		t.Fatalf("got %d %s cleared=%v", w.Code, w.Body, *f.cleared)
+	}
+}
+
+func TestPipelineHandler_Clear_SharesInflightGuardWithLaunches(t *testing.T) {
+	f := newClearFixture()
+	req := LaunchRequest{Repo: "o/r", Number: 612}
+	f.h.inflight.Store(req, struct{}{})
+	w := doReq(f.h, http.MethodPost, "/api/pipeline/clear-lock", `{"repo":"o/r","number":612}`)
+	if w.Code != http.StatusConflict || !strings.Contains(w.Body.String(), "in progress") || len(*f.cleared) != 0 {
+		t.Fatalf("got %d %s", w.Code, w.Body)
+	}
+}
+
+func TestPipelineHandler_Clear_BadInputAndMethod(t *testing.T) {
+	f := newClearFixture()
+	for _, route := range []string{"/api/pipeline/clear-lock", "/api/pipeline/clear-reenrich"} {
+		if w := doReq(f.h, http.MethodGet, route, ""); w.Code != http.StatusMethodNotAllowed {
+			t.Errorf("GET %s: status = %d, want 405", route, w.Code)
+		}
+		for _, body := range []string{`{`, `{"repo":"o/r","number":0}`, `{"repo":"nope","number":1}`} {
+			if w := doReq(f.h, http.MethodPost, route, body); w.Code != http.StatusBadRequest {
+				t.Errorf("POST %s %s: status = %d, want 400", route, body, w.Code)
+			}
+		}
+	}
+}
+
+func TestStuckEnrichingAfter_MatchesFrontendRule(t *testing.T) {
+	if StuckEnrichingAfter != 6*time.Hour {
+		t.Fatalf("StuckEnrichingAfter = %v; web/src/lib/running.js STUCK_ENRICHING_SECONDS must change with it", StuckEnrichingAfter)
 	}
 }
