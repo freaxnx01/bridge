@@ -67,7 +67,7 @@ away, so a fresh report shows within about a minute instead of at the next
 
 | Column | Contents |
 |---|---|
-| Running | Pipeline workflow runs (queued / in progress), issues labelled `enrichment-ongoing`, and live agent sessions. The count covers active work only: idle sessions fold into **Idle sessions**, and an `enrichment-ongoing` issue unchanged for 6 h+ folds into **Stuck enriching** (a label a finished run never cleared). A pipeline run shows its runtime in minutes, orange from 30 min, red from 60 min |
+| Running | Pipeline workflow runs (queued / in progress), issues labelled `enrichment-ongoing`, and live agent sessions. The count covers active work only: idle sessions fold into **Idle sessions**, and an `enrichment-ongoing` issue unchanged for 6 h+ folds into **Stuck enriching** (a label a finished run never cleared; each card offers **Clear lock** and **Clear & re-enrich**). A pipeline run shows its runtime in minutes, orange from 30 min, red from 60 min |
 | Ready | Issues that pass `dispatch.Eligible`, in dispatch order |
 | Held | Otherwise eligible issues blocked by `outside active milestone` or `open PR` |
 | Needs enrichment | Issues labelled `needs-enrichment` or `❓ to-be-defined` |
@@ -196,6 +196,29 @@ enrich, in Ready for dispatch.
 | 503 | `BRIDGE_API_TOKEN` is not set (writes fail closed) |
 | 500 | `launch failed` (details are in the server log) |
 
+### `POST /api/pipeline/clear-lock` and `POST /api/pipeline/clear-reenrich`
+
+Body (max 4 KiB): `{"repo": "owner/name", "number": 12}`, like enrich and
+dispatch. The issue must be a Running **enrichment** card unchanged for more
+than 6 h — the same rule the **Stuck enriching** fold uses; a fresh lock is
+refused so a running enrichment cannot be cut off. Success (`200`) is
+`{"cleared": true}` for `clear-lock` and the enrich `LaunchResult` for
+`clear-reenrich`, which clears first and only then starts the session Enrich
+starts. The label is removed with the repo owner's **own** token (the same
+per-owner client the collector reads with, not `GH_TOKEN`), and a
+`🔓 Enrichment lock cleared from the cockpit at <UTC>` comment is posted
+afterwards — best effort: a failed comment does not fail the request, and no
+comment is posted when the removal failed.
+
+Same statuses as enrich and dispatch, plus:
+
+| Status | Meaning |
+|---|---|
+| 409 | `not stuck` (the card is an enrichment younger than 6 h) or `not on the board` (no such enrichment card) — the label is left alone |
+| 422 | `lock clearing is not supported for this forge` (no label removal, e.g. Forgejo) or `no token for this owner` |
+| 502 | `forge call failed` (the forge detail is in the server log, never in the body) |
+| 500 | `launch failed` — `clear-reenrich` only: the lock stays cleared and the board reloads |
+
 ### SSE
 
 `GET /api/events` emits `pipeline-updated` whenever the board changes and
@@ -212,10 +235,14 @@ The Inbox page polls `/api/inbox` every 60 s for the same reason.
 
 ## What the buttons run
 
-Both start a **paid Claude session** and ask for confirmation first.
+Every button asks for confirmation first. Enrich, Dispatch and Clear &
+re-enrich start a **paid Claude session**; Clear lock does not.
 
 - **Enrich:** `bridge launch <name> -w enrich-<N> --agent claude --rc --prompt "/enrich <N> --headless"`
 - **Dispatch:** `bridge launch <name> -w dispatch-<N> --agent claude --rc --prompt "/gh:implement <N>"`
+- **Clear lock:** removes the `enrichment-ongoing` label and posts the audit
+  comment — no session is started.
+- **Clear & re-enrich:** does that, then runs the Enrich command above.
 
 (The server also passes `--rc-wait 15s --json` and runs the child with a 60 s
 timeout.) `launch --prompt` hands the text to claude as its initial prompt; it is
