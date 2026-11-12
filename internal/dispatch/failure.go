@@ -16,10 +16,11 @@ const (
 	LabelAIChecksBlocked = "ai:checks-blocked"
 )
 
-// staleRetryAfter is the longest a run marker saying "retry" may go without a
-// newer report before a person is asked. The pipeline's longest retry delay is
-// 5 minutes plus one run, so three hours means the retry was lost — a 403 on
-// re-dispatch, or a run that timed out and posted no report at all.
+// staleRetryAfter is the longest a retry — the pipeline's own (row 14) or
+// bridge's re-dispatch (row 15a) — may go without a newer report before a
+// person is asked. The pipeline's longest retry delay is 5 minutes plus one
+// run, so three hours means the retry was lost — a 403 on re-dispatch, or a run
+// that timed out and posted no report at all.
 const staleRetryAfter = 3 * time.Hour
 
 // ActionKind is what a retry tick should do with one issue.
@@ -42,17 +43,27 @@ type Action struct {
 // run for this issue that is queued or in progress — is the caller's job:
 // labels alone cannot tell a re-dispatched run from the last finished one,
 // because the status label and the marker both survive until the next report.
+//
+// StateFor builds one from an issue's comments, runs and PRs, and is what both
+// callers use so the dispatcher and the cockpit inbox never disagree.
 type IssueState struct {
 	Labels   []string
 	Run      RunRecord
 	HasRun   bool // LatestRun found a marker
 	InFlight bool
-	Now      time.Time
+	// Redispatched is when bridge last re-dispatched this issue, or zero. Newer
+	// than the marker means the pipeline owes a report (rows 15a-15b).
+	Redispatched time.Time
+	// HasOpenPR is whether an open PR closes this issue (row 15c).
+	HasOpenPR bool
+	Now       time.Time
 }
 
 // NextAction maps one issue's pipeline state onto the four outcomes. It is pure:
 // it reads nothing and writes nothing. The rows of the mapping are documented in
-// docs/dispatch.md ("When a run fails") and the first matching one wins.
+// docs/dispatch.md ("When a run fails") and the first matching one wins. Rows
+// 15a-15c guard a would-be retry against bridge's own pending re-dispatch and
+// against an open PR.
 //
 // Unknown state is never ActionRetry — an unattended re-dispatch spends money,
 // so anything bridge cannot read goes to a person instead.
@@ -63,7 +74,26 @@ func NextAction(s IssueState) Action {
 	if a, ok := noMarkerAction(s); ok {
 		return a
 	}
-	return runAction(s.Run, s.Now)
+	return guardRetry(s, runAction(s.Run, s.Now))
+}
+
+// guardRetry applies rows 15a-15c to a would-be retry. Pending is checked
+// before the open PR because a pending re-dispatch can itself be the run that
+// opened the PR, and until its 3 hours are up the right answer is to wait.
+func guardRetry(s IssueState, a Action) Action {
+	if a.Kind != ActionRetry {
+		return a
+	}
+	pending := s.Redispatched.After(s.Run.Posted)
+	switch {
+	case pending && s.Now.Sub(s.Redispatched) > staleRetryAfter: // row 15a
+		return Action{ActionHuman, "re-dispatch never reported"}
+	case pending: // row 15b
+		return Action{ActionWait, "retry pending"}
+	case s.HasOpenPR: // row 15c
+		return Action{ActionHuman, "open PR"}
+	}
+	return a
 }
 
 // labelAction covers the states visible from the labels and the in-flight

@@ -16,6 +16,39 @@ func RedispatchComment(reason string) string {
 	return RedispatchCommentPrefix + " (retry: " + reason + ")."
 }
 
+// LastRedispatch returns when bridge last re-dispatched this issue, or the zero
+// time when it never did. A re-dispatch newer than the latest run marker means
+// the pipeline owes a report, which NextAction's rows 15a-15b act on.
+//
+// The author is deliberately not checked: the guard can only ever suppress a
+// retry or ask a person, so a hand-written comment costs an operator a tick,
+// not a run.
+func LastRedispatch(comments []forge.Comment) time.Time {
+	var last time.Time
+	for _, c := range comments {
+		if strings.HasPrefix(c.Body, RedispatchCommentPrefix) && c.Created.After(last) {
+			last = c.Created
+		}
+	}
+	return last
+}
+
+// StateFor builds the state NextAction maps, from everything one tick already
+// read about an issue. It is the single constructor the dispatcher's retry pass
+// and the cockpit inbox share, so the two never show one issue differently.
+func StateFor(i forge.Issue, comments []forge.Comment, runs []forge.WorkflowRun, prs []forge.PullRequest, now time.Time) IssueState {
+	run, hasRun := LatestRun(comments)
+	return IssueState{
+		Labels:       i.Labels,
+		Run:          run,
+		HasRun:       hasRun,
+		InFlight:     InFlight(i, runs),
+		Redispatched: LastRedispatch(comments),
+		HasOpenPR:    HasOpenPR(prs, i.Number),
+		Now:          now,
+	}
+}
+
 // RetryPending reports whether bridge has already re-dispatched this issue
 // since the run report at `since`, which means the pipeline owes a report and
 // retrying again would stack runs.
