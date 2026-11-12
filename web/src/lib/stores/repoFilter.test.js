@@ -171,6 +171,24 @@ describe('initRepoFilter', () => {
     stop()
   })
 
+  it('prefers a URL filter that only names a forge and an owner', () => {
+    const win = fakeWin({
+      search: '?forge=github&owner=anim-bossinfo-ch',
+      stored: '{"forge":"ado","owner":"","repos":[]}',
+    })
+    const stop = initRepoFilter(win)
+    expect(get(repoFilter)).toEqual({ forge: 'github', owner: 'anim-bossinfo-ch', repos: [] })
+    stop()
+  })
+
+  it('keeps an owner-only URL filter instead of rewriting it away', () => {
+    const win = fakeWin({ search: '?owner=x' })
+    const stop = initRepoFilter(win)
+    expect(get(repoFilter)).toEqual({ forge: '', owner: 'x', repos: [] })
+    expect(win.urls.at(-1)).toBe('/?owner=x')
+    stop()
+  })
+
   it('falls back to the stored filter when the URL has none', () => {
     const win = fakeWin({ stored: '{"forge":"github","owner":"o","repos":["github:o/a"]}' })
     const stop = initRepoFilter(win)
