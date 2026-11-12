@@ -192,3 +192,54 @@ func TestRequireSameOrigin_CaseInsensitive_Allowed(t *testing.T) {
 		}
 	}
 }
+
+// clearRoutes are the lock-clearing endpoints; they must be guarded exactly
+// like /api/pipeline/enrich, which starts the same paid session.
+var clearRoutes = []string{"/api/pipeline/clear-lock", "/api/pipeline/clear-reenrich"}
+
+func guardedChain(token string, next http.Handler) http.Handler {
+	return requireTokenConfigured(token, requireBearer(token, requireSameOrigin(testAllowlist(), next)))
+}
+
+func clearGuardReq(path, origin, auth string) *http.Request {
+	req := httptest.NewRequest(http.MethodPost, "http://localhost:7777"+path, strings.NewReader(`{"repo":"o/r","number":612}`))
+	if origin != "" {
+		req.Header.Set("Origin", origin)
+	}
+	if auth != "" {
+		req.Header.Set("Authorization", auth)
+	}
+	return req
+}
+
+func TestClearRoutes_GuardedLikeEnrich(t *testing.T) {
+	cases := []struct {
+		name, token, origin, auth string
+		want                      int
+	}{
+		{"no token configured", "", "http://localhost:7777", "Bearer secret", http.StatusServiceUnavailable},
+		{"no bearer", "secret", "http://localhost:7777", "", http.StatusUnauthorized},
+		{"wrong bearer", "secret", "http://localhost:7777", "Bearer nope", http.StatusUnauthorized},
+		{"foreign origin", "secret", "http://evil.example", "Bearer secret", http.StatusForbidden},
+		{"allowed", "secret", "http://localhost:7777", "Bearer secret", http.StatusOK},
+	}
+	for _, path := range clearRoutes {
+		for _, tc := range cases {
+			t.Run(path+" "+tc.name, func(t *testing.T) {
+				reached := false
+				next := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					reached = true
+					w.WriteHeader(http.StatusOK)
+				})
+				w := httptest.NewRecorder()
+				guardedChain(tc.token, next).ServeHTTP(w, clearGuardReq(path, tc.origin, tc.auth))
+				if w.Code != tc.want {
+					t.Fatalf("status = %d, want %d (%s)", w.Code, tc.want, w.Body)
+				}
+				if reached != (tc.want == http.StatusOK) {
+					t.Fatalf("handler reached = %v for status %d", reached, w.Code)
+				}
+			})
+		}
+	}
+}

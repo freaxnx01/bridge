@@ -164,7 +164,8 @@ func cockpitSources(resolve clientResolver) cockpit.Sources {
 
 // pipelineHandler builds the Pipeline API on top of a running collector. ctx is
 // the server's: background refreshes outlive the request that triggered them.
-func pipelineHandler(ctx context.Context, col *cockpit.Collector, repos func() ([]core.Repo, error)) *api.PipelineHandler {
+func pipelineHandler(ctx context.Context, col *cockpit.Collector, repos func() ([]core.Repo, error),
+	resolve clientResolver) *api.PipelineHandler {
 	var refreshing atomic.Bool
 	refresh := func(context.Context) {
 		if !refreshing.CompareAndSwap(false, true) {
@@ -199,6 +200,16 @@ func pipelineHandler(ctx context.Context, col *cockpit.Collector, repos func() (
 		},
 		Dispatch: func(c context.Context, req api.LaunchRequest) (api.LaunchResult, error) {
 			return launch(c, req, "dispatch", fmt.Sprintf("/gh:implement %d", req.Number))
+		},
+		ClearLock: func(c context.Context, req api.LaunchRequest) error {
+			if err := clearEnrichmentLock(c, resolve, repos, time.Now, req); err != nil {
+				slog.Error("clear enrichment lock failed", "repo", req.Repo, "number", req.Number, "error", err)
+				return err
+			}
+			owner, name, _ := strings.Cut(req.Repo, "/")
+			// On the server ctx, like the launch path: the refresh must outlive the request.
+			go col.CollectRepo(ctx, owner, name)
+			return nil
 		},
 	}
 }

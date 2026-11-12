@@ -235,11 +235,12 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/tools/", requireBearer(apiToken, imcp.RESTHandler(restDeps(toolDeps, serveAllowWrites))))
 	apiMux.Handle("/api/agents", agentsH)
 
-	collector := cockpit.NewCollector(cockpitSources(cachedClients(clientForMCP(reposRoots()))), cockpit.DefaultIntervals(), time.Now, func(ev string) {
+	clients := cachedClients(clientForMCP(reposRoots()))
+	collector := cockpit.NewCollector(cockpitSources(clients), cockpit.DefaultIntervals(), time.Now, func(ev string) {
 		hub.Broadcast(web.Event{Type: ev})
 	})
 	go collector.Run(ctx)
-	pipelineH := pipelineHandler(ctx, collector, reposWithMeta)
+	pipelineH := pipelineHandler(ctx, collector, reposWithMeta, clients)
 	origins := newOriginAllowlist(servePort, os.Getenv("BRIDGE_COCKPIT_ORIGINS"))
 	guarded := requireTokenConfigured(apiToken, requireBearer(apiToken, requireSameOrigin(origins, pipelineH)))
 	inboxH := &api.InboxHandler{Inbox: collector.Inbox, Detail: collector.IssueDetail}
@@ -253,6 +254,8 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/pipeline/refresh", guarded)
 	apiMux.Handle("/api/pipeline/enrich", guarded)
 	apiMux.Handle("/api/pipeline/dispatch", guarded)
+	apiMux.Handle("/api/pipeline/clear-lock", guarded)
+	apiMux.Handle("/api/pipeline/clear-reenrich", guarded)
 
 	// Broadcast overview-updated every 10s so connected clients stay live.
 	go func() {

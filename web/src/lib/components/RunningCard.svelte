@@ -1,6 +1,7 @@
 <script>
   import { ageSeconds, formatAge } from '../freshness.js';
-  import { runDuration } from '../running.js';
+  import { isStuckEnrichment, runDuration } from '../running.js';
+  import StuckActions from './StuckActions.svelte';
 
   let { card, now } = $props();
 
@@ -47,4 +48,5 @@
     </div>
   </div>
   {#if link}<a class="action" href={link.href} target="_blank" rel="noopener noreferrer">{link.text}</a>{/if}
+  {#if isStuckEnrichment(card, now)}<StuckActions {card} />{/if}
 </li>

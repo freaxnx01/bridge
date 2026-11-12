@@ -22,3 +22,21 @@ describe('ConfirmDialog', () => {
     expect(onconfirm).toHaveBeenCalled()
   })
 })
+
+describe('ConfirmDialog lock clearing', () => {
+  it('describes clear-lock as label-only, with no paid session', () => {
+    render(ConfirmDialog, { repo: 'a/b', number: 612, action: 'clear-lock', onconfirm: vi.fn(), oncancel: vi.fn() })
+    const dlg = screen.getByRole('dialog')
+    expect(dlg.textContent).toContain('Clear lock a/b #612?')
+    expect(dlg.textContent).toContain('enrichment-ongoing')
+    expect(dlg.textContent).not.toContain('paid Claude session')
+  })
+
+  it('describes clear-reenrich as clearing and then starting a paid session', () => {
+    render(ConfirmDialog, { repo: 'a/b', number: 612, action: 'clear-reenrich', onconfirm: vi.fn(), oncancel: vi.fn() })
+    const dlg = screen.getByRole('dialog')
+    expect(dlg.textContent).toContain('Clear & re-enrich a/b #612?')
+    expect(dlg.textContent).toContain('enrich-612')
+    expect(dlg.textContent).toContain('starts a paid Claude session')
+  })
+})

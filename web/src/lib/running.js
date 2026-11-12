@@ -17,8 +17,13 @@ export function splitRunning(running, now) {
 
 function groupOf(card, now) {
   if (card.kind === 'session' && card.status === 'idle') return 'idle'
-  if (card.kind === 'enrichment' && ageSeconds(card.since, now) > STUCK_ENRICHING_SECONDS) return 'stuck'
+  if (isStuckEnrichment(card, now)) return 'stuck'
   return 'active'
+}
+
+// isStuckEnrichment: an enrichment-ongoing label older than STUCK_ENRICHING_SECONDS.
+export function isStuckEnrichment(card, now) {
+  return card.kind === 'enrichment' && ageSeconds(card.since, now) > STUCK_ENRICHING_SECONDS
 }
 
 // A dispatched pipeline run normally finishes, review included, in 10-25

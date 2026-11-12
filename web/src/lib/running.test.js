@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest'
-import { splitRunning, runDuration, STUCK_ENRICHING_SECONDS, RUN_WARN_MINUTES, RUN_OVER_MINUTES } from './running.js'
+import { splitRunning, runDuration, isStuckEnrichment, STUCK_ENRICHING_SECONDS, RUN_WARN_MINUTES, RUN_OVER_MINUTES } from './running.js'
 
 const now = Date.parse('2026-10-27T20:00:00Z')
 const ago = (s) => new Date(now - s * 1000).toISOString()
@@ -55,5 +55,21 @@ describe('runDuration', () => {
 
   it('runDuration_LongRun_StaysInMinutes', () => {
     expect(runDuration(run(3 * 3600), now).minutes).toBe(180)
+  })
+})
+
+describe('isStuckEnrichment', () => {
+  const at = (s) => new Date(now - s * 1000).toISOString()
+  it('pins the threshold at six hours, like api.StuckEnrichingAfter', () => {
+    expect(STUCK_ENRICHING_SECONDS).toBe(6 * 3600)
+  })
+  it.each([
+    ['older than 6 h', { kind: 'enrichment', since: at(6 * 3600 + 1) }, true],
+    ['exactly 6 h', { kind: 'enrichment', since: at(6 * 3600) }, false],
+    ['fresh', { kind: 'enrichment', since: at(60) }, false],
+    ['not an enrichment', { kind: 'pipeline', since: at(99 * 3600) }, false],
+    ['no timestamp', { kind: 'enrichment' }, false],
+  ])('%s', (_name, card, want) => {
+    expect(isStuckEnrichment(card, now)).toBe(want)
   })
 })
