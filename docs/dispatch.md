@@ -419,6 +419,65 @@ These are inherent to a proxy measurement, not bugs:
 - **A run's cost is booked at dispatch time**, though the run burns quota over the following minutes. This errs toward blocking, the safe direction.
 - **Hand-labelled `ai-implement` runs and pipeline retries are not counted** in the ledger — only runs `bridge dispatch` itself applied the label to. The operator doing that by hand is present and aware.
 
+## Dispatch journal
+
+Every `bridge dispatch` invocation appends exactly **one** record to a per-day JSON-lines journal:
+
+```
+~/.cache/bridge/dispatch-journal/YYYY-MM-DD.jsonl
+```
+
+(or under `$XDG_CACHE_HOME/bridge/` when that is set). The file is named by the **UTC** day of the record's `at`, so a tick at 00:30 local in winter lands in the previous day's file. `journalctl` keeps the prose; this keeps the decisions, so the cockpit's overnight digest can say *why* a slot was empty instead of "nothing happened".
+
+Every exit path writes a record: a config or state error, paused, outside window, a fetch error, the dry-run return and an apply error alike. `dispatch status`, `pause` and `resume` write none.
+
+One record, line-wrapped here for reading:
+
+```json
+{"v":1,"at":"2026-11-11T02:00:04Z","trigger":"timer","mode":"dry-run",
+ "outcome":"decided","lanes_in_window":["default","auto"],
+ "repos":["freaxnx01/bridge","freaxnx01/quotes"],
+ "budget":{"used_usd":4.5,"limit_usd":9.6,"known":true},
+ "decisions":[
+   {"owner":"freaxnx01","repo":"bridge","issue":41,"title":"feat: …","kind":"dispatch",
+    "lane":"auto","lane_reason":"auto→hitl: agent.yml lacks ai-review-ai-merge: true",
+    "decision":"would_dispatch"},
+   {"owner":"freaxnx01","repo":"quotes","issue":12,"title":"fix: …","kind":"retry",
+    "retry_reason":"rate_limit, retries exhausted","lane":"default",
+    "decision":"skipped","reason":"global cap 3/3"}]}
+```
+
+**`trigger` and `mode` are independent.** `trigger` is `timer` when the tick ran with `--auto` (the systemd heartbeat's entry point) and `manual` otherwise. `mode` is `dry-run` when `--dry-run` was passed and `live` otherwise. So the observation-week timer — `--auto` with a `--dry-run` drop-in — records `timer` + `dry-run`: a filled timer slot that applied nothing, not a manual tick and not a gap.
+
+**`outcome`** is one of:
+
+| value | meaning |
+|---|---|
+| `decided` | the tick ran and produced decisions |
+| `no_candidates` | the tick ran and found nothing to decide |
+| `paused` | `--auto` with the pause flag set; nothing was fetched |
+| `outside_window` | `--auto` with no lane acting; nothing was fetched |
+| `error` | the tick failed — `error` carries the text, and any decisions it had already made are kept |
+
+**`decision`** is one of:
+
+| value | meaning |
+|---|---|
+| `dispatched` | live, and the run is booked in the spend ledger. A dispatch whose follow-up comment failed still counts: the label is the pipeline's trigger, so the run is real |
+| `would_dispatch` | the tick was `--dry-run`, or the candidate's lane is `dry_run`. Nothing was applied |
+| `skipped` | a cap, the window, or the retry pass declined it; `reason` says which |
+| `not_applied` | live, meant to dispatch, and never booked — the label did not land. The tick's `error` says why |
+
+**`budget`** is present only when the rung is on for that tick (see "Usage-budget rung" above). `known: false` means usage could not be measured, which is what makes the rung refuse everything — it is never the same as a measured zero.
+
+`lanes_in_window` and `repos` are the tick's inputs: which lanes acted at `at` (read from the config, no network, so the early-exit paths can still answer it) and which repos were fetched, as `owner/name`.
+
+**Retention is 30 days.** After each append, day files dated more than 30 days before the new record's UTC day are deleted; any other file in the directory is left alone.
+
+The journal is **append-only** — one whole-line `O_APPEND` write per record — and takes no lock, so `bridge serve` can read it while a tick is running. A reader doing so may catch a partial last line; skip any line that does not decode rather than treating it as corruption. `dispatch.ReadJournal(dir, since)` does exactly that.
+
+A journal write or prune that fails only logs a `slog.Warn` to `journalctl` ("cannot write the tick journal"). It never changes the tick's exit code, its output, or `dispatch.json` — a full disk must not stop the dispatcher.
+
 ## Running it
 
 ### Flags
@@ -439,7 +498,7 @@ These are inherent to a proxy measurement, not bugs:
 
 `docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer is a bare half-hourly heartbeat — `bridge dispatch --auto` fires on the hour and half hour, fetches every repo's candidates, resolves each one's lane, and checks it against that lane's window. If no candidate's lane is currently in window, the tick reports "outside dispatch window" and applies nothing. The windows in `dispatch.json` (top-level `schedule.windows`, or a lane's own `windows`), not the timer, are the schedule.
 
-**Every in-window tick — day or night — runs the same full dispatch path, bounded by the same usage-budget/nightly/global/per-repo bounds** (the budget rung only ever applies on windows with `budget_rung: true`, see "Usage-budget rung" above). That path begins with the retry pass (see "Retry pass" above), which runs under the very same bounds and in the same tick — there is no second systemd unit and no extra config key. What keeps repeated ticks from re-labeling an issue that is merely still running is the "not already dispatched" eligibility guard plus, on the retry side, the in-flight and `retry pending` checks. During the observation week the timer runs with a `--dry-run` drop-in; removing that drop-in is an operator decision.
+**Every in-window tick — day or night — runs the same full dispatch path, bounded by the same usage-budget/nightly/global/per-repo bounds** (the budget rung only ever applies on windows with `budget_rung: true`, see "Usage-budget rung" above). That path begins with the retry pass (see "Retry pass" above), which runs under the very same bounds and in the same tick — there is no second systemd unit and no extra config key. What keeps repeated ticks from re-labeling an issue that is merely still running is the "not already dispatched" eligibility guard plus, on the retry side, the in-flight and `retry pending` checks. During the observation week the timer runs with a `--dry-run` drop-in; removing that drop-in is an operator decision. Every timer tick is journaled, dry-run ones included (see "Dispatch journal" above), so an empty slot can always be told apart from a slot that never fired.
 
 The service requires a GitHub token in its environment. Systemd user units do **not** inherit your shell/direnv env, so create `~/.config/bridge/dispatch.env` (referenced by the service's `EnvironmentFile=`) containing at least:
 ```
