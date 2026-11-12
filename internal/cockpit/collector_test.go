@@ -1,9 +1,12 @@
 package cockpit
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -779,4 +782,54 @@ func TestCollector_IssueDetail_Table(t *testing.T) {
 			t.Errorf("err = %v, want it not to read as a not-found error", err)
 		}
 	})
+}
+
+func adoRepo(name string) core.Repo {
+	return core.Repo{Forge: "ado", Owner: "bossDMS", Name: name, Path: "/r/" + name}
+}
+
+func TestCollector_UnsupportedForge_SkippedNotError(t *testing.T) {
+	w := newWorld(ghRepo("a"), adoRepo("x"), adoRepo("y"))
+	w.issuesErr["bossDMS/x"] = fmt.Errorf("%w: ado", ErrForgeUnsupported)
+	w.issuesErr["bossDMS/y"] = fmt.Errorf("%w: ado", ErrForgeUnsupported)
+	w.issuesErr["o/a"] = errors.New("boom")
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	b := c.Board()
+	if len(b.Errors) != 1 || b.Errors[0].Source != "issues o/a" {
+		t.Fatalf("Errors = %+v, want only 'issues o/a'", b.Errors)
+	}
+	want := []SkippedForge{{Forge: "ado", Repos: 2}}
+	if !slices.Equal(b.Skipped, want) {
+		t.Fatalf("Skipped = %+v, want %+v", b.Skipped, want)
+	}
+}
+
+func TestCollector_RepoTurnsUnsupported_ClearsOldError(t *testing.T) {
+	w := newWorld(adoRepo("x"))
+	w.issuesErr["bossDMS/x"] = errors.New("boom")
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+	ctx := context.Background()
+	c.CollectIssues(ctx)
+
+	w.set(func() { w.issuesErr["bossDMS/x"] = fmt.Errorf("%w: ado", ErrForgeUnsupported) })
+	c.CollectIssues(ctx)
+
+	if got := c.Board().Errors; len(got) != 0 {
+		t.Fatalf("Errors = %+v, want none", got)
+	}
+}
+
+func TestBoard_NoUnsupported_SkippedIsEmptyArray(t *testing.T) {
+	c := NewCollector(newWorld(ghRepo("a")).sources(), DefaultIntervals(), fixedNow, nil)
+	c.CollectIssues(context.Background())
+	raw, err := json.Marshal(c.Board())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Contains(raw, []byte(`"skipped":[]`)) {
+		t.Fatalf("board JSON = %s, want \"skipped\":[]", raw)
+	}
 }

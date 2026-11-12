@@ -60,7 +60,7 @@ func TestPipelineHandler_GetBoard_ReturnsJSON(t *testing.T) {
 	if err := json.Unmarshal(w.Body.Bytes(), &got); err != nil {
 		t.Fatal(err)
 	}
-	for _, k := range []string{"running", "ready", "held", "needsEnrichment", "dispatchPaused", "collectedAt", "intervalsSeconds", "errors"} {
+	for _, k := range []string{"running", "ready", "held", "needsEnrichment", "dispatchPaused", "collectedAt", "intervalsSeconds", "errors", "skipped"} {
 		if _, ok := got[k]; !ok {
 			t.Errorf("key %q missing in %s", k, w.Body)
 		}
@@ -197,7 +197,7 @@ func TestPipelineHandler_UnknownPath_404(t *testing.T) {
 func TestPipelineHandler_EmptyBoard_SerializesEmptyArrays(t *testing.T) {
 	h := &PipelineHandler{Board: func() cockpit.Board { return cockpit.Board{} }}
 	w := doReq(h, http.MethodGet, "/api/pipeline", "")
-	for _, k := range []string{`"running":[]`, `"ready":[]`, `"held":[]`, `"needsEnrichment":[]`, `"errors":[]`} {
+	for _, k := range []string{`"running":[]`, `"ready":[]`, `"held":[]`, `"needsEnrichment":[]`, `"errors":[]`, `"skipped":[]`} {
 		if !strings.Contains(w.Body.String(), k) {
 			t.Errorf("%s missing in %s", k, w.Body)
 		}
