@@ -76,6 +76,29 @@ describe('Inbox', () => {
       await fireEvent.click(screen.getByRole('button', { name: '✕ clear filter' }))
       expect(get(repoFilter)).toEqual({ forge: '', owner: '', repos: [] })
     })
+
+    it('holds back the filter empty state until the payload has loaded', async () => {
+      repoFilter.set({ forge: '', owner: '', repos: ['github:o/a'] })
+      await renderInbox(null)
+
+      expect(screen.queryByText('Nothing for the selected repos.')).toBeNull()
+    })
+
+    it('shows the load error, not the filter empty state, when the payload failed', async () => {
+      repoFilter.set({ forge: '', owner: '', repos: ['github:o/a'] })
+      await renderInbox(null, '/api/inbox: 500 Internal Server Error')
+
+      expect(screen.queryByText('Nothing for the selected repos.')).toBeNull()
+      expect(screen.getByText(/500 Internal Server Error/)).toBeTruthy()
+    })
+
+    it('still warns about failed comment reads when the filter hides every card', async () => {
+      repoFilter.set({ forge: '', owner: '', repos: ['github:gone/away'] })
+      await renderInbox({ cards: [cardA()], waiting: [], parked: [], errors: { 'comments o/a#5': 'x' } })
+
+      expect(screen.getByText('Nothing for the selected repos.')).toBeTruthy()
+      expect(screen.getByText(/Could not read comments: o\/a#5 — x/)).toBeTruthy()
+    })
   })
 
   it('shows the empty state and still lists what is waiting', async () => {
