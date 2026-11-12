@@ -32,7 +32,7 @@ var reviewReasons = []string{"review blocked", "review failed", "checks blocked"
 
 // noInfoReasons are the reasons bridge cannot say anything about the run from,
 // so they sort last.
-var noInfoReasons = []string{"no run marker", "retry never reported"}
+var noInfoReasons = []string{"no run marker", "retry never reported", "re-dispatch never reported"}
 
 // InboxCard is one issue in the inbox, in whichever of the three buckets its
 // NextAction put it.
@@ -134,10 +134,10 @@ func classify(rd RepoData, i forge.Issue, now time.Time) (InboxCard, bool) {
 	if !read {
 		return InboxCard{}, false
 	}
-	run, hasRun := dispatch.LatestRun(comments)
-	action := dispatch.NextAction(dispatch.IssueState{
-		Labels: i.Labels, Run: run, HasRun: hasRun, InFlight: dispatch.InFlight(i, rd.Runs), Now: now,
-	})
+	// The same constructor the dispatcher's retry pass uses, so a guarded retry
+	// (rows 15a-15c) reads here exactly as it does there.
+	s := dispatch.StateFor(i, comments, rd.Runs, rd.PRs, now)
+	action := dispatch.NextAction(s)
 	kind, ok := cardKind(action)
 	if !ok {
 		return InboxCard{}, false
@@ -146,8 +146,8 @@ func classify(rd RepoData, i forge.Issue, now time.Time) (InboxCard, bool) {
 		Repo: repoName(rd), Number: i.Number, Title: i.Title, URL: i.URL,
 		Kind: kind, Reason: action.Reason, Since: i.Updated,
 	}
-	if hasRun {
-		c.Run, c.Since = &run, run.Posted
+	if s.HasRun {
+		c.Run, c.Since = &s.Run, s.Run.Posted
 	}
 	return c, true
 }

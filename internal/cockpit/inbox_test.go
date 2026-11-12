@@ -72,27 +72,47 @@ func only(t *testing.T, ib Inbox) (string, InboxCard) {
 
 func TestBuildInbox_MappingRows_Table(t *testing.T) {
 	retryMarker := `{"v":1,"class":"rate_limit","decision":"stop","attempt":2}`
+	failed := []string{dispatch.LabelAIImplement, dispatch.LabelAIFailed}
+	redispatch := func(at time.Time) forge.Comment {
+		return forge.Comment{Author: "github-actions[bot]", Body: dispatch.RedispatchComment("x"), Created: at}
+	}
 	tests := []struct {
 		name       string
 		labels     []string
 		comments   []forge.Comment
+		prs        []forge.PullRequest
 		wantBucket string
 		wantKind   string
 		wantReason string
 	}{
-		{"parked", []string{dispatch.LabelParked}, nil, "parked", CardParked, "parked"},
-		{"parked legacy", []string{dispatch.LabelParkedLegacy}, nil, "parked", CardParked, "parked"},
-		{"review blocked", []string{dispatch.LabelAIReviewBlocked}, nil, "cards", CardHuman, "review blocked"},
+		{"parked", []string{dispatch.LabelParked}, nil, nil, "parked", CardParked, "parked"},
+		{"parked legacy", []string{dispatch.LabelParkedLegacy}, nil, nil, "parked", CardParked, "parked"},
+		{"review blocked", []string{dispatch.LabelAIReviewBlocked}, nil, nil, "cards", CardHuman, "review blocked"},
 		{"retries exhausted", []string{dispatch.LabelAIImplement},
-			[]forge.Comment{marker(retryMarker, inboxNow.Add(-2*time.Hour))},
+			[]forge.Comment{marker(retryMarker, inboxNow.Add(-2*time.Hour))}, nil,
 			"cards", CardRetry, "rate_limit, retries exhausted"},
-		{"paused", []string{dispatch.LabelAIPaused}, nil, "waiting", CardWait, "paused"},
-		{"dispatched, no marker", []string{dispatch.LabelAIImplement}, nil, "waiting", CardWait, "no run report yet"},
-		{"done, no marker", []string{dispatch.LabelAIDone}, nil, "", "", ""},
+		{"paused", []string{dispatch.LabelAIPaused}, nil, nil, "waiting", CardWait, "paused"},
+		{"dispatched, no marker", []string{dispatch.LabelAIImplement}, nil, nil, "waiting", CardWait, "no run report yet"},
+		{"done, no marker", []string{dispatch.LabelAIDone}, nil, nil, "", "", ""},
+		// Rows 15a-15c: the inbox must read a guarded retry exactly as the
+		// dispatcher's retry pass does.
+		{"re-dispatch pending", failed,
+			[]forge.Comment{marker(retryMarker, inboxNow.Add(-2*time.Hour)),
+				redispatch(inboxNow.Add(-90 * time.Minute))}, nil,
+			"waiting", CardWait, "retry pending"},
+		{"re-dispatch never reported", failed,
+			[]forge.Comment{marker(retryMarker, inboxNow.Add(-5*time.Hour)),
+				redispatch(inboxNow.Add(-4 * time.Hour))}, nil,
+			"cards", CardHuman, "re-dispatch never reported"},
+		{"open PR", failed,
+			[]forge.Comment{marker(retryMarker, inboxNow.Add(-2*time.Hour))},
+			[]forge.PullRequest{{Number: 7, Body: "Closes #1"}},
+			"cards", CardHuman, "open PR"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			rd := inboxRepo([]forge.Issue{inboxIssue(1, tc.labels...)}, nil, map[int][]forge.Comment{1: tc.comments})
+			rd.PRs = tc.prs
 			bucket, card := only(t, buildInbox(rd))
 			if bucket != tc.wantBucket {
 				t.Fatalf("bucket = %q, want %q (card %+v)", bucket, tc.wantBucket, card)
@@ -152,15 +172,20 @@ func TestBuildInbox_CardsUrgency_GroupThenOldest(t *testing.T) {
 		issueAt(3, at(time.Minute), dispatch.LabelAIFailed),
 		issueAt(4, at(time.Minute), dispatch.LabelAIImplement),
 		issueAt(5, at(30*time.Hour), dispatch.LabelAIFailed),
+		issueAt(6, at(time.Minute), dispatch.LabelAIImplement, dispatch.LabelAIFailed),
 	}
 	comments := map[int][]forge.Comment{
 		3: {marker(`{"v":1,"class":"task_failure","decision":"stop","attempt":2}`, at(10*time.Hour))},
 		4: {marker(`{"v":1,"class":"rate_limit","decision":"stop","attempt":2}`, at(20*time.Hour))},
+		// A lost re-dispatch says as little about the run as a missing marker,
+		// so it belongs in group 4 rather than ahead of it.
+		6: {marker(`{"v":1,"class":"rate_limit","decision":"stop","attempt":2}`, at(5*time.Hour)),
+			{Author: "github-actions[bot]", Body: dispatch.RedispatchComment("x"), Created: at(4 * time.Hour)}},
 	}
 
 	ib := buildInbox(inboxRepo(issues, nil, comments))
 
-	want := []int{2, 1, 3, 4, 5}
+	want := []int{2, 1, 3, 4, 5, 6}
 	var got []int
 	for _, c := range ib.Cards {
 		got = append(got, c.Number)
@@ -175,6 +200,9 @@ func TestBuildInbox_CardsUrgency_GroupThenOldest(t *testing.T) {
 	}
 	if ib.Cards[4].Reason != "no run marker" {
 		t.Errorf("group 4 reason = %q, want %q", ib.Cards[4].Reason, "no run marker")
+	}
+	if ib.Cards[5].Reason != "re-dispatch never reported" {
+		t.Errorf("group 4 reason = %q, want %q", ib.Cards[5].Reason, "re-dispatch never reported")
 	}
 }
 

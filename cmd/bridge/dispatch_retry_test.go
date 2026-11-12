@@ -58,6 +58,14 @@ var retryMarkerAt = time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
 
 func retryTickNow() time.Time { return retryMarkerAt.Add(time.Hour) }
 
+// ago renders a timestamp d before now the way GitHub's API does. A tick run
+// through runDispatch reads the wall clock, so every fixture it reads a
+// duration off — the run marker and the re-dispatch comments the 3 h guard
+// compares against it — is dated relative to now rather than to retryMarkerAt.
+func ago(d time.Duration) string {
+	return time.Now().UTC().Add(-d).Format(time.RFC3339)
+}
+
 func markerComment(marker string, at time.Time) forge.Comment {
 	return forge.Comment{Author: "github-actions[bot]",
 		Body: "report\n<!-- ai-run: " + marker + " -->", Created: at}
@@ -189,24 +197,36 @@ func TestCollectRetries_SkipReasons_Table(t *testing.T) {
 		issue      forge.Issue
 		comments   []forge.Comment
 		runs       []forge.WorkflowRun
+		prs        []forge.PullRequest
 		wantReason string
 	}{
 		{"a run is already going", failedIssue(43),
 			[]forge.Comment{markerComment(rateLimitMarker, retryMarkerAt)},
-			[]forge.WorkflowRun{{Event: "issues", Status: "queued", DisplayTitle: "T"}},
+			[]forge.WorkflowRun{{Event: "issues", Status: "queued", DisplayTitle: "T"}}, nil,
 			"running"},
 		{"bridge already re-dispatched it", failedIssue(43),
 			[]forge.Comment{
 				markerComment(rateLimitMarker, retryMarkerAt),
 				{Author: "github-actions[bot]", Body: dispatch.RedispatchComment("x"),
 					Created: retryMarkerAt.Add(time.Hour)},
-			}, nil, "retry pending"},
+			}, nil, nil, "retry pending"},
+		// The table's tick runs two hours on from retryMarkerAt, so a re-dispatch
+		// past the 3 h guard has to sit before it.
+		{"the re-dispatch never reported back", failedIssue(43),
+			[]forge.Comment{
+				markerComment(rateLimitMarker, retryMarkerAt.Add(-5*time.Hour)),
+				{Author: "github-actions[bot]", Body: dispatch.RedispatchComment("x"),
+					Created: retryMarkerAt.Add(-4 * time.Hour)},
+			}, nil, nil, "re-dispatch never reported"},
+		{"an open PR already closes it", failedIssue(43),
+			[]forge.Comment{markerComment(rateLimitMarker, retryMarkerAt)}, nil,
+			[]forge.PullRequest{{Number: 7, Body: "Closes #43"}}, "open PR"},
 		{"a task failure needs a person", failedIssue(43),
 			[]forge.Comment{markerComment(
 				`{"v":1,"class":"task_failure","decision":"stop","attempt":1,"status":"ai:failed"}`,
-				retryMarkerAt)}, nil, "task_failure"},
+				retryMarkerAt)}, nil, nil, "task_failure"},
 		{"an interrupted swap", failedIssue(43, "ai-implement", "ai:failed", "ai:retrying"),
-			nil, nil, "retry interrupted"},
+			nil, nil, nil, "retry interrupted"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -215,8 +235,10 @@ func TestCollectRetries_SkipReasons_Table(t *testing.T) {
 				runs:   tc.runs,
 			}
 
+			in := githubRepoInput(tc.issue)
+			in.PRs = tc.prs
 			cands, skips := collectRetries(context.Background(), gh,
-				[]repoInput{githubRepoInput(tc.issue)}, retryMarkerAt.Add(2*time.Hour))
+				[]repoInput{in}, retryMarkerAt.Add(2*time.Hour))
 
 			if len(cands) != 0 {
 				t.Errorf("want no selection, got %+v", cands)
@@ -329,6 +351,7 @@ type retryFixture struct {
 	issues    string // JSON array for GET …/issues
 	comments  string // JSON array for GET …/issues/43/comments
 	runs      string // JSON array for the workflow_runs field
+	prs       string // JSON array for GET …/pulls
 	failWrite string // "METHOD path" answered with 500
 }
 
@@ -360,11 +383,13 @@ func commentJSON(t *testing.T, id int, author, body, created string) string {
 }
 
 // markerCommentJSON is the pipeline's run report for #43: rate-limited,
-// stopped, one attempt spent — NextAction's ActionRetry row.
+// stopped, one attempt spent — NextAction's ActionRetry row. Six hours back, so
+// every re-dispatch comment the guard tests date relative to now is newer than
+// it whatever the wall-clock date is.
 func markerCommentJSON(t *testing.T) string {
 	t.Helper()
 	return commentJSON(t, 1, "github-actions[bot]",
-		"report\n<!-- ai-run: "+rateLimitMarker+" -->", "2026-11-10T10:00:00Z")
+		"report\n<!-- ai-run: "+rateLimitMarker+" -->", ago(6*time.Hour))
 }
 
 func newRetryGithub(t *testing.T, f retryFixture) (*httptest.Server, *writeLog) {
@@ -378,6 +403,9 @@ func newRetryGithub(t *testing.T, f retryFixture) (*httptest.Server, *writeLog) 
 	}
 	if f.runs == "" {
 		f.runs = "[]"
+	}
+	if f.prs == "" {
+		f.prs = "[]"
 	}
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -395,9 +423,10 @@ func newRetryGithub(t *testing.T, f retryFixture) (*httptest.Server, *writeLog) 
 		switch {
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
 			w.Write([]byte(f.issues))
-		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones",
-			r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
 			w.Write([]byte(`[]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+			w.Write([]byte(f.prs))
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/actions/runs":
 			w.Write([]byte(`{"workflow_runs":` + f.runs + `}`))
 		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues/43":
@@ -576,8 +605,10 @@ func TestRunDispatch_RetryInFlight_NoWrites(t *testing.T) {
 }
 
 func TestRunDispatch_RetryPendingComment_NoWrites(t *testing.T) {
+	// The tick runs on the wall clock, and the guard times out after 3 hours, so
+	// a pending re-dispatch has to be dated relative to now.
 	pending := commentJSON(t, 2, "github-actions[bot]",
-		dispatch.RedispatchComment("x"), "2026-11-10T11:00:00Z")
+		dispatch.RedispatchComment("x"), ago(time.Hour))
 	srv, log := newRetryGithub(t, retryFixture{
 		comments: "[" + markerCommentJSON(t) + "," + pending + "]",
 	})
@@ -594,6 +625,100 @@ func TestRunDispatch_RetryPendingComment_NoWrites(t *testing.T) {
 	}
 	if !strings.Contains(out, "SKIP retry (retry pending)") {
 		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestRunDispatch_RetryWithOpenPR_NoWrites(t *testing.T) {
+	srv, log := newRetryGithub(t, retryFixture{
+		prs: `[{"number":7,"title":"p","state":"open","body":"Closes #43",` +
+			`"head":{"ref":"x","sha":"abc"},"base":{"ref":"main"},` +
+			`"html_url":"p7","created_at":"2026-07-01T00:00:00Z"}]`,
+	})
+	retryTickEnv(t, srv)
+	setDispatchFlags(t, false, false)
+
+	out, err := runRetryTick(t)
+	if err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	calls, _ := log.snapshot()
+	for _, c := range calls {
+		if strings.Contains(c, "/issues/43") {
+			t.Errorf("a run must not be stacked next to the PR that closes it: %v", calls)
+		}
+	}
+	if !strings.Contains(out, "SKIP retry (open PR)") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+func TestRunDispatch_RetryStaleRedispatch_NoWritesHumanReason(t *testing.T) {
+	// A re-dispatch that never reported back: four hours on from the comment,
+	// past the three the guard waits.
+	stale := commentJSON(t, 2, "github-actions[bot]",
+		dispatch.RedispatchComment("x"), ago(4*time.Hour))
+	srv, log := newRetryGithub(t, retryFixture{
+		comments: "[" + markerCommentJSON(t) + "," + stale + "]",
+	})
+	retryTickEnv(t, srv)
+	setDispatchFlags(t, false, false)
+
+	out, err := runRetryTick(t)
+	if err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	if calls, _ := log.snapshot(); len(calls) != 0 {
+		t.Errorf("a lost re-dispatch is a person's call, not a second one: %v", calls)
+	}
+	if !strings.Contains(out, "SKIP retry (re-dispatch never reported)") {
+		t.Errorf("output:\n%s", out)
+	}
+}
+
+// Before step 3 of the swap no pipeline has fired, so a failure there must
+// leave the spend ledger untouched — the mirror of the step-4 case above.
+func TestRunDispatch_RetrySwapFailsEarly_BooksNothing(t *testing.T) {
+	tests := []struct {
+		name      string
+		failWrite string
+		wantStep  string
+	}{
+		{"step 1 cannot set the bracket label",
+			"POST /repos/freaxnx01/bridge/issues/43/labels", "step 1"},
+		{"step 2 cannot drop ai-implement",
+			"DELETE /repos/freaxnx01/bridge/issues/43/labels/ai-implement", "step 2"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			srv, log := newRetryGithub(t, retryFixture{failWrite: tc.failWrite})
+			retryTickEnv(t, srv)
+			setDispatchFlags(t, false, false)
+
+			_, err := runRetryTick(t)
+			if err == nil {
+				t.Fatal("a failing swap step must surface as an error")
+			}
+			if !strings.Contains(err.Error(), tc.wantStep) {
+				t.Errorf("the error must name the failing step: %v", err)
+			}
+
+			calls, _ := log.snapshot()
+			for _, c := range calls {
+				if strings.HasSuffix(c, "/comments") {
+					t.Errorf("no comment after a failed swap: %v", calls)
+				}
+			}
+
+			ledger, lerr := usage.LoadLedger(dispatchLedgerPath())
+			if lerr != nil {
+				t.Fatal(lerr)
+			}
+			if len(ledger.Runs) != 0 {
+				t.Errorf("nothing fired, so nothing is booked: %+v", ledger.Runs)
+			}
+		})
 	}
 }
 

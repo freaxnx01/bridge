@@ -81,6 +81,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- `bridge dispatch`: a re-dispatch with no run report for 3 h now goes to a person (`re-dispatch never reported`) instead of being skipped as `retry pending` forever, and a failed issue with an open PR closing it is no longer retried (`open PR`). The cockpit inbox shows both the same way, because the dispatcher and the inbox now build their state through one `dispatch.StateFor`. (#390)
 - Cockpit: Azure DevOps clones no longer fill the error strip; the board shows one muted line per unsupported forge (`skipped` in `/api/pipeline`). (#366)
 - `bridge dispatch` no longer re-dispatches issues the pipeline parked: the pipeline parks with the ASCII label `parked`, while bridge recognised only `🧊 parked`, so every tick re-applied `ai-implement` and the pipeline's cap step parked the issue again with another comment. Both spellings are now read (in dispatch eligibility and on the cockpit board); bridge only ever writes `parked`. (#367)
 - Cockpit: has its own favicon instead of keeping Authentik's from the login redirect.

@@ -44,7 +44,7 @@ Cards sort by urgency group, oldest first within a group:
 1. Work exists and waits for review: `review blocked`, `review failed`, `checks blocked`, `partial`.
 2. A run stopped: every other `human` reason except group 4.
 3. `retry` cards.
-4. No information: `no run marker`, `retry never reported`.
+4. No information: `no run marker`, `retry never reported`, `re-dispatch never reported`.
 
 A card shows `repo#n`, the title, the reason, and — when the issue has a marker
 — `agent · model · cost · #attempt`, plus Issue / PR / Run links. Its age is the

@@ -76,7 +76,7 @@ func retriesForRepo(ctx context.Context, gh retryReader, r repoInput, now time.T
 			skips = append(skips, skipRetry(retryCandidate(r, i, ""), "issue unreadable"))
 			continue
 		}
-		a := dispatch.EvaluateRetry(i, comments, runs, now)
+		a := dispatch.NextAction(dispatch.StateFor(i, comments, runs, r.PRs, now))
 		if a.Kind != dispatch.ActionRetry {
 			reason := a.Reason
 			if reason == "" {

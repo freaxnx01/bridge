@@ -16,34 +16,37 @@ func RedispatchComment(reason string) string {
 	return RedispatchCommentPrefix + " (retry: " + reason + ")."
 }
 
-// RetryPending reports whether bridge has already re-dispatched this issue
-// since the run report at `since`, which means the pipeline owes a report and
-// retrying again would stack runs.
+// LastRedispatch returns when bridge last re-dispatched this issue, or the zero
+// time when it never did. A re-dispatch newer than the latest run marker means
+// the pipeline owes a report, which NextAction's rows 15a-15b act on.
 //
 // The author is deliberately not checked: the guard can only ever suppress a
-// retry, so a hand-written comment costs an operator a tick, not a run.
-func RetryPending(comments []forge.Comment, since time.Time) bool {
+// retry or ask a person, so a hand-written comment costs an operator a tick,
+// not a run.
+func LastRedispatch(comments []forge.Comment) time.Time {
+	var last time.Time
 	for _, c := range comments {
-		if strings.HasPrefix(c.Body, RedispatchCommentPrefix) && c.Created.After(since) {
-			return true
+		if strings.HasPrefix(c.Body, RedispatchCommentPrefix) && c.Created.After(last) {
+			last = c.Created
 		}
 	}
-	return false
+	return last
 }
 
-// EvaluateRetry decides what the retry pass should do with one issue: NextAction
-// over its latest run marker and in-flight runs, with the retry-pending guard on
-// top. Only ActionRetry is re-dispatched; every other kind is listed with its
-// reason.
-func EvaluateRetry(i forge.Issue, comments []forge.Comment, runs []forge.WorkflowRun, now time.Time) Action {
+// StateFor builds the state NextAction maps, from everything one tick already
+// read about an issue. It is the single constructor the dispatcher's retry pass
+// and the cockpit inbox share, so the two never show one issue differently.
+func StateFor(i forge.Issue, comments []forge.Comment, runs []forge.WorkflowRun, prs []forge.PullRequest, now time.Time) IssueState {
 	run, hasRun := LatestRun(comments)
-	a := NextAction(IssueState{
-		Labels: i.Labels, Run: run, HasRun: hasRun, InFlight: InFlight(i, runs), Now: now,
-	})
-	if a.Kind == ActionRetry && RetryPending(comments, run.Posted) {
-		return Action{ActionWait, "retry pending"}
+	return IssueState{
+		Labels:       i.Labels,
+		Run:          run,
+		HasRun:       hasRun,
+		InFlight:     InFlight(i, runs),
+		Redispatched: LastRedispatch(comments),
+		HasOpenPR:    HasOpenPR(prs, i.Number),
+		Now:          now,
 	}
-	return a
 }
 
 // RetryCandidate reports whether an issue's labels put it into the retry pass,

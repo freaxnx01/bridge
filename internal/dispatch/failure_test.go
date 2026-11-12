@@ -179,3 +179,61 @@ func TestNextAction_RetryOnlyWithACountedAttempt(t *testing.T) {
 		}
 	}
 }
+
+// TestNextAction_RetryGuard walks rows 15a-15c: the three states that turn a
+// would-be row 16 retry into a wait or a person's call.
+func TestNextAction_RetryGuard(t *testing.T) {
+	now := time.Date(2026, 11, 10, 12, 0, 0, 0, time.UTC)
+	failed := []string{"ai-implement", "ai:failed"}
+	failure := func(class, decision string, attempt int) RunRecord {
+		return RunRecord{
+			Attempt: attempt, Counts: attempt > 0, Class: class, Decision: decision,
+			Status: "ai:failed", Agent: "claude", Posted: now.Add(-10 * time.Minute),
+		}
+	}
+	run := failure("rate_limit", "stop", 1)
+	// A re-dispatch only counts as pending while it is newer than the marker, so
+	// the staleness rows need a marker older than the re-dispatch they guard.
+	old := run
+	old.Posted = now.Add(-staleRetryAfter - time.Hour)
+	retry := Action{ActionRetry, "rate_limit, retries exhausted"}
+
+	cases := []struct {
+		name         string
+		run          RunRecord
+		redispatched time.Time
+		hasOpenPR    bool
+		want         Action
+	}{
+		{"row 16 unguarded", run, time.Time{}, false, retry},
+		{"row 15b: re-dispatch newer than marker", run, now.Add(-5 * time.Minute), false,
+			Action{ActionWait, "retry pending"}},
+		{"row 15b: exactly 3h old still waits", old, now.Add(-staleRetryAfter), false,
+			Action{ActionWait, "retry pending"}},
+		{"row 15a: older than 3h", old, now.Add(-staleRetryAfter - time.Second), false,
+			Action{ActionHuman, "re-dispatch never reported"}},
+		{"re-dispatch at the marker's instant is not pending", run, run.Posted, false, retry},
+		{"re-dispatch older than the marker belongs to the reported run",
+			run, run.Posted.Add(-time.Minute), false, retry},
+		{"row 15c: open PR", run, time.Time{}, true, Action{ActionHuman, "open PR"}},
+		{"pending beats open PR", run, now.Add(-5 * time.Minute), true,
+			Action{ActionWait, "retry pending"}},
+		{"stale beats open PR", old, now.Add(-staleRetryAfter - time.Second), true,
+			Action{ActionHuman, "re-dispatch never reported"}},
+		// The guard only ever touches a would-be Retry; every other row stands.
+		{"a non-retry row is untouched", failure("task_failure", "stop", 1),
+			now.Add(-5 * time.Minute), true, Action{ActionHuman, "task_failure"}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := NextAction(IssueState{
+				Labels: failed, Run: c.run, HasRun: true, Now: now,
+				Redispatched: c.redispatched, HasOpenPR: c.hasOpenPR,
+			})
+			if got != c.want {
+				t.Errorf("got %s %q, want %s %q",
+					kindName(got.Kind), got.Reason, kindName(c.want.Kind), c.want.Reason)
+			}
+		})
+	}
+}
