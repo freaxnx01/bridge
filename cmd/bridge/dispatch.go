@@ -296,7 +296,19 @@ func resolveTiming(cfg dispatch.Config, now time.Time) tickTiming {
 	return t
 }
 
+// runDispatch runs one tick and journals it. Every exit path of runTick lands
+// in exactly one record, so the cockpit digest can account for every slot —
+// and journaling never changes the tick's own result.
 func runDispatch(cmd *cobra.Command, _ []string) error {
+	rec := newTickRecord(time.Now(), dispatchAuto, dispatchDryRun, dispatchRetryOnly)
+	err := runTick(cmd, &rec)
+	recordTick(dispatchJournalDir(), rec, err)
+	return err
+}
+
+// runTick is the tick itself. It fills rec as it goes: the outcome at each
+// early exit, and the tick's inputs and decisions once they are known.
+func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 	cfg, err := dispatch.LoadConfig(dispatchConfigPath())
 	if err != nil {
 		return err
@@ -309,11 +321,14 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	// is the operator asking for it, so it always runs.
 	if dispatchAuto && state.Paused {
 		fmt.Fprintln(cmd.OutOrStdout(), "dispatcher paused — nothing to do")
+		rec.Outcome = dispatch.OutcomePaused
 		return nil
 	}
 
 	now := time.Now()
 	timing := resolveTiming(cfg, now)
+	rec.At = now
+	rec.LanesInWindow = lanesInWindow(cfg, now)
 
 	// The window gate is --auto only, as before: an explicit `dispatch now` is
 	// the operator asking for a tick. With lanes the question is per lane, so
@@ -322,6 +337,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	// out-of-window tick the free no-op it was before lanes.
 	if dispatchAuto && !anyLaneActs(cfg, now) {
 		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
+		rec.Outcome = dispatch.OutcomeOutsideWindow
 		return nil
 	}
 
@@ -330,6 +346,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	rec.Repos = repoNames(repos)
 
 	gate := resolveGate(ctx, repos, cfg.Lanes, now)
 	ordered, retrySkips := tickCandidates(ctx, repos, cfg, gate, now, dispatchRetryOnly)
@@ -344,6 +361,9 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		usedUSD, usedKnown = measureWindowUSD(ctx, cfg, timing.MeasureFrom, now)
 	}
 	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
+	if timing.RungOn {
+		rec.Budget = journalBudget(budget)
+	}
 
 	autonomous := func(repo string) bool {
 		lane, _ := dispatch.ResolveLane(cfg.Lanes, repo, gate)
@@ -365,6 +385,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	// The retry pass's own skips never reached ApplyCaps, so they are not in
 	// `ordered` either. They are reported in every mode and applied in none.
 	decisions = append(decisions, retrySkips...)
+	rec.Decisions = journalDecisions(decisions, dispatchDryRun)
 
 	if dispatchJSON {
 		if err := emitJSON(cmd.OutOrStdout(), decisionsJSON(decisions)); err != nil {
@@ -376,7 +397,11 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	if dispatchDryRun {
 		return nil
 	}
-	return applyDecisions(ctx, decisions, state, timing, cfg)
+	runs, err := applyDecisionsBooked(ctx, decisions, state, timing, cfg)
+	// The ledger is what makes a dispatch real, so the journal promotes only
+	// the runs it booked — a label that never landed stays not_applied.
+	markBooked(rec.Decisions, runs)
+	return err
 }
 
 // fetchRepoInputs reads every discovered repo's issues, milestones and open
@@ -535,6 +560,14 @@ func laneCounts(state dispatch.State, cfg dispatch.Config, now time.Time) map[st
 // ledger and the nightly counter. It never writes agent:* or model:* — model
 // choice belongs to agent-workflow's classify-task.sh.
 func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing tickTiming, cfg dispatch.Config) error {
+	_, err := applyDecisionsBooked(ctx, ds, state, timing, cfg)
+	return err
+}
+
+// applyDecisionsBooked is applyDecisions plus the runs it booked. The journal
+// needs that list to tell a dispatch that happened from one the tick only
+// meant to make: booking is the same line the ledger draws.
+func applyDecisionsBooked(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing tickTiming, cfg dispatch.Config) ([]usage.Run, error) {
 	var runs []usage.Run
 	var dispatchErr error
 
@@ -616,7 +649,7 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 	state.LastTick = timing.Now
 	stateErr := dispatch.WriteState(dispatchStatePath(), state)
 
-	return errors.Join(dispatchErr, ledgerErr, stateErr)
+	return runs, errors.Join(dispatchErr, ledgerErr, stateErr)
 }
 
 // recordRuns appends runs to the ledger and trims history outside the window

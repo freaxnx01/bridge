@@ -9,6 +9,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- `bridge dispatch`: every tick appends a record to a per-day JSON-lines **dispatch
+  journal** under the bridge cache dir (trigger, mode, lanes in window, repos, budget
+  reading, each decision with its outcome), kept 30 days; the cockpit digest reads it. (#379)
 - `bridge dispatch`: retry pass — every tick re-dispatches failed issues whose run
   marker says a retry can fix them (guarded `ai:retrying` label swap, shared caps,
   retries first); `--retry-only` runs only that pass; decisions carry a `kind`. (#253)
