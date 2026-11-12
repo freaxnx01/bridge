@@ -225,6 +225,9 @@ wins.
 | 13 | class `out_of_credits` (a pause class) | Wait | `paused` |
 | 14 | class `transient`, `rate_limit` or `task_failure`, decision `retry`, marker older than 3 h | Human | `retry never reported` |
 | 15 | class `transient`, `rate_limit` or `task_failure`, decision `retry` | Wait | `pipeline retrying` |
+| 15a | row 16 would apply, a bridge re-dispatch comment is newer than the marker, and it is older than 3 h | Human | `re-dispatch never reported` |
+| 15b | row 16 would apply and a bridge re-dispatch comment is newer than the marker | Wait | `retry pending` |
+| 15c | row 16 would apply and an open PR closes the issue | Human | `open PR` |
 | 16 | class `transient` or `rate_limit`, decision `stop`, attempt > 0 | Retry | `<class>, retries exhausted` |
 | 17 | class `transient` or `rate_limit`, decision `stop`, attempt absent | Human | `<class>, no attempt cap` |
 | 18 | class `task_failure`, decision `stop` | Human | `task_failure` |
@@ -239,6 +242,11 @@ Notes:
   0`, a stub run, the pause gate) there is no bound, so row 17 asks a person.
   Row 18 is Human for the same reason: the pipeline already retried the turn
   budget once.
+- **Rows 15a-15c only guard a would-be row 16.** They never turn any other row
+  into something else: a `task_failure` next to an open PR is still row 18.
+  Pending (15b) is checked before the open PR (15c) because a pending
+  re-dispatch can itself be the run that opened the PR, and while its 3 h are
+  running the right answer is to wait for its report.
 - **Unknown is never Retry.** An unattended re-dispatch spends money, so anything
   bridge cannot read goes to a person (rows 10 and 20).
 - **In flight is an input, not a label.** The pipeline creates `ai:running` but
@@ -246,10 +254,11 @@ Notes:
   marker all survive until the next report — so labels alone cannot tell a
   re-dispatched run from the last finished one. The caller computes it from the
   repo's queued and in-progress workflow runs.
-- **3 h** (`staleRetryAfter`) is how long a `decision: retry` may go without a
-  newer report. The pipeline's longest retry delay is 5 minutes plus one run, so
-  more than that means the retry was lost — a 403 on re-dispatch, or a run that
-  timed out and posted no report at all.
+- **3 h** (`staleRetryAfter`) is how long a retry may go without a newer report
+  — the pipeline's own (row 14) and bridge's re-dispatch (row 15a) alike. The
+  pipeline's longest retry delay is 5 minutes plus one run, so more than that
+  means the retry was lost — a 403 on re-dispatch, or a run that timed out and
+  posted no report at all.
 - `agent_timeout` is not a pipeline class; a timed-out run posts no report and
   lands in row 9, 10 or 14.
 - On Forgejo and Azure DevOps there is no marker at all, so a failure there is
@@ -285,7 +294,17 @@ the issue is skipped with `retry pending`: bridge has already retried and the
 pipeline owes a report. Without that guard, a re-dispatch whose run cannot be
 matched by title — or that never starts — would be retried every half hour until
 a cap bit. The author is not checked, because the guard can only ever *suppress*
-a retry.
+a retry or ask a person.
+
+The guard is part of `NextAction` (rows 15a-15b), not of the retry pass, and
+both passes build their state through one `dispatch.StateFor` — so the cockpit's
+inbox shows such an issue as the same waiting card the dispatcher skips, instead
+of a retry card. After 3 h (`staleRetryAfter`) with no newer report the
+re-dispatch counts as lost and the issue goes to a person as `re-dispatch never
+reported`; there is no automatic second re-dispatch, because unknown state must
+never spend money. An open PR that closes the issue likewise stops a retry
+(`open PR`, row 15c) whatever the per-repo cap says — the failed run may have
+opened it just before dying.
 
 **The swap.** The pipeline starts only on `issues: labeled`, and re-adding a
 label that is still present fires nothing, so a re-dispatch is a guarded label
@@ -309,8 +328,8 @@ finishing it beats starting something new. A dry-run lane writes nothing and
 books nothing, exactly as for a new dispatch.
 
 **Skip reasons** shown for a retry row: `retry interrupted`, `runs unreadable`,
-`issue unreadable`, `retry pending`, plus whatever reason the table above
-produced (`running`, `task_failure`, `no run marker`, …).
+`issue unreadable`, `retry pending`, `re-dispatch never reported`, `open PR`,
+plus whatever reason the table above produced (`running`, `task_failure`, `no run marker`, …).
 
 **Recovery from `ai:retrying`.** A swap interrupted between steps leaves the
 label behind, and that is deliberate: it makes the issue visible and keeps it out
