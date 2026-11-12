@@ -146,3 +146,28 @@ func TestEligible_PlanHeadingAnyLevelCaseInsensitive_Eligible(t *testing.T) {
 		}
 	}
 }
+
+// A swap interrupted after Redispatch's step 2 leaves ai:retrying behind with
+// ai-implement already gone, so the plan heading alone would make the issue look
+// like a fresh candidate. It must stay out of the new-dispatch pass.
+func TestEligible_RetryingLabel_RetryInterrupted(t *testing.T) {
+	body := "x\n## Implementation Plan\n- a"
+	tests := []struct {
+		name       string
+		labels     []string
+		wantReason string
+	}{
+		{"interrupted after the ai-implement removal", []string{"feat", "ai:retrying"}, "retry interrupted"},
+		{"beats already dispatched", []string{"ai-implement", "ai:retrying"}, "retry interrupted"},
+		{"parked still wins", []string{"parked", "ai:retrying"}, "parked"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			i := forge.Issue{Number: 7, Body: body, Labels: tc.labels}
+			ok, reason := Eligible(i, "", nil)
+			if ok || reason != tc.wantReason {
+				t.Errorf("got (%v, %q) want (false, %q)", ok, reason, tc.wantReason)
+			}
+		})
+	}
+}

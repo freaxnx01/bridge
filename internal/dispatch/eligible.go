@@ -16,6 +16,9 @@ const (
 	LabelParkedLegacy    = "🧊 parked"
 	LabelAIImplement     = "ai-implement"
 	LabelAIReviewAIMerge = "ai-review-ai-merge"
+	// LabelRetrying marks a re-dispatch label swap in progress. Left behind, it
+	// keeps the issue out of both dispatch passes until a person clears it.
+	LabelRetrying = "ai:retrying"
 )
 
 func hasLabel(labels []string, want string) bool {
@@ -95,6 +98,12 @@ func Eligible(i forge.Issue, activeMilestone string, prs []forge.PullRequest) (b
 	}
 	if IsParked(i.Labels) {
 		return false, "parked"
+	}
+	// An interrupted label swap can have removed ai-implement already, so this
+	// has to be checked on its own: otherwise the half-swapped issue reads as a
+	// fresh candidate and gets dispatched as new work.
+	if hasLabel(i.Labels, LabelRetrying) {
+		return false, "retry interrupted"
 	}
 	if hasLabel(i.Labels, LabelAIImplement) {
 		return false, "already dispatched"

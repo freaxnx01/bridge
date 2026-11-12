@@ -136,7 +136,7 @@ func classify(rd RepoData, i forge.Issue, now time.Time) (InboxCard, bool) {
 	}
 	run, hasRun := dispatch.LatestRun(comments)
 	action := dispatch.NextAction(dispatch.IssueState{
-		Labels: i.Labels, Run: run, HasRun: hasRun, InFlight: inFlight(i, rd.Runs), Now: now,
+		Labels: i.Labels, Run: run, HasRun: hasRun, InFlight: dispatch.InFlight(i, rd.Runs), Now: now,
 	})
 	kind, ok := cardKind(action)
 	if !ok {
@@ -203,15 +203,3 @@ func withCommentErrs(errs map[string]string, rd RepoData) map[string]string {
 // isInboxCandidate reports whether an issue's labels can produce anything but
 // ActionNone.
 func isInboxCandidate(labels []string) bool { return hasAny(labels, inboxLabels...) }
-
-// inFlight reports whether a workflow run is going for this issue.
-func inFlight(i forge.Issue, runs []forge.WorkflowRun) bool {
-	return slices.ContainsFunc(runs, func(r forge.WorkflowRun) bool { return isIssueRunFor(i, r) })
-}
-
-// isIssueRunFor reports whether the run is in flight for this issue. A run names
-// its issue only by display title, which for an `issues` event is the title.
-func isIssueRunFor(i forge.Issue, r forge.WorkflowRun) bool {
-	return r.Event == "issues" && (r.Status == "queued" || r.Status == "in_progress") &&
-		r.DisplayTitle == i.Title
-}
