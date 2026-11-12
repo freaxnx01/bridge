@@ -42,6 +42,11 @@
 
   const errors = $derived((board?.errors ?? []).filter((e) => !dismissed.includes(e)));
 
+  // Repos on a forge the board has no client for: a standing fact, not a
+  // failure, so they get one muted line per forge and no dismiss.
+  const forgeLabels = { ado: 'Azure DevOps' };
+  const skipped = $derived(board?.skipped ?? []);
+
   function runningKey(card, index) {
     return (card.kind === 'session' ? card.sessionId : card.url) || `idx:${index}`;
   }
@@ -189,6 +194,18 @@
       {/if}
     </Column>
   </div>
+
+  {#if skipped.length > 0}
+    <div class="skipped" role="note">
+      {#each skipped as s (s.forge)}
+        <p>
+          {s.repos}
+          {forgeLabels[s.forge] ?? s.forge}
+          {s.repos === 1 ? 'repo' : 'repos'} not on the board (forge not supported).
+        </p>
+      {/each}
+    </div>
+  {/if}
 
   {#if errors.length > 0}
     <div class="errors" role="status">

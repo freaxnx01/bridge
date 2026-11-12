@@ -43,6 +43,10 @@ var ErrUnknownRepo = errors.New("unknown repo")
 // repo in the collector's last snapshot.
 var ErrNotCandidate = errors.New("not an inbox candidate")
 
+// ErrForgeUnsupported marks a repo on a forge the board has no client for.
+// The collector lists such repos under Board.Skipped instead of Errors.
+var ErrForgeUnsupported = errors.New("forge not supported by the board")
+
 // detailTTL bounds how often an issue detail costs a live forge read: a thread
 // read this recently is served from the cache instead. The runs tick already
 // re-reads a repo within about a minute of a run ending, so the panel stays
@@ -95,6 +99,7 @@ type Collector struct {
 	sessions    []agentview.Session
 	collectedAt map[string]time.Time
 	errs        map[string]SourceError
+	unsupported map[string]string // repo key → forge the board has no client for
 	board       Board
 	boardJSON   []byte
 	inbox       Inbox
@@ -123,6 +128,7 @@ func NewCollector(src Sources, iv Intervals, now func() time.Time, onChange func
 		src: src, iv: iv, now: now, onChange: onChange,
 		comments:    map[issueKey]cachedComments{},
 		collectedAt: map[string]time.Time{}, errs: map[string]SourceError{},
+		unsupported: map[string]string{},
 	}
 	c.mu.Lock()
 	c.rebuildLocked()
@@ -202,6 +208,7 @@ func (c *Collector) Board() Board {
 	b.CollectedAt = maps.Clone(b.CollectedAt)
 	b.IntervalsSeconds = maps.Clone(b.IntervalsSeconds)
 	b.Errors = slices.Clone(b.Errors)
+	b.Skipped = slices.Clone(b.Skipped)
 	return b
 }
 
@@ -277,17 +284,25 @@ func (c *Collector) CollectIssues(ctx context.Context) {
 	c.mu.Lock()
 	old := c.repoIndexLocked()
 	next := make([]RepoData, 0, len(repos))
+	// Rebuilt from this pass alone, so a repo that disappeared or whose forge
+	// became supported leaves no stale entry behind.
+	unsupported := make(map[string]string, len(c.unsupported))
 	for i, r := range repos {
 		rd, prev := results[i].data, old[repoKey(r)]
 		src := "issues " + repoKey(r)
-		if results[i].err != nil {
+		switch {
+		case errors.Is(results[i].err, ErrForgeUnsupported):
+			unsupported[repoKey(r)] = r.Forge
+			delete(c.errs, src)
+			rd = baseRepoData(r, false)
+		case results[i].err != nil:
 			c.setErrLocked(src, results[i].err)
 			if prev != nil {
 				next = append(next, *prev)
 				continue
 			}
 			rd = baseRepoData(r, false)
-		} else {
+		default:
 			delete(c.errs, src)
 			if prev != nil {
 				rd.Runs = prev.Runs
@@ -296,6 +311,7 @@ func (c *Collector) CollectIssues(ctx context.Context) {
 		next = append(next, rd)
 	}
 	c.repos = next
+	c.unsupported = unsupported
 	c.collectedAt[sourceIssues] = c.now()
 	c.mu.Unlock()
 	c.pruneComments(next)
@@ -456,6 +472,11 @@ func (c *Collector) applyRepoLocked(r core.Repo, res repoResult, runs []forge.Wo
 	key := repoKey(r)
 	idx := c.repoIndexLocked()
 	prev := idx[key]
+	if errors.Is(res.err, ErrForgeUnsupported) {
+		c.markUnsupportedLocked(r, prev)
+		return
+	}
+	delete(c.unsupported, key)
 	if res.err != nil {
 		c.setErrLocked("issues "+key, res.err)
 		if prev == nil {
@@ -479,6 +500,30 @@ func (c *Collector) applyRepoLocked(r core.Repo, res repoResult, runs []forge.Wo
 		return
 	}
 	c.repos = append(c.repos, rd)
+}
+
+// markUnsupportedLocked records r as skipped (no client for its forge) and
+// drops any earlier source error for it.
+func (c *Collector) markUnsupportedLocked(r core.Repo, prev *RepoData) {
+	key := repoKey(r)
+	delete(c.errs, "issues "+key)
+	c.unsupported[key] = r.Forge
+	if prev == nil {
+		c.repos = append(c.repos, baseRepoData(r, false))
+	}
+}
+
+// skippedForges groups unsupported repos per forge, sorted by forge.
+func skippedForges(unsupported map[string]string) []SkippedForge {
+	counts := map[string]int{}
+	for _, f := range unsupported {
+		counts[f]++
+	}
+	out := []SkippedForge{}
+	for _, f := range slices.Sorted(maps.Keys(counts)) {
+		out = append(out, SkippedForge{Forge: f, Repos: counts[f]})
+	}
+	return out
 }
 
 type repoResult struct {
@@ -699,6 +744,7 @@ func (c *Collector) rebuildLocked() (board, inbox bool) {
 	if b.Errors == nil {
 		b.Errors = []SourceError{}
 	}
+	b.Skipped = skippedForges(c.unsupported)
 	raw, err := json.Marshal(b)
 	board = err != nil || !bytes.Equal(raw, c.boardJSON)
 	c.boardJSON = raw

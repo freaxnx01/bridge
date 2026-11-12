@@ -59,6 +59,12 @@ type SourceError struct {
 	Since  time.Time `json:"since"`
 }
 
+// SkippedForge counts the repos on one forge the board has no client for.
+type SkippedForge struct {
+	Forge string `json:"forge"`
+	Repos int    `json:"repos"`
+}
+
 // Board is the Pipeline board's whole payload.
 type Board struct {
 	Running          []RunningCard        `json:"running"`
@@ -69,6 +75,7 @@ type Board struct {
 	CollectedAt      map[string]time.Time `json:"collectedAt"`      // keys: "issues","runs","sessions"
 	IntervalsSeconds map[string]int       `json:"intervalsSeconds"` // same keys
 	Errors           []SourceError        `json:"errors"`
+	Skipped          []SkippedForge       `json:"skipped"` // forges with no client, one entry each
 }
 
 // RepoData is the collected state of one repo. Comments holds the run-report
@@ -106,7 +113,7 @@ type columns struct {
 }
 
 // BuildBoard classifies the input into columns. It fills everything except
-// CollectedAt, IntervalsSeconds and Errors (Errors is an empty, non-nil slice).
+// CollectedAt, IntervalsSeconds, Errors and Skipped (both empty, non-nil slices).
 func BuildBoard(in Input) Board {
 	b := Board{
 		Running:         []RunningCard{},
@@ -114,6 +121,7 @@ func BuildBoard(in Input) Board {
 		Held:            []IssueCard{},
 		NeedsEnrichment: []IssueCard{},
 		Errors:          []SourceError{},
+		Skipped:         []SkippedForge{},
 		DispatchPaused:  in.DispatchPaused,
 	}
 	var ready []dispatch.Candidate

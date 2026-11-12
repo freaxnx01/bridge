@@ -120,12 +120,17 @@ All JSON. `GET` is open (LAN), `POST` is guarded (see Auth).
   "dispatchPaused": false,
   "collectedAt": {"issues": "RFC3339", "runs": "RFC3339", "sessions": "RFC3339"},
   "intervalsSeconds": {"issues": 600, "runs": 60, "sessions": 5},
-  "errors": [{"source": "issues owner/name", "error": "", "since": "RFC3339"}]
+  "errors": [{"source": "issues owner/name", "error": "", "since": "RFC3339"}],
+  "skipped": [{"forge": "ado", "repos": 10}]
 }
 ```
 
 `IssueCard` is `{forge, repo, number, title, url, labels[], reason?}`; `reason`
-is set on Held cards. Empty sections are `[]`, never `null`. `issue`, `url`,
+is set on Held cards. Empty sections are `[]`, never `null`.
+
+`skipped` lists forges the board has no client for (today: Azure DevOps), one
+entry per forge with its repo count, sorted by forge; those repos are not
+errors. A GitHub or Forgejo repo without a token still shows under `errors`. `issue`, `url`,
 `sessionId` and `cwd` are omitted when empty.
 
 ### `GET /api/inbox`
@@ -225,6 +230,10 @@ rejected for any other agent.
 
 ## Known limits
 
+- The board has clients for GitHub and Forgejo only. Clones on any other forge
+  (Azure DevOps today) carry no issues on the board; they show as one muted
+  line per forge, from `skipped` in `GET /api/pipeline`, and are not errors. A
+  GitHub or Forgejo repo whose owner has no token is still an error.
 - The first sessions collect takes about 35 s.
 - Subagent visibility is not built yet.
 - A session card shows an "Open RC" link only when its sessionId looks like `session_…`.

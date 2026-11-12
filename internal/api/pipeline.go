@@ -90,6 +90,9 @@ func nonNilBoard(b cockpit.Board) cockpit.Board {
 	if b.Errors == nil {
 		b.Errors = []cockpit.SourceError{}
 	}
+	if b.Skipped == nil {
+		b.Skipped = []cockpit.SkippedForge{}
+	}
 	return b
 }
 

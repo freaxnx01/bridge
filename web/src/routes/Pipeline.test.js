@@ -142,6 +142,26 @@ describe('Pipeline', () => {
     await waitFor(() => expect(screen.getByText(/401 Bad credentials/)).toBeTruthy())
   })
 
+  it('shows one muted line per skipped forge, outside the error strip', () => {
+    pipeline.set(board({ skipped: [{ forge: 'ado', repos: 10 }] }))
+    render(Pipeline)
+    const line = screen.getByText('10 Azure DevOps repos not on the board (forge not supported).')
+    expect(line.closest('.errors')).toBeNull()
+    expect(screen.queryByRole('button', { name: 'dismiss' })).toBeNull()
+  })
+
+  it('says "repo" for a single skipped repo', () => {
+    pipeline.set(board({ skipped: [{ forge: 'ado', repos: 1 }] }))
+    render(Pipeline)
+    expect(screen.getByText('1 Azure DevOps repo not on the board (forge not supported).')).toBeTruthy()
+  })
+
+  it('shows nothing for an empty or missing skipped list', () => {
+    pipeline.set(board({ skipped: [] }))
+    render(Pipeline)
+    expect(screen.queryByText(/not on the board/)).toBeNull()
+  })
+
   it('Dispatch asks for a token when none is stored', async () => {
     const f = stubFetch(() => ({ status: 200, body: {} }))
     render(Pipeline)
