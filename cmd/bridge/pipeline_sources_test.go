@@ -5,9 +5,32 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/cockpit"
 	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
+
+func TestCockpitSources_Issues_UnsupportedForge_ReportsSkip(t *testing.T) {
+	src := cockpitSources(func(string, string) forge.Client { return nil })
+	cases := []struct {
+		name  string
+		forge string
+		want  error
+	}{
+		{"ado is unsupported", "ado", cockpit.ErrForgeUnsupported},
+		{"unknown forge is unsupported", "gitlab", cockpit.ErrForgeUnsupported},
+		{"github without token is an error", "github", errNoForgeClient},
+		{"forgejo without token is an error", "forgejo", errNoForgeClient},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			r := core.Repo{Forge: c.forge, Owner: "bossDMS", Name: "x"}
+			if _, err := src.Issues(context.Background(), r); !errors.Is(err, c.want) {
+				t.Fatalf("err = %v, want %v", err, c.want)
+			}
+		})
+	}
+}
 
 func TestCockpitSources_NoClientForOwner_ReportsError(t *testing.T) {
 	noClient := func(string, string) forge.Client { return nil }

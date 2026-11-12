@@ -95,6 +95,10 @@ func githubOnly(resolve clientResolver, r core.Repo) (*forge.GithubClient, error
 	return gh, nil
 }
 
+// boardForge reports whether the cockpit has a client for forgeName. It
+// mirrors clientForMCP's switch.
+func boardForge(name string) bool { return name == "github" || name == "forgejo" }
+
 // runsPerRepo is how many recent workflow runs the board reads per repo.
 const runsPerRepo = 30
 
@@ -106,6 +110,9 @@ func cockpitSources(resolve clientResolver) cockpit.Sources {
 		Repos: reposWithMeta,
 		Wired: repoWired,
 		Issues: func(ctx context.Context, r core.Repo) ([]forge.Issue, error) {
+			if !boardForge(r.Forge) {
+				return nil, fmt.Errorf("%w: %s", cockpit.ErrForgeUnsupported, r.Forge)
+			}
 			cl, err := repoClient(resolve, r)
 			if err != nil {
 				return nil, err

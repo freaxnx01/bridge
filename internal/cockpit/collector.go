@@ -43,6 +43,10 @@ var ErrUnknownRepo = errors.New("unknown repo")
 // repo in the collector's last snapshot.
 var ErrNotCandidate = errors.New("not an inbox candidate")
 
+// ErrForgeUnsupported marks a repo on a forge the board has no client for.
+// The collector lists such repos under Board.Skipped instead of Errors.
+var ErrForgeUnsupported = errors.New("forge not supported by the board")
+
 // detailTTL bounds how often an issue detail costs a live forge read: a thread
 // read this recently is served from the cache instead. The runs tick already
 // re-reads a repo within about a minute of a run ending, so the panel stays
