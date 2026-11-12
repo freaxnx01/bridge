@@ -98,7 +98,7 @@ export function toQuery(filter, search) {
 // then keeps both in step with every change. Returns the unsubscribe function.
 export function initRepoFilter(win = window) {
   const fromUrl = parseQuery(win.location.search)
-  repoFilter.set(fromUrl.forge || fromUrl.repos.length > 0 ? fromUrl : readStored(win))
+  repoFilter.set(isFiltered(fromUrl) ? fromUrl : readStored(win))
   return repoFilter.subscribe((filter) => {
     writeStored(win, filter)
     win.history.replaceState(null, '', win.location.pathname + toQuery(filter, win.location.search) + win.location.hash)

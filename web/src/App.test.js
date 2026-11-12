@@ -82,6 +82,18 @@ describe('App', () => {
     expect(document.querySelector('.badge').textContent).toBe('1')
   })
 
+  it('drops the repo filter bar on the Architecture tab, where it filters nothing', async () => {
+    const { default: App } = await import('./App.svelte')
+    render(App)
+    expect(screen.getByRole('button', { name: 'All repos ▾' })).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Pipeline' }))
+    expect(screen.getByRole('button', { name: 'All repos ▾' })).toBeTruthy()
+
+    await fireEvent.click(screen.getByRole('button', { name: 'Arch' }))
+    expect(screen.queryByRole('button', { name: 'All repos ▾' })).toBeNull()
+  })
+
   it('keeps the Architecture section reachable via the nav with the inlined SVG', async () => {
     const { default: App } = await import('./App.svelte')
     render(App)

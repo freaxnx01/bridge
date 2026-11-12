@@ -106,6 +106,26 @@ describe('Pipeline', () => {
       await fireEvent.click(screen.getByRole('button', { name: '✕ clear filter' }))
       expect(get(repoFilter)).toEqual({ forge: '', owner: '', repos: [] })
     })
+
+    it('shows the columns loading, not the filter empty state, before the board arrives', () => {
+      pipeline.set(null)
+      repoFilter.set({ forge: '', owner: '', repos: ['github:o/a'] })
+      render(Pipeline)
+
+      expect(screen.queryByText('Nothing for the selected repos.')).toBeNull()
+      expect(screen.getByText(/RUNNING NOW · …/)).toBeTruthy()
+    })
+
+    it('keeps the load error and its Retry visible under an active filter', () => {
+      pipeline.set(null)
+      pipelineError.set('boom')
+      repoFilter.set({ forge: '', owner: '', repos: ['github:o/a'] })
+      render(Pipeline)
+
+      expect(screen.queryByText('Nothing for the selected repos.')).toBeNull()
+      expect(screen.getAllByText(/Couldn't load: boom/).length).toBe(3)
+      expect(screen.getAllByRole('button', { name: 'Retry' }).length).toBe(3)
+    })
   })
   afterEach(() => vi.unstubAllGlobals())
 

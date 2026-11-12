@@ -40,8 +40,11 @@
   const ready = $derived(mine(board?.ready));
   const held = $derived(mine(board?.held));
   const needsEnrichment = $derived(mine(board?.needsEnrichment));
+  // Only a loaded board can be empty *because of* the filter: before that the
+  // columns still owe the operator their loading state or the load error.
   const hiddenByFilter = $derived(
-    isFiltered($repoFilter) &&
+    Boolean(board) &&
+      isFiltered($repoFilter) &&
       running.active.length + running.idle.length + running.stuck.length +
         ready.length + held.length + needsEnrichment.length === 0,
   );

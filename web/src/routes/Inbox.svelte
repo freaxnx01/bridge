@@ -16,8 +16,11 @@
   const waiting = $derived(mine(data?.waiting));
   const parked = $derived(mine(data?.parked));
   const errors = $derived(Object.entries(data?.errors ?? {}));
+  // Only a loaded payload can be empty *because of* the filter: before that
+  // the page still owes the operator its loading state or the load error.
   const hiddenByFilter = $derived(
-    isFiltered($repoFilter) && cards.length === 0 && waiting.length === 0 && parked.length === 0,
+    Boolean(data) &&
+      isFiltered($repoFilter) && cards.length === 0 && waiting.length === 0 && parked.length === 0,
   );
 
   function mine(list) {
@@ -79,11 +82,14 @@
         {/each}
       </ul>
     {/if}
-    {#each errors as [key, message] (key)}
-      <p class="warn" role="status">⚠ Could not read comments: {issueRef(key)} — {message}</p>
-    {/each}
   </section>
   {/if}
+
+  <!-- Outside the filter branch: a filter that hides every card must not also
+       hide which comment reads failed. -->
+  {#each errors as [key, message] (key)}
+    <p class="warn" role="status">⚠ Could not read comments: {issueRef(key)} — {message}</p>
+  {/each}
 
   {#if selected}
     <IssueDetail repo={selected.repo} number={selected.number} onclose={() => (selected = null)} />
@@ -129,6 +135,9 @@
     .inbox {
       grid-template-columns: 2fr 1fr;
       align-items: start;
+    }
+    .warn {
+      grid-column: 1 / -1;
     }
     .cards {
       grid-template-columns: repeat(2, minmax(0, 1fr));
