@@ -531,8 +531,9 @@ type repoResult struct {
 	err  error
 }
 
-// fetchIssues fetches issues (and PRs + milestones when the repo can have a
-// Ready/Held candidate). Any failure fails the whole repo fetch.
+// fetchIssues fetches issues, plus PRs when the repo can have a Ready/Held or
+// an inbox candidate and milestones when it can have a Ready/Held one. Any
+// failure fails the whole repo fetch.
 func (c *Collector) fetchIssues(ctx context.Context, r core.Repo) repoResult {
 	rd := baseRepoData(r, c.src.Wired(r))
 	issues, err := c.src.Issues(ctx, r)
@@ -543,10 +544,15 @@ func (c *Collector) fetchIssues(ctx context.Context, r core.Repo) repoResult {
 	if rd.Forge != "github" || !rd.Wired {
 		return repoResult{data: rd}
 	}
-	if hasCandidate(issues) {
+	// The inbox reads the open PRs too — an issue whose retry is guarded by the
+	// PR that closes it must not read as a retry card just because the repo has
+	// no gate candidate left.
+	if hasCandidate(issues) || hasInboxCandidate(issues) {
 		if rd.PRs, err = c.src.PRs(ctx, r); err != nil {
 			return repoResult{err: fmt.Errorf("prs: %w", err)}
 		}
+	}
+	if hasCandidate(issues) {
 		if rd.Milestones, err = c.src.Milestones(ctx, r); err != nil {
 			return repoResult{err: fmt.Errorf("milestones: %w", err)}
 		}
@@ -706,6 +712,10 @@ func (c *Collector) setErrLocked(source string, err error) {
 
 func hasCandidate(issues []forge.Issue) bool {
 	return slices.ContainsFunc(issues, func(i forge.Issue) bool { return isGateCandidate(i.Labels) })
+}
+
+func hasInboxCandidate(issues []forge.Issue) bool {
+	return slices.ContainsFunc(issues, func(i forge.Issue) bool { return isInboxCandidate(i.Labels) })
 }
 
 func hasAIImplement(issues []forge.Issue) bool {

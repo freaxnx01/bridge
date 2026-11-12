@@ -172,15 +172,20 @@ func TestBuildInbox_CardsUrgency_GroupThenOldest(t *testing.T) {
 		issueAt(3, at(time.Minute), dispatch.LabelAIFailed),
 		issueAt(4, at(time.Minute), dispatch.LabelAIImplement),
 		issueAt(5, at(30*time.Hour), dispatch.LabelAIFailed),
+		issueAt(6, at(time.Minute), dispatch.LabelAIImplement, dispatch.LabelAIFailed),
 	}
 	comments := map[int][]forge.Comment{
 		3: {marker(`{"v":1,"class":"task_failure","decision":"stop","attempt":2}`, at(10*time.Hour))},
 		4: {marker(`{"v":1,"class":"rate_limit","decision":"stop","attempt":2}`, at(20*time.Hour))},
+		// A lost re-dispatch says as little about the run as a missing marker,
+		// so it belongs in group 4 rather than ahead of it.
+		6: {marker(`{"v":1,"class":"rate_limit","decision":"stop","attempt":2}`, at(5*time.Hour)),
+			{Author: "github-actions[bot]", Body: dispatch.RedispatchComment("x"), Created: at(4 * time.Hour)}},
 	}
 
 	ib := buildInbox(inboxRepo(issues, nil, comments))
 
-	want := []int{2, 1, 3, 4, 5}
+	want := []int{2, 1, 3, 4, 5, 6}
 	var got []int
 	for _, c := range ib.Cards {
 		got = append(got, c.Number)
@@ -195,6 +200,9 @@ func TestBuildInbox_CardsUrgency_GroupThenOldest(t *testing.T) {
 	}
 	if ib.Cards[4].Reason != "no run marker" {
 		t.Errorf("group 4 reason = %q, want %q", ib.Cards[4].Reason, "no run marker")
+	}
+	if ib.Cards[5].Reason != "re-dispatch never reported" {
+		t.Errorf("group 4 reason = %q, want %q", ib.Cards[5].Reason, "re-dispatch never reported")
 	}
 }
 

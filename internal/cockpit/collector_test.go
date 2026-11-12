@@ -27,6 +27,7 @@ type fakeWorld struct {
 	issues      map[string][]forge.Issue
 	issuesErr   map[string]error
 	runs        map[string][]forge.WorkflowRun
+	prs         map[string][]forge.PullRequest
 	comments    map[string][]forge.Comment
 	issueErr    map[string]error
 	detailIssue map[string]forge.Issue
@@ -44,6 +45,7 @@ func newWorld(repos ...core.Repo) *fakeWorld {
 	return &fakeWorld{
 		repos: repos, wired: map[string]bool{}, issues: map[string][]forge.Issue{},
 		issuesErr: map[string]error{}, runs: map[string][]forge.WorkflowRun{},
+		prs:      map[string][]forge.PullRequest{},
 		comments: map[string][]forge.Comment{}, issueErr: map[string]error{},
 		detailIssue: map[string]forge.Issue{},
 		prCalls:     map[string]int{}, msCalls: map[string]int{}, runCalls: map[string]int{},
@@ -141,7 +143,7 @@ func (w *fakeWorld) sources() Sources {
 			w.mu.Lock()
 			defer w.mu.Unlock()
 			w.prCalls[key(r)]++
-			return nil, nil
+			return w.prs[key(r)], nil
 		},
 		Milestones: func(_ context.Context, r core.Repo) ([]forge.Milestone, error) {
 			w.mu.Lock()
@@ -208,6 +210,33 @@ func TestCollector_CollectIssues_PRsOnlyForWiredReposWithCandidates(t *testing.T
 	}
 	if got := len(c.Board().Ready); got != 1 {
 		t.Errorf("Ready = %d, want 1", got)
+	}
+}
+
+// A repo whose open issues are all dispatched already has no gate candidate,
+// yet its failed issue still needs the open PRs: without them the inbox reads a
+// PR-guarded retry as a retry card while the dispatcher skips it.
+func TestCollector_CollectIssues_InboxCandidateWithoutGateCandidate_FetchesPRs(t *testing.T) {
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(1, dispatch.LabelAIImplement, dispatch.LabelAIFailed)}
+	w.comments["o/a#1"] = []forge.Comment{
+		marker(`{"v":1,"class":"rate_limit","decision":"stop","attempt":2}`, t0.Add(-2*time.Hour)),
+	}
+	w.prs["o/a"] = []forge.PullRequest{{Number: 7, Body: "Closes #1"}}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	if w.prCalls["o/a"] != 1 || w.msCalls["o/a"] != 0 {
+		t.Errorf("PRs/milestones = %d/%d, want 1/0", w.prCalls["o/a"], w.msCalls["o/a"])
+	}
+	cards := c.Inbox().Cards
+	if len(cards) != 1 {
+		t.Fatalf("want one card, got %+v", cards)
+	}
+	if cards[0].Kind != CardHuman || cards[0].Reason != "open PR" {
+		t.Errorf("kind/reason = %q/%q, want %q/%q", cards[0].Kind, cards[0].Reason, CardHuman, "open PR")
 	}
 }
 

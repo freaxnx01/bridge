@@ -59,8 +59,9 @@ var retryMarkerAt = time.Date(2026, 11, 10, 10, 0, 0, 0, time.UTC)
 func retryTickNow() time.Time { return retryMarkerAt.Add(time.Hour) }
 
 // ago renders a timestamp d before now the way GitHub's API does. A tick run
-// through runDispatch reads the wall clock, so anything the 3 h guard measures
-// has to be dated relative to it rather than to retryMarkerAt.
+// through runDispatch reads the wall clock, so every fixture it reads a
+// duration off — the run marker and the re-dispatch comments the 3 h guard
+// compares against it — is dated relative to now rather than to retryMarkerAt.
 func ago(d time.Duration) string {
 	return time.Now().UTC().Add(-d).Format(time.RFC3339)
 }
@@ -382,11 +383,13 @@ func commentJSON(t *testing.T, id int, author, body, created string) string {
 }
 
 // markerCommentJSON is the pipeline's run report for #43: rate-limited,
-// stopped, one attempt spent — NextAction's ActionRetry row.
+// stopped, one attempt spent — NextAction's ActionRetry row. Six hours back, so
+// every re-dispatch comment the guard tests date relative to now is newer than
+// it whatever the wall-clock date is.
 func markerCommentJSON(t *testing.T) string {
 	t.Helper()
 	return commentJSON(t, 1, "github-actions[bot]",
-		"report\n<!-- ai-run: "+rateLimitMarker+" -->", "2026-11-10T10:00:00Z")
+		"report\n<!-- ai-run: "+rateLimitMarker+" -->", ago(6*time.Hour))
 }
 
 func newRetryGithub(t *testing.T, f retryFixture) (*httptest.Server, *writeLog) {

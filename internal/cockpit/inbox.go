@@ -32,7 +32,7 @@ var reviewReasons = []string{"review blocked", "review failed", "checks blocked"
 
 // noInfoReasons are the reasons bridge cannot say anything about the run from,
 // so they sort last.
-var noInfoReasons = []string{"no run marker", "retry never reported"}
+var noInfoReasons = []string{"no run marker", "retry never reported", "re-dispatch never reported"}
 
 // InboxCard is one issue in the inbox, in whichever of the three buckets its
 // NextAction put it.
