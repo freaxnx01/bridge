@@ -63,7 +63,10 @@
   onToken={() => requestToken()}
 />
 
-<RepoFilterBar repos={$repos} filter={$repoFilter} {counts} />
+<!-- The Architecture tab shows a static diagram: there is nothing to filter. -->
+{#if area !== 'arch'}
+  <RepoFilterBar repos={$repos} filter={$repoFilter} {counts} />
+{/if}
 
 <main>
   {#if area === 'inbox'}
