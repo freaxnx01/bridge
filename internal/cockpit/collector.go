@@ -403,7 +403,7 @@ func inFlightRunURLs(rd *RepoData) map[string]bool {
 			continue
 		}
 		for _, r := range rd.Runs {
-			if isIssueRunFor(i, r) {
+			if dispatch.IsIssueRunFor(i, r) {
 				out[r.URL] = true
 			}
 		}
