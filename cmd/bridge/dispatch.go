@@ -23,6 +23,9 @@ import (
 // observation week exists to answer.
 func decisionStatus(d dispatch.Decision) string {
 	reason := d.Candidate.LaneReason
+	if d.Candidate.Retry {
+		return retryStatus(d, reason)
+	}
 	switch {
 	case d.Dispatch && d.Candidate.Lane.DryRun:
 		return withReason("WOULD dispatch (dry-run)", reason)
@@ -33,6 +36,22 @@ func decisionStatus(d dispatch.Decision) string {
 			return fmt.Sprintf("SKIP (%s; %s)", reason, d.Reason)
 		}
 		return fmt.Sprintf("SKIP (%s)", d.Reason)
+	}
+}
+
+// retryStatus renders a re-dispatch, which always names the failure the retry
+// is answering: "retry" alone would not say what is being retried, and that is
+// the one thing an operator reading an unattended tick needs.
+func retryStatus(d dispatch.Decision, laneReason string) string {
+	switch {
+	case d.Dispatch && d.Candidate.Lane.DryRun:
+		return withReason("WOULD retry: "+d.Candidate.RetryReason+" (dry-run)", laneReason)
+	case d.Dispatch:
+		return withReason("retry: "+d.Candidate.RetryReason, laneReason)
+	case laneReason != "":
+		return fmt.Sprintf("SKIP retry (%s; %s)", laneReason, d.Reason)
+	default:
+		return fmt.Sprintf("SKIP retry (%s)", d.Reason)
 	}
 }
 
@@ -72,6 +91,19 @@ type decisionJSON struct {
 	DryRun     bool     `json:"dry_run"`
 	Dispatch   bool     `json:"dispatch"`
 	Reason     string   `json:"reason,omitempty"`
+	// Kind separates a first dispatch from a re-dispatch; RetryReason is the
+	// failure the retry answers. Reason is already the skip reason, and a retry
+	// skipped by a cap needs both.
+	Kind        string `json:"kind"`
+	RetryReason string `json:"retry_reason,omitempty"`
+}
+
+// decisionKind names the pass a decision came from.
+func decisionKind(c dispatch.Candidate) string {
+	if c.Retry {
+		return "retry"
+	}
+	return "dispatch"
 }
 
 func decisionsJSON(ds []dispatch.Decision) []decisionJSON {
@@ -87,6 +119,9 @@ func decisionsJSON(ds []dispatch.Decision) []decisionJSON {
 			DryRun:     d.Candidate.Lane.DryRun,
 			Dispatch:   d.Dispatch,
 			Reason:     d.Reason,
+
+			Kind:        decisionKind(d.Candidate),
+			RetryReason: d.Candidate.RetryReason,
 		})
 	}
 	return out

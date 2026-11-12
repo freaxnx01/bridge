@@ -20,6 +20,11 @@ type Candidate struct {
 	// ordering. LaneReason records a downgrade so --dry-run can explain it.
 	Lane       Lane
 	LaneReason string
+	// Retry marks a candidate the retry pass selected: it is re-dispatched by
+	// the label swap rather than labelled for the first time. RetryReason is the
+	// Action reason that selected it. The zero value is a new dispatch.
+	Retry       bool
+	RetryReason string
 }
 
 // typeRank maps an issue's labels to the ladder's third rung.
