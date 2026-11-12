@@ -2,6 +2,11 @@ import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/svelte'
 import { writable } from 'svelte/store'
 
+// jsdom has no EventSource, which the real SSE store builds on import.
+vi.mock('./lib/stores/sse.js', () => ({
+  sseEvent: { subscribe: (fn) => { fn(null); return () => {} } },
+}))
+
 vi.mock('./lib/stores/pipeline.js', async () => {
   const { writable } = await import('svelte/store')
   return {
