@@ -6,7 +6,7 @@ Phase 2 (`/ui:flow`). Wireframe: [`wireframe.md`](wireframe.md).
 
 ```mermaid
 flowchart LR
-  URL["URL ?forge=…&repo=…"] -->|on load, wins| F[repoFilter store]
+  URL["URL ?forge=…&owner=…&repo=…"] -->|on load, wins| F[repoFilter store]
   LS["localStorage bridge.repoFilter"] -->|on load, if URL has none| F
   F -->|on change| URL2[history.replaceState]
   F -->|on change| LS2[localStorage]
@@ -29,8 +29,9 @@ stateDiagram-v2
   Open --> Closed: Esc / click outside / click button
   Open --> Open: type in search (narrows list)
   Open --> Open: tick repo / group "all" / "All repos"
-  Closed --> Closed: click forge chip (drops selected repos of other forges)
-  Closed --> Closed: ✕ clear (forge = All, repos = none)
+  Closed --> Closed: click forge chip (owner = All, drops repos of other forges)
+  Closed --> Closed: click owner chip (drops repos of other owners)
+  Closed --> Closed: ✕ clear (forge = All, owner = All, repos = none)
 ```
 
 ## Matching rule
@@ -39,12 +40,15 @@ stateDiagram-v2
 flowchart TD
   I[item: forge, repo] --> A{forge chip set and item.forge differs?}
   A -- yes --> H[hidden]
-  A -- no --> B{any repo selected?}
+  A -- no --> O{owner chip set and item's owner differs?}
+  O -- yes --> H
+  O -- no --> B{any repo selected?}
   B -- no --> S[shown]
   B -- yes --> C{"forge:owner/name in selection?"}
   C -- yes --> S
   C -- no --> H
 ```
 
-An item without a repo (a session outside every discovered repo, `repo: ""`)
+An item's owner is its `repo` up to the last `/` (ADO project names contain
+spaces, never `/`). An item without a repo (a session outside every discovered repo, `repo: ""`)
 is shown only when no forge and no repo is selected.
