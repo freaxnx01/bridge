@@ -37,6 +37,7 @@ var noInfoReasons = []string{"no run marker", "retry never reported", "re-dispat
 // InboxCard is one issue in the inbox, in whichever of the three buckets its
 // NextAction put it.
 type InboxCard struct {
+	Forge  string              `json:"forge"`
 	Repo   string              `json:"repo"` // "owner/name"
 	Number int                 `json:"number"`
 	Title  string              `json:"title"`
@@ -143,7 +144,7 @@ func classify(rd RepoData, i forge.Issue, now time.Time) (InboxCard, bool) {
 		return InboxCard{}, false
 	}
 	c := InboxCard{
-		Repo: repoName(rd), Number: i.Number, Title: i.Title, URL: i.URL,
+		Forge: rd.Forge, Repo: repoName(rd), Number: i.Number, Title: i.Title, URL: i.URL,
 		Kind: kind, Reason: action.Reason, Since: i.Updated,
 	}
 	if s.HasRun {

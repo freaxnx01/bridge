@@ -31,7 +31,8 @@ const (
 // RunningCard is one unit of work in flight.
 type RunningCard struct {
 	Kind      RunKind   `json:"kind"`
-	Repo      string    `json:"repo"` // "owner/name"; "" when unknown
+	Forge     string    `json:"forge,omitempty"` // "" when the card belongs to no repo
+	Repo      string    `json:"repo"`            // "owner/name"; "" when unknown
 	Issue     int       `json:"issue,omitempty"`
 	Title     string    `json:"title"`
 	URL       string    `json:"url,omitempty"`
@@ -161,7 +162,7 @@ func classifyIssues(b *columns, rd RepoData) []dispatch.Candidate {
 		case dispatch.IsParked(i.Labels) || hasAny(i.Labels, LabelRoadmap):
 		case hasAny(i.Labels, LabelEnrichmentOngoing):
 			b.running = append(b.running, RunningCard{
-				Kind: KindEnrichment, Repo: repoName(rd), Issue: i.Number, Title: i.Title,
+				Kind: KindEnrichment, Forge: rd.Forge, Repo: repoName(rd), Issue: i.Number, Title: i.Title,
 				URL: i.URL, Status: "enriching", Since: i.Updated,
 			})
 		case hasAny(i.Labels, dispatch.LabelNeedsEnrichment, dispatch.LabelToBeDefined):
@@ -207,7 +208,7 @@ func pipelineRuns(rd RepoData) []RunningCard {
 		if r.Event != "issues" || (r.Status != "queued" && r.Status != "in_progress") {
 			continue
 		}
-		c := RunningCard{Kind: KindPipeline, Repo: repoName(rd), Title: r.Name, URL: r.URL, Status: r.Status, Since: r.Created}
+		c := RunningCard{Kind: KindPipeline, Forge: rd.Forge, Repo: repoName(rd), Title: r.Name, URL: r.URL, Status: r.Status, Since: r.Created}
 		if single {
 			c.Issue, c.Title = linked.Number, linked.Title
 		}
@@ -233,17 +234,19 @@ func singleAIImplement(issues []forge.Issue) (forge.Issue, bool) {
 func sessionCards(in Input) []RunningCard {
 	out := make([]RunningCard, 0, len(in.Sessions))
 	for _, s := range in.Sessions {
+		repo, forgeName := repoForCWD(in.Repos, s.CWD)
 		out = append(out, RunningCard{
-			Kind: KindSession, Repo: repoForCWD(in.Repos, s.CWD), Title: s.Name,
+			Kind: KindSession, Forge: forgeName, Repo: repo, Title: s.Name,
 			Status: s.Status, Since: s.StartedAt, SessionID: s.SessionID, CWD: s.CWD,
 		})
 	}
 	return out
 }
 
-// repoForCWD returns the repo whose Path is the longest path-boundary prefix of cwd.
-func repoForCWD(repos []RepoData, cwd string) string {
-	best, bestLen := "", -1
+// repoForCWD returns the name and forge of the repo whose Path is the longest
+// path-boundary prefix of cwd, both empty when no repo contains it.
+func repoForCWD(repos []RepoData, cwd string) (repo, forgeName string) {
+	bestLen := -1
 	c := filepath.Clean(cwd)
 	for _, rd := range repos {
 		if rd.Path == "" {
@@ -251,10 +254,10 @@ func repoForCWD(repos []RepoData, cwd string) string {
 		}
 		p := filepath.Clean(rd.Path)
 		if (c == p || strings.HasPrefix(c, p+"/")) && len(p) > bestLen {
-			best, bestLen = repoName(rd), len(p)
+			repo, forgeName, bestLen = repoName(rd), rd.Forge, len(p)
 		}
 	}
-	return best
+	return repo, forgeName
 }
 
 func sortedCards(ds []dated) []IssueCard {
