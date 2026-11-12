@@ -1,11 +1,17 @@
 package main
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"testing"
 	"time"
+
+	"github.com/spf13/cobra"
 
 	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
@@ -275,5 +281,313 @@ func TestJournalBudget_CarriesReadingAndKnown(t *testing.T) {
 	}
 	if known := journalBudget(dispatch.BudgetState{}); !known.Known {
 		t.Errorf("a measured reading is known, got %+v", known)
+	}
+}
+
+// newJournalGithub serves the one repo the journal integration tests fetch:
+// a single eligible issue #41, no milestones, no PRs, and a label/comment
+// endpoint whose status each test picks. Anything else is a test bug.
+func newJournalGithub(t *testing.T, labelStatus, commentStatus int) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/issues":
+			w.Header().Set("Content-Type", "application/json")
+			w.Write([]byte(`[
+				{"number":41,"title":"eligible issue","body":"a real description\n## Implementation Plan\n- step","html_url":"u41","labels":[{"name":"feat"}],"updated_at":"2026-07-01T00:00:00Z","created_at":"2026-06-01T00:00:00Z"}
+			]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/milestones":
+			w.Write([]byte(`[]`))
+		case r.Method == "GET" && r.URL.Path == "/repos/freaxnx01/bridge/pulls":
+			w.Write([]byte(`[]`))
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/labels":
+			w.WriteHeader(labelStatus)
+			if labelStatus == http.StatusOK {
+				w.Write([]byte(`[{"name":"ai-implement"}]`))
+			} else {
+				w.Write([]byte(`{"message":"boom"}`))
+			}
+		case r.Method == "POST" && r.URL.Path == "/repos/freaxnx01/bridge/issues/41/comments":
+			w.WriteHeader(commentStatus)
+			w.Write([]byte(`{"id":1,"body":"x","created_at":"2026-07-01T00:00:00Z"}`))
+		default:
+			t.Errorf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+}
+
+// journalTickEnv isolates one tick: its own cache (where the journal lands),
+// config, transcripts, and the flags runDispatch reads as globals.
+func journalTickEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("XDG_CACHE_HOME", t.TempDir())
+	t.Setenv("XDG_CONFIG_HOME", t.TempDir())
+	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
+	t.Cleanup(func() { dispatchAuto, dispatchRetryOnly = false, false })
+}
+
+// pointAtFakeGithub wires the one fake repo and its server into the tick.
+func pointAtFakeGithub(t *testing.T, srv *httptest.Server) {
+	t.Helper()
+	t.Setenv("BRIDGE_REPOS_ROOT", writeFakeGithubRepo(t, "freaxnx01", "bridge"))
+	t.Setenv("BRIDGE_GITHUB_API", srv.URL)
+	t.Setenv("GH_TOKEN", "tok")
+}
+
+// onlyRecord asserts the tick wrote exactly one journal record and returns it.
+func onlyRecord(t *testing.T) dispatch.JournalRecord {
+	t.Helper()
+	recs, err := dispatch.ReadJournal(dispatchJournalDir(), time.Time{})
+	if err != nil {
+		t.Fatalf("ReadJournal: %v", err)
+	}
+	if len(recs) != 1 {
+		t.Fatalf("want exactly one record per invocation, got %d: %+v", len(recs), recs)
+	}
+	return recs[0]
+}
+
+func decisionFor(t *testing.T, rec dispatch.JournalRecord, issue int) dispatch.JournalDecision {
+	t.Helper()
+	for _, d := range rec.Decisions {
+		if d.Issue == issue {
+			return d
+		}
+	}
+	t.Fatalf("no decision for #%d in %+v", issue, rec.Decisions)
+	return dispatch.JournalDecision{}
+}
+
+func runJournalTick(t *testing.T) error {
+	t.Helper()
+	cmd := &cobra.Command{}
+	cmd.SetOut(&bytes.Buffer{})
+	return runDispatch(cmd, nil)
+}
+
+// The observation-week drop-in: the timer runs --auto --dry-run. That has to
+// journal as a timer slot in dry-run mode, with a live-lane candidate recorded
+// as would_dispatch — never as a dispatch that did not happen.
+func TestRunDispatch_AutoDryRun_JournalsTimerDryRunWouldDispatch(t *testing.T) {
+	srv := newJournalGithub(t, http.StatusOK, http.StatusCreated)
+	defer srv.Close()
+	journalTickEnv(t)
+	pointAtFakeGithub(t, srv)
+	pinUnattendedSchedule(t)
+	dispatchAuto = true
+	setDispatchFlags(t, false, true)
+
+	if err := runJournalTick(t); err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	rec := onlyRecord(t)
+	if rec.Trigger != dispatch.TriggerTimer || rec.Mode != dispatch.ModeDryRun {
+		t.Errorf("trigger/mode = %q/%q, want timer/dry-run", rec.Trigger, rec.Mode)
+	}
+	if rec.Outcome != dispatch.OutcomeDecided {
+		t.Errorf("outcome = %q, want decided", rec.Outcome)
+	}
+	if !equalStrings(rec.Repos, []string{"freaxnx01/bridge"}) {
+		t.Errorf("repos = %v", rec.Repos)
+	}
+	if len(rec.LanesInWindow) == 0 || rec.LanesInWindow[0] != "default" {
+		t.Errorf("lanes_in_window = %v, want the default lane", rec.LanesInWindow)
+	}
+	if d := decisionFor(t, rec, 41); d.Decision != dispatch.DecisionWouldDispatch || d.Kind != dispatch.KindDispatch {
+		t.Errorf("#41 = %q/%q, want would_dispatch/dispatch", d.Decision, d.Kind)
+	}
+}
+
+func TestRunDispatch_ManualLive_JournalsDispatched(t *testing.T) {
+	srv := newJournalGithub(t, http.StatusOK, http.StatusCreated)
+	defer srv.Close()
+	journalTickEnv(t)
+	pointAtFakeGithub(t, srv)
+	pinUnattendedSchedule(t)
+	setDispatchFlags(t, false, false)
+
+	if err := runJournalTick(t); err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	rec := onlyRecord(t)
+	if rec.Trigger != dispatch.TriggerManual || rec.Mode != dispatch.ModeLive {
+		t.Errorf("trigger/mode = %q/%q, want manual/live", rec.Trigger, rec.Mode)
+	}
+	if rec.Outcome != dispatch.OutcomeDecided {
+		t.Errorf("outcome = %q, want decided", rec.Outcome)
+	}
+	if d := decisionFor(t, rec, 41); d.Decision != dispatch.DecisionDispatched {
+		t.Errorf("#41 = %q, want dispatched", d.Decision)
+	}
+}
+
+// A label that never landed means the pipeline never fired, so the journal
+// must not claim a dispatch for it.
+func TestRunDispatch_LabelFails_JournalsNotAppliedAndError(t *testing.T) {
+	srv := newJournalGithub(t, http.StatusInternalServerError, http.StatusCreated)
+	defer srv.Close()
+	journalTickEnv(t)
+	pointAtFakeGithub(t, srv)
+	pinUnattendedSchedule(t)
+	setDispatchFlags(t, false, false)
+
+	if err := runJournalTick(t); err == nil {
+		t.Fatal("a failing label must surface as an error")
+	}
+
+	rec := onlyRecord(t)
+	if rec.Outcome != dispatch.OutcomeError || rec.Error == "" {
+		t.Errorf("outcome/error = %q/%q, want error with text", rec.Outcome, rec.Error)
+	}
+	if d := decisionFor(t, rec, 41); d.Decision != dispatch.DecisionNotApplied {
+		t.Errorf("#41 = %q, want not_applied", d.Decision)
+	}
+}
+
+// The label is the pipeline's trigger: once it lands the run is real and the
+// ledger books it, so a failing follow-up comment still journals a dispatch.
+func TestRunDispatch_CommentFailsAfterLabel_JournalsDispatched(t *testing.T) {
+	srv := newJournalGithub(t, http.StatusOK, http.StatusInternalServerError)
+	defer srv.Close()
+	journalTickEnv(t)
+	pointAtFakeGithub(t, srv)
+	pinUnattendedSchedule(t)
+	setDispatchFlags(t, false, false)
+
+	if err := runJournalTick(t); err == nil {
+		t.Fatal("a failing comment must surface as an error")
+	}
+
+	rec := onlyRecord(t)
+	if rec.Outcome != dispatch.OutcomeError {
+		t.Errorf("outcome = %q, want error", rec.Outcome)
+	}
+	if d := decisionFor(t, rec, 41); d.Decision != dispatch.DecisionDispatched {
+		t.Errorf("#41 = %q, want dispatched (the label landed)", d.Decision)
+	}
+}
+
+func TestRunDispatch_AutoPaused_JournalsPausedWithoutFetch(t *testing.T) {
+	journalTickEnv(t)
+	if err := dispatch.WriteState(dispatchStatePath(), dispatch.State{Paused: true}); err != nil {
+		t.Fatal(err)
+	}
+	dispatchAuto = true
+	setDispatchFlags(t, false, false)
+
+	if err := runJournalTick(t); err != nil {
+		t.Fatalf("a paused tick returns cleanly: %v", err)
+	}
+
+	rec := onlyRecord(t)
+	if rec.Outcome != dispatch.OutcomePaused || rec.Trigger != dispatch.TriggerTimer {
+		t.Errorf("outcome/trigger = %q/%q, want paused/timer", rec.Outcome, rec.Trigger)
+	}
+	if len(rec.Repos) != 0 {
+		t.Errorf("a paused tick fetches nothing, got repos %v", rec.Repos)
+	}
+}
+
+func TestRunDispatch_AutoOutsideWindow_JournalsOutsideWindow(t *testing.T) {
+	journalTickEnv(t)
+	// One minute wide, three hours ahead: a window that cannot contain now,
+	// and cannot coincide with it on a fall-back DST day either.
+	future := time.Now().Add(3 * time.Hour)
+	body := `{"schedule":{"windows":[{"from":"` + future.Format("15:04") + `","to":"` +
+		future.Add(time.Minute).Format("15:04") + `","budget_rung":false}]}}`
+	writeDispatchConfig(t, body)
+	dispatchAuto = true
+	setDispatchFlags(t, false, false)
+
+	if err := runJournalTick(t); err != nil {
+		t.Fatalf("out-of-window tick must return cleanly: %v", err)
+	}
+
+	rec := onlyRecord(t)
+	if rec.Outcome != dispatch.OutcomeOutsideWindow {
+		t.Errorf("outcome = %q, want outside_window", rec.Outcome)
+	}
+	if len(rec.LanesInWindow) != 0 {
+		t.Errorf("no lane acts, got %v", rec.LanesInWindow)
+	}
+}
+
+func TestRunDispatch_ConfigUnreadable_JournalsError(t *testing.T) {
+	journalTickEnv(t)
+	writeDispatchConfig(t, `{not json`)
+	setDispatchFlags(t, false, false)
+
+	if err := runJournalTick(t); err == nil {
+		t.Fatal("an unreadable config must surface as an error")
+	}
+
+	rec := onlyRecord(t)
+	if rec.Outcome != dispatch.OutcomeError || rec.Error == "" {
+		t.Errorf("outcome/error = %q/%q, want error with text", rec.Outcome, rec.Error)
+	}
+}
+
+func TestRunDispatch_RetryOnlyDryRun_JournalsRetryOnly(t *testing.T) {
+	srv := newJournalGithub(t, http.StatusOK, http.StatusCreated)
+	defer srv.Close()
+	journalTickEnv(t)
+	pointAtFakeGithub(t, srv)
+	pinUnattendedSchedule(t)
+	dispatchRetryOnly = true
+	setDispatchFlags(t, false, true)
+
+	if err := runJournalTick(t); err != nil {
+		t.Fatalf("runDispatch: %v", err)
+	}
+
+	rec := onlyRecord(t)
+	if !rec.RetryOnly || rec.Mode != dispatch.ModeDryRun {
+		t.Errorf("retry_only/mode = %t/%q, want true/dry-run", rec.RetryOnly, rec.Mode)
+	}
+	for _, d := range rec.Decisions {
+		if d.Issue == 41 {
+			t.Errorf("--retry-only skips new issues, got %+v", d)
+		}
+	}
+}
+
+// The journal is observability: an unwritable one must leave the tick's error,
+// its stdout and its state exactly as they were.
+func TestRunDispatch_JournalDirUnwritable_TickUnaffected(t *testing.T) {
+	journalTickEnv(t)
+	t.Setenv("BRIDGE_BASE", t.TempDir()) // exists but has no repos
+	setDispatchFlags(t, true, false)     // --json, live
+
+	if err := os.MkdirAll(cacheRoot(), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dispatchJournalDir(), []byte("not a dir"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	cmd := &cobra.Command{}
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+
+	if err := runDispatch(cmd, nil); err != nil {
+		t.Fatalf("a broken journal must not fail the tick: %v", err)
+	}
+	var decisions []dispatch.Decision
+	if err := json.Unmarshal(out.Bytes(), &decisions); err != nil {
+		t.Fatalf("stdout must be unchanged, got %q: %v", out.String(), err)
+	}
+}
+
+// writeDispatchConfig puts body at the path runDispatch reads its config from.
+func writeDispatchConfig(t *testing.T, body string) {
+	t.Helper()
+	dir := filepath.Dir(dispatchConfigPath())
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(dispatchConfigPath(), []byte(body), 0o600); err != nil {
+		t.Fatal(err)
 	}
 }
