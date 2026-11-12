@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 
@@ -100,4 +102,57 @@ func retryCandidate(r repoInput, i forge.Issue, reason string) dispatch.Candidat
 
 func skipRetry(c dispatch.Candidate, reason string) dispatch.Decision {
 	return dispatch.Decision{Candidate: c, Dispatch: false, Reason: reason}
+}
+
+// tickCandidates gathers one tick's work: the retry pass first, then the new
+// dispatches, each ordered by the ladder on its own. Retries lead because a
+// failed issue already carries a run's worth of sunk cost, so finishing it
+// beats starting something new under the same caps.
+//
+// The second return is the retry rows that were decided before the caps ran —
+// they are reported, never applied.
+func tickCandidates(ctx context.Context, repos []repoInput, cfg dispatch.Config, gate dispatch.GateState, now time.Time, retryOnly bool) ([]dispatch.Candidate, []dispatch.Decision) {
+	retries, retrySkips := collectRetriesForTick(ctx, repos, now)
+	assignLanes(retries, cfg.Lanes, gate)
+	for i := range retrySkips {
+		retrySkips[i].Candidate.Lane, retrySkips[i].Candidate.LaneReason =
+			dispatch.ResolveLane(cfg.Lanes, retrySkips[i].Candidate.Repo, gate)
+	}
+	ordered := dispatch.Order(retries, cfg.RepoPriority)
+
+	if !retryOnly {
+		fresh := collectCandidates(repos)
+		assignLanes(fresh, cfg.Lanes, gate)
+		ordered = append(ordered, dispatch.Order(fresh, cfg.RepoPriority)...)
+	}
+	return ordered, retrySkips
+}
+
+// collectRetriesForTick resolves the GitHub client the retry pass reads
+// through. Without one there is nothing to read, and passing a typed-nil
+// client as the interface would turn that into a nil dereference.
+func collectRetriesForTick(ctx context.Context, repos []repoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
+	gh, ok := clientFor("github").(*forge.GithubClient)
+	if !ok || gh == nil {
+		return nil, nil
+	}
+	return collectRetries(ctx, gh, repos, now)
+}
+
+// applyRetry re-dispatches one issue and reports whether the run has to be
+// booked. From step 3 of the swap the pipeline has fired, so everything after
+// it is accounting the ledger must not lose — exactly like the label/comment
+// split on the new-dispatch path.
+func applyRetry(ctx context.Context, gh *forge.GithubClient, d dispatch.Decision) (bool, error) {
+	owner, repo, num := d.Candidate.Owner, d.Candidate.Repo, d.Candidate.Issue.Number
+	if err := dispatch.Redispatch(ctx, gh, owner, repo, num, d.Candidate.Lane.EffectiveLabels()); err != nil {
+		var re *dispatch.RedispatchError
+		booked := errors.As(err, &re) && re.Step == 4
+		return booked, fmt.Errorf("retry %s#%d: %w", repo, num, err)
+	}
+	if _, err := gh.CommentIssue(ctx, owner, repo, num,
+		dispatch.RedispatchComment(d.Candidate.RetryReason)); err != nil {
+		return true, fmt.Errorf("comment %s#%d: %w", repo, num, err)
+	}
+	return true, nil
 }

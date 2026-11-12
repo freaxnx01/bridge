@@ -171,9 +171,10 @@ func milestoneDue(ms []forge.Milestone, title string) time.Time {
 }
 
 var (
-	dispatchDryRun bool
-	dispatchJSON   bool
-	dispatchAuto   bool
+	dispatchDryRun    bool
+	dispatchJSON      bool
+	dispatchAuto      bool
+	dispatchRetryOnly bool
 )
 
 var dispatchCmd = &cobra.Command{
@@ -210,6 +211,7 @@ func init() {
 	dispatchCmd.PersistentFlags().BoolVar(&dispatchDryRun, "dry-run", false, "decide and print, change nothing")
 	dispatchCmd.PersistentFlags().BoolVar(&dispatchJSON, "json", false, "machine-readable output")
 	dispatchCmd.PersistentFlags().BoolVar(&dispatchAuto, "auto", false, "timer entry point; honours the pause flag")
+	dispatchCmd.PersistentFlags().BoolVar(&dispatchRetryOnly, "retry-only", false, "run only the retry pass")
 	dispatchCmd.AddCommand(dispatchNowCmd, dispatchPauseCmd, dispatchResumeCmd, dispatchStatusCmd)
 	rootCmd.AddCommand(dispatchCmd)
 }
@@ -330,9 +332,7 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 	}
 
 	gate := resolveGate(ctx, repos, cfg.Lanes, now)
-	candidates := collectCandidates(repos)
-	assignLanes(candidates, cfg.Lanes, gate)
-	ordered := dispatch.Order(candidates, cfg.RepoPriority)
+	ordered, retrySkips := tickCandidates(ctx, repos, cfg, gate, now, dispatchRetryOnly)
 	acting, outOfWindow := partitionForTick(ordered, cfg, now, dispatchAuto)
 
 	// The rung is keyed on what it guards, not on --auto: a manual tick burns
@@ -362,6 +362,9 @@ func runDispatch(cmd *cobra.Command, _ []string) error {
 		budget,
 	)
 	decisions = mergeInOrder(ordered, decisions, outOfWindow)
+	// The retry pass's own skips never reached ApplyCaps, so they are not in
+	// `ordered` either. They are reported in every mode and applied in none.
+	decisions = append(decisions, retrySkips...)
 
 	if dispatchJSON {
 		if err := emitJSON(cmd.OutOrStdout(), decisionsJSON(decisions)); err != nil {
@@ -555,6 +558,20 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 			continue
 		}
 		owner, repo, num := d.Candidate.Owner, d.Candidate.Repo, d.Candidate.Issue.Number
+		if d.Candidate.Retry {
+			booked, err := applyRetry(ctx, gh, d)
+			if booked {
+				runs = append(runs, usage.Run{
+					At: timing.Now, Repo: repo, Issue: num, EstUSD: cfg.Budget.MeanRunCostUSD,
+				})
+				laneDispatched[lane.Name]++
+			}
+			if err != nil {
+				dispatchErr = err
+				break
+			}
+			continue
+		}
 		if _, err := gh.AddLabels(ctx, owner, repo, num, lane.EffectiveLabels()); err != nil {
 			dispatchErr = fmt.Errorf("label %s#%d: %w", repo, num, err)
 			break
