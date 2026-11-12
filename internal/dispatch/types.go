@@ -33,7 +33,7 @@ type Window struct {
 }
 
 // Schedule is the single source of truth for when dispatch acts. The systemd
-// timer is a bare hourly heartbeat, so these windows are the only place the
+// timer is a bare half-hourly heartbeat, so these windows are the only place the
 // hours are written down — the previous dispatch_at/retry_until fields were
 // read by nothing and duplicated the timer.
 type Schedule struct {

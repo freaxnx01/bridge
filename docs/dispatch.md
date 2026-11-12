@@ -255,9 +255,69 @@ Notes:
 - On Forgejo and Azure DevOps there is no marker at all, so a failure there is
   always row 10.
 
-**Status today:** `NextAction` is computed but not yet called by a tick — #253
-wires it to a `--retry-only` dispatch mode. For now, retries of any kind require
-a manual `bridge dispatch now`.
+**Status today:** every `bridge dispatch` tick runs the retry pass below before
+the new-dispatch pass, so a row-16 failure is picked back up unattended.
+`--retry-only` limits a run to that pass.
+
+### Retry pass
+
+**Candidates.** Per GitHub repo the tick already fetched, an open issue joins the
+retry pass when it carries both `ai-implement` and `ai:failed` and none of
+`parked` / `🧊 parked` / `ai:retrying` / `ai:paused`. Only row 16 is ever
+re-dispatched, and it needs a failed run's marker, so that label pair is a
+pre-filter: every other issue costs no extra API call. Forgejo and Azure DevOps
+post no marker, so they never produce a candidate.
+
+Each candidate then costs one `GetIssue` (its comment thread, for the marker) on
+top of one `ListWorkflowRuns` per repo that has any candidate at all.
+
+**In flight** is the rule the cockpit's inbox uses, shared from
+`internal/dispatch/inflight.go`: a workflow run with `event: issues`, status
+`queued` or `in_progress`, and a display title equal to the issue's. If the run
+list cannot be read, every one of that repo's candidates is skipped with `runs
+unreadable` — not knowing whether a run is in flight must never read as "not in
+flight", because a retry on top of a running pipeline stacks two runs on one
+issue.
+
+**Retry pending.** A re-dispatch posts a comment beginning ``Re-dispatched by
+`bridge dispatch` ``. While such a comment is newer than the latest run marker,
+the issue is skipped with `retry pending`: bridge has already retried and the
+pipeline owes a report. Without that guard, a re-dispatch whose run cannot be
+matched by title — or that never starts — would be retried every half hour until
+a cap bit. The author is not checked, because the guard can only ever *suppress*
+a retry.
+
+**The swap.** The pipeline starts only on `issues: labeled`, and re-adding a
+label that is still present fires nothing, so a re-dispatch is a guarded label
+swap in exactly this order:
+
+1. add `ai:retrying`
+2. remove `ai-implement`
+3. add the lane's labels — this is what fires the pipeline
+4. remove `ai:retrying`
+
+A failure stops the sequence and the error names the step. `ai:failed` is never
+touched; the next run report replaces the status label. (`workflow_dispatch`
+would be simpler, but the consumer `agent.yml` has no such trigger —
+agent-workflow #351.)
+
+**Ordering and caps.** Retries go through the same `Order` ladder, the same
+nightly / global / per-repo / lane caps and the same budget rung as new
+dispatches, and each one is booked in the spend ledger. Within a tick they come
+**first**: a failed issue already carries a run's worth of sunk cost, so
+finishing it beats starting something new. A dry-run lane writes nothing and
+books nothing, exactly as for a new dispatch.
+
+**Skip reasons** shown for a retry row: `retry interrupted`, `runs unreadable`,
+`issue unreadable`, `retry pending`, plus whatever reason the table above
+produced (`running`, `task_failure`, `no run marker`, …).
+
+**Recovery from `ai:retrying`.** A swap interrupted between steps leaves the
+label behind, and that is deliberate: it makes the issue visible and keeps it out
+of *both* passes (`Eligible` and the retry predicate both answer `retry
+interrupted`) until a person clears it. Before removing it, check that
+`ai-implement` is still on the issue — an interruption after step 2 removed it —
+and re-add it if not.
 
 ## Config
 
@@ -346,7 +406,8 @@ These are inherent to a proxy measurement, not bugs:
 
 - `bridge dispatch` — Default: **applies decisions for real** (adds `ai-implement` labels and comments to GitHub). Use only after validation. To preview without side effects, use `--dry-run`.
 - `bridge dispatch --dry-run` — Dry-run mode: decide which issues to dispatch, print decisions, change nothing. Used for testing and the first week of validation. **This flag must be passed explicitly to preview safely.**
-- `bridge dispatch --json` — Machine-readable output: one JSON object per decision with repo, issue number, title, dispatch decision, and skip reason. Works with or without `--dry-run`.
+- `bridge dispatch --json` — Machine-readable output: one JSON object per decision with repo, issue number, title, dispatch decision, and skip reason. Each decision also carries `kind` (`"dispatch"` or `"retry"`) and, for a retry, `retry_reason` — the failure the retry answers, which `reason` (the skip reason) cannot express on a retry a cap stopped. Works with or without `--dry-run`.
+- `bridge dispatch --retry-only` — Run only the retry pass (see "Retry pass" above), skipping new dispatches entirely. Combines with `--dry-run`, `--json` and `--auto`; the pause and window gates are unchanged.
 
 ### Subcommands
 
@@ -359,7 +420,7 @@ These are inherent to a proxy measurement, not bugs:
 
 `docs/systemd/bridge-dispatch.service` and `docs/systemd/bridge-dispatch.timer` are provided. The timer is a bare half-hourly heartbeat — `bridge dispatch --auto` fires on the hour and half hour, fetches every repo's candidates, resolves each one's lane, and checks it against that lane's window. If no candidate's lane is currently in window, the tick reports "outside dispatch window" and applies nothing. The windows in `dispatch.json` (top-level `schedule.windows`, or a lane's own `windows`), not the timer, are the schedule.
 
-**Every in-window tick — day or night — runs the same full dispatch path, bounded by the same usage-budget/nightly/global/per-repo bounds** (the budget rung only ever applies on windows with `budget_rung: true`, see "Usage-budget rung" above). There is no separate retry-only mode yet (see "When a run fails" above) — a dedicated `--retry-only` mode is still future work. What keeps repeated ticks from re-labeling and re-commenting an issue that already failed without producing a PR is the "not already dispatched" eligibility guard (an issue already carrying `ai-implement` is skipped), not a retry-specific code path.
+**Every in-window tick — day or night — runs the same full dispatch path, bounded by the same usage-budget/nightly/global/per-repo bounds** (the budget rung only ever applies on windows with `budget_rung: true`, see "Usage-budget rung" above). That path begins with the retry pass (see "Retry pass" above), which runs under the very same bounds and in the same tick — there is no second systemd unit and no extra config key. What keeps repeated ticks from re-labeling an issue that is merely still running is the "not already dispatched" eligibility guard plus, on the retry side, the in-flight and `retry pending` checks. During the observation week the timer runs with a `--dry-run` drop-in; removing that drop-in is an operator decision.
 
 The service requires a GitHub token in its environment. Systemd user units do **not** inherit your shell/direnv env, so create `~/.config/bridge/dispatch.env` (referenced by the service's `EnvironmentFile=`) containing at least:
 ```
