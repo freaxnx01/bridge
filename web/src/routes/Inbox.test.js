@@ -1,6 +1,8 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/svelte'
-import { writable } from 'svelte/store'
+import { writable, get } from 'svelte/store'
+
+import { repoFilter, clearFilter } from '../lib/stores/repoFilter.js'
 
 vi.mock('../lib/stores/sse.js', () => ({
   sseEvent: { subscribe: (fn) => { fn(null); return () => {} } },
@@ -18,9 +20,12 @@ vi.mock('../lib/stores/inbox.js', () => ({
 }))
 
 const card = (over = {}) => ({
-  repo: 'freaxnx01/bridge', number: 412, title: 'fix(nav): x', url: 'u',
+  forge: 'github', repo: 'freaxnx01/bridge', number: 412, title: 'fix(nav): x', url: 'u',
   kind: 'human', reason: 'review blocked', since: '2026-11-11T10:00:00Z', ...over,
 })
+
+const cardA = (over = {}) => card({ repo: 'o/a', number: 1, title: 'card a', ...over })
+const cardB = (over = {}) => card({ repo: 'p/b', number: 2, title: 'card b', ...over })
 
 async function renderInbox(data, error = null) {
   inbox.set(data)
@@ -34,6 +39,43 @@ describe('Inbox', () => {
     vi.clearAllMocks()
     inbox.set(null)
     inboxError.set(null)
+    clearFilter()
+  })
+
+  describe('repo filter', () => {
+    it('keeps only the selected repos cards', async () => {
+      repoFilter.set({ forge: '', owner: '', repos: ['github:o/a'] })
+      await renderInbox({ cards: [cardA(), cardB()], waiting: [], parked: [] })
+
+      expect(screen.getByText('card a')).toBeTruthy()
+      expect(screen.queryByText('card b')).toBeNull()
+    })
+
+    it('applies a forge and owner filter to waiting lines and parked cards too', async () => {
+      repoFilter.set({ forge: 'github', owner: 'p', repos: [] })
+      await renderInbox({
+        cards: [cardA(), cardB()],
+        waiting: [cardA({ number: 3, kind: 'wait', reason: 'running' }), cardB({ number: 4, kind: 'wait', reason: 'running' })],
+        parked: [cardA({ number: 5, kind: 'parked', reason: 'parked' }), cardB({ number: 6, kind: 'parked', reason: 'parked' })],
+      })
+
+      expect(screen.queryByText('card a')).toBeNull()
+      expect(screen.getByText('card b')).toBeTruthy()
+      expect(screen.queryByText('a#3')).toBeNull()
+      expect(screen.getByText('b#4')).toBeTruthy()
+      expect(screen.getByRole('button', { name: /Parked \(1\)/ })).toBeTruthy()
+    })
+
+    it('offers to clear the filter when it hides everything', async () => {
+      repoFilter.set({ forge: '', owner: '', repos: ['github:gone/away'] })
+      await renderInbox({ cards: [cardA()], waiting: [], parked: [] })
+
+      expect(screen.getByText('Nothing for the selected repos.')).toBeTruthy()
+      expect(screen.queryByText('Nothing needs you.')).toBeNull()
+
+      await fireEvent.click(screen.getByRole('button', { name: '✕ clear filter' }))
+      expect(get(repoFilter)).toEqual({ forge: '', owner: '', repos: [] })
+    })
   })
 
   it('shows the empty state and still lists what is waiting', async () => {

@@ -9,7 +9,7 @@
   import { pipeline } from './lib/stores/pipeline.js';
   import { inbox, loadInbox, startInboxPolling } from './lib/stores/inbox.js';
   import { repos, loadRepos } from './lib/stores/repos.js';
-  import { repoFilter, initRepoFilter, repoKey } from './lib/stores/repoFilter.js';
+  import { repoFilter, initRepoFilter, repoKey, matches } from './lib/stores/repoFilter.js';
   import { now } from './lib/stores/now.js';
   import { requestToken } from './lib/stores/tokenPrompt.js';
   import { staleSourceCount } from './lib/freshness.js';
@@ -18,6 +18,7 @@
   let area = $state('inbox');
 
   const staleCount = $derived(staleSourceCount($pipeline, $now));
+  const inboxCount = $derived(($inbox?.cards ?? []).filter((card) => matches($repoFilter, card)).length);
 
   // Every item the current tab can show, so the dropdown can put a count next
   // to each repo.
@@ -58,7 +59,7 @@
   onnavigate={(next) => (area = next)}
   {staleCount}
   dispatchPaused={$pipeline?.dispatchPaused ?? false}
-  inboxCount={$inbox?.cards?.length ?? 0}
+  {inboxCount}
   onToken={() => requestToken()}
 />
 

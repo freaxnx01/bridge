@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/svelte'
 import { writable } from 'svelte/store'
+import { repoFilter, clearFilter } from './lib/stores/repoFilter.js'
 
 // jsdom has no EventSource, which the real SSE store builds on import.
 vi.mock('./lib/stores/sse.js', () => ({
@@ -29,10 +30,27 @@ vi.mock('./lib/stores/inbox.js', () => ({
   loadIssueDetail: vi.fn(),
 }))
 
+// The real initRepoFilter would re-seed the store from the URL on mount and
+// overwrite the filter a test set up.
+vi.mock('./lib/stores/repoFilter.js', async (importOriginal) => ({
+  ...(await importOriginal()),
+  initRepoFilter: vi.fn(() => () => {}),
+}))
+
+vi.mock('./lib/stores/repos.js', async () => {
+  const { writable } = await import('svelte/store')
+  return { repos: writable([]), loadRepos: vi.fn() }
+})
+
+const card = (number, repo = 'o/r') => ({
+  forge: 'github', repo, number, title: 't', url: 'u', kind: 'human', reason: 'bug', since: '2026-11-11T10:00:00Z',
+})
+
 describe('App', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     inbox.set(null)
+    clearFilter()
   })
 
   it('lands on the Inbox view', async () => {
@@ -50,11 +68,18 @@ describe('App', () => {
   })
 
   it('shows the inbox card count in the header', async () => {
-    const card = (number) => ({ repo: 'o/r', number, title: 't', url: 'u', kind: 'human', reason: 'bug', since: '2026-11-11T10:00:00Z' })
     inbox.set({ cards: [card(1), card(2)], waiting: [], parked: [] })
     const { default: App } = await import('./App.svelte')
     render(App)
     expect(document.querySelector('.badge').textContent).toBe('2')
+  })
+
+  it('counts only the cards matching the repo filter in the header badge', async () => {
+    inbox.set({ cards: [card(1), card(2, 'p/b')], waiting: [], parked: [] })
+    repoFilter.set({ forge: '', owner: '', repos: ['github:o/r'] })
+    const { default: App } = await import('./App.svelte')
+    render(App)
+    expect(document.querySelector('.badge').textContent).toBe('1')
   })
 
   it('keeps the Architecture section reachable via the nav with the inlined SVG', async () => {
