@@ -3,7 +3,9 @@
   import Column from '../lib/components/Column.svelte';
   import RunningCard from '../lib/components/RunningCard.svelte';
   import IssueCard from '../lib/components/IssueCard.svelte';
+  import FilterEmpty from '../lib/components/FilterEmpty.svelte';
   import { authedPost, ensureToken } from '../lib/auth.js';
+  import { repoFilter, matches, isFiltered } from '../lib/stores/repoFilter.js';
   import { oldestSource, ageSeconds, formatAge } from '../lib/freshness.js';
   import { loadPipeline, startPipelinePolling, pipeline, pipelineError } from '../lib/stores/pipeline.js';
   import { now } from '../lib/stores/now.js';
@@ -34,13 +36,23 @@
   const runningLoading = $derived(!board || !runningSource);
   const issuesLoading = $derived(!board || !issuesSource);
 
-  const running = $derived(splitRunning(board?.running, $now));
-
-  const needsEnrichment = $derived(board?.needsEnrichment ?? []);
+  const running = $derived(splitRunning(mine(board?.running), $now));
+  const ready = $derived(mine(board?.ready));
+  const held = $derived(mine(board?.held));
+  const needsEnrichment = $derived(mine(board?.needsEnrichment));
+  const hiddenByFilter = $derived(
+    isFiltered($repoFilter) &&
+      running.active.length + running.idle.length + running.stuck.length +
+        ready.length + held.length + needsEnrichment.length === 0,
+  );
   const shownEnrichment = $derived(enrichExpanded ? needsEnrichment : needsEnrichment.slice(0, VISIBLE_ENRICH));
   const hiddenEnrichment = $derived(needsEnrichment.length - shownEnrichment.length);
 
   const errors = $derived((board?.errors ?? []).filter((e) => !dismissed.includes(e)));
+
+  function mine(list) {
+    return (list ?? []).filter((card) => matches($repoFilter, card));
+  }
 
   // Repos on a forge the board has no client for: a standing fact, not a
   // failure, so they get one muted line per forge and no dismiss.
@@ -85,6 +97,9 @@
     <p class="note">⏸ Dispatch paused: ready issues are not started automatically.</p>
   {/if}
 
+  {#if hiddenByFilter}
+    <FilterEmpty />
+  {:else}
   <div class="columns">
     <Column
       title="RUNNING NOW"
@@ -138,7 +153,7 @@
 
     <Column
       title="READY TO DISPATCH"
-      count={board?.ready.length ?? null}
+      count={board ? ready.length : null}
       source={issuesSource}
       now={$now}
       loading={issuesLoading}
@@ -149,19 +164,19 @@
       onretry={loadPipeline}
     >
       <ul class="cards">
-        {#each board.ready as card (issueKey(card))}
+        {#each ready as card (issueKey(card))}
           <IssueCard {card} action="dispatch" />
         {/each}
       </ul>
       {#snippet extra()}
-        {#if board.held.length > 0}
+        {#if held.length > 0}
           <div class="held">
             <button type="button" class="collapse" aria-expanded={heldOpen} onclick={() => (heldOpen = !heldOpen)}>
-              {heldOpen ? '▾' : '▸'} Held · {board.held.length} <span class="muted">(milestone, open PR, attempts)</span>
+              {heldOpen ? '▾' : '▸'} Held · {held.length} <span class="muted">(milestone, open PR, attempts)</span>
             </button>
             {#if heldOpen}
               <ul class="cards">
-                {#each board.held as card (issueKey(card))}
+                {#each held as card (issueKey(card))}
                   <IssueCard {card} />
                 {/each}
               </ul>
@@ -173,7 +188,7 @@
 
     <Column
       title="NEEDS ENRICHMENT"
-      count={board?.needsEnrichment.length ?? null}
+      count={board ? needsEnrichment.length : null}
       source={issuesSource}
       now={$now}
       loading={issuesLoading}
@@ -194,6 +209,7 @@
       {/if}
     </Column>
   </div>
+  {/if}
 
   {#if skipped.length > 0}
     <div class="skipped" role="note">

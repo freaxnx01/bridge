@@ -2,7 +2,9 @@
   import InboxCard from '../lib/components/InboxCard.svelte';
   import IssueDetail from '../lib/components/IssueDetail.svelte';
   import WaitLine from '../lib/components/WaitLine.svelte';
+  import FilterEmpty from '../lib/components/FilterEmpty.svelte';
   import { inbox, inboxError } from '../lib/stores/inbox.js';
+  import { repoFilter, matches, isFiltered } from '../lib/stores/repoFilter.js';
   import { now } from '../lib/stores/now.js';
 
   let parkedOpen = $state(false);
@@ -10,10 +12,17 @@
 
   const data = $derived($inbox);
   const loadError = $derived(data ? null : $inboxError);
-  const cards = $derived(data?.cards ?? []);
-  const waiting = $derived(data?.waiting ?? []);
-  const parked = $derived(data?.parked ?? []);
+  const cards = $derived(mine(data?.cards));
+  const waiting = $derived(mine(data?.waiting));
+  const parked = $derived(mine(data?.parked));
   const errors = $derived(Object.entries(data?.errors ?? {}));
+  const hiddenByFilter = $derived(
+    isFiltered($repoFilter) && cards.length === 0 && waiting.length === 0 && parked.length === 0,
+  );
+
+  function mine(list) {
+    return (list ?? []).filter((card) => matches($repoFilter, card));
+  }
 
   function cardKey(card) {
     return `${card.repo}#${card.number}`;
@@ -31,6 +40,9 @@
     <p class="load-error" role="alert">{loadError}</p>
   {/if}
 
+  {#if hiddenByFilter}
+    <FilterEmpty />
+  {:else}
   <section class="needs">
     {#if cards.length === 0}
       <p class="empty">Nothing needs you.</p>
@@ -71,6 +83,7 @@
       <p class="warn" role="status">⚠ Could not read comments: {issueRef(key)} — {message}</p>
     {/each}
   </section>
+  {/if}
 
   {#if selected}
     <IssueDetail repo={selected.repo} number={selected.number} onclose={() => (selected = null)} />

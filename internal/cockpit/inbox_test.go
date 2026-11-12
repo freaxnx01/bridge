@@ -355,3 +355,19 @@ func TestBuildIssueDetail_RunsNewestFirst(t *testing.T) {
 		t.Errorf("body %s, want nil labels marshalled as []", raw)
 	}
 }
+
+func TestBuildInbox_Card_CarriesForge(t *testing.T) {
+	i := inboxIssue(1, dispatch.LabelAIReviewBlocked)
+	_, c := only(t, buildInbox(inboxRepo([]forge.Issue{i}, nil, nil)))
+
+	if c.Forge != "github" {
+		t.Errorf("Forge = %q, want github", c.Forge)
+	}
+	raw, err := json.Marshal(c)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(raw), `"forge":"github"`) {
+		t.Errorf("body %s, want a forge field", raw)
+	}
+}

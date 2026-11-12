@@ -9,6 +9,7 @@ vi.mock('../lib/stores/sse.js', () => ({
 import Pipeline from './Pipeline.svelte'
 import { pipeline, pipelineError } from '../lib/stores/pipeline.js'
 import { tokenPrompt } from '../lib/stores/tokenPrompt.js'
+import { repoFilter, clearFilter } from '../lib/stores/repoFilter.js'
 
 const iso = (s) => new Date(Date.now() - s * 1000).toISOString()
 
@@ -52,7 +53,59 @@ describe('Pipeline', () => {
     pipelineError.set(null)
     pipeline.set(board())
     tokenPrompt.set(null)
+    clearFilter()
     stubFetch((url) => (url === '/api/pipeline' ? { status: 200, body: board() } : { status: 202, body: {} }))
+  })
+
+  describe('repo filter', () => {
+    const issue = (repo, number, over = {}) => ({ forge: 'github', repo, number, title: `t${number}`, url: `u${number}`, labels: [], ...over })
+    const twoRepos = () => board({
+      running: [
+        { kind: 'pipeline', forge: 'github', repo: 'o/a', title: 'ci', status: 'in_progress', since: iso(60) },
+        { kind: 'pipeline', forge: 'github', repo: 'p/b', title: 'ci', status: 'in_progress', since: iso(60) },
+      ],
+      ready: [issue('o/a', 1), issue('p/b', 2)],
+      held: [issue('o/a', 3, { reason: 'open PR' }), issue('p/b', 4, { reason: 'open PR' })],
+      needsEnrichment: [issue('o/a', 5), issue('p/b', 6)],
+    })
+
+    it('keeps only the selected repos items in every column', async () => {
+      pipeline.set(twoRepos())
+      repoFilter.set({ forge: '', owner: '', repos: ['github:o/a'] })
+      render(Pipeline)
+
+      expect(screen.getByText(/RUNNING NOW · 1/)).toBeTruthy()
+      expect(screen.getByText(/READY TO DISPATCH · 1/)).toBeTruthy()
+      expect(screen.getByText(/NEEDS ENRICHMENT · 1/)).toBeTruthy()
+      expect(screen.getByText(/#1\b/)).toBeTruthy()
+      expect(screen.queryByText(/#2\b/)).toBeNull()
+      expect(screen.queryByText(/#6\b/)).toBeNull()
+
+      await fireEvent.click(screen.getByRole('button', { name: /Held · 1/ }))
+      expect(screen.getByText(/#3\b/)).toBeTruthy()
+      expect(screen.queryByText(/#4\b/)).toBeNull()
+    })
+
+    it('counts the hidden needs-enrichment cards after filtering', () => {
+      const many = [...Array(12)].map((_, i) => issue('o/a', 100 + i))
+      pipeline.set(board({ needsEnrichment: [...many, issue('p/b', 200), issue('p/b', 201), issue('p/b', 202)] }))
+      repoFilter.set({ forge: 'github', owner: 'o', repos: [] })
+      render(Pipeline)
+
+      expect(screen.getByRole('button', { name: 'show 2 more' })).toBeTruthy()
+    })
+
+    it('offers to clear the filter when it hides everything', async () => {
+      pipeline.set(twoRepos())
+      repoFilter.set({ forge: '', owner: '', repos: ['github:gone/away'] })
+      render(Pipeline)
+
+      expect(screen.getByText('Nothing for the selected repos.')).toBeTruthy()
+      expect(screen.queryByText(/RUNNING NOW/)).toBeNull()
+
+      await fireEvent.click(screen.getByRole('button', { name: '✕ clear filter' }))
+      expect(get(repoFilter)).toEqual({ forge: '', owner: '', repos: [] })
+    })
   })
   afterEach(() => vi.unstubAllGlobals())
 

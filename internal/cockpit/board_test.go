@@ -220,3 +220,44 @@ func TestBuildBoard_EnrichmentOngoing_CardCarriesIssueURL(t *testing.T) {
 		t.Errorf("%+v", b.Running)
 	}
 }
+
+func TestBuildBoard_RunningCards_CarryForge(t *testing.T) {
+	ado := RepoData{Forge: "ado", Owner: "p", Name: "s", Path: "/r/s"}
+	pipelineRepo := func() Input {
+		rd := repo(issue(7, dispatch.LabelAIImplement))
+		rd.Runs = []forge.WorkflowRun{run("in_progress", "issues")}
+		return Input{Repos: []RepoData{rd}}
+	}
+	tests := []struct {
+		name string
+		in   Input
+		want string
+	}{
+		{"pipeline run", pipelineRepo(), "github"},
+		{"enrichment", Input{Repos: []RepoData{repo(issue(1, LabelEnrichmentOngoing))}}, "github"},
+		{"session in an ado repo", Input{Repos: []RepoData{ado}, Sessions: []agentview.Session{
+			{CWD: "/r/s/sub", Name: "n", StartedAt: t0},
+		}}, "ado"},
+		{"session outside every repo", Input{Repos: []RepoData{ado}, Sessions: []agentview.Session{
+			{CWD: "/tmp", Name: "n", StartedAt: t0},
+		}}, ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := BuildBoard(tc.in)
+			if len(b.Running) != 1 {
+				t.Fatalf("Running = %+v, want one card", b.Running)
+			}
+			if b.Running[0].Forge != tc.want {
+				t.Errorf("Forge = %q, want %q", b.Running[0].Forge, tc.want)
+			}
+			raw, err := json.Marshal(b.Running[0])
+			if err != nil {
+				t.Fatal(err)
+			}
+			if got := strings.Contains(string(raw), `"forge"`); got != (tc.want != "") {
+				t.Errorf("body %s, want a forge field: %v", raw, tc.want != "")
+			}
+		})
+	}
+}
