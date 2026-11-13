@@ -102,6 +102,12 @@ type JournalDecision struct {
 	LaneReason  string `json:"lane_reason,omitempty"`
 	Decision    string `json:"decision"`
 	Reason      string `json:"reason,omitempty"`
+	// Rank, RankReason and Ladder are the candidate's place in the tick's order
+	// and why it is there. They are recorded rather than re-derived: a week-old
+	// record has to explain itself from labels that have since moved on.
+	Rank       int    `json:"rank,omitempty"`
+	RankReason string `json:"rank_reason,omitempty"`
+	Ladder     Ladder `json:"ladder,omitzero"`
 }
 
 // AppendJournal writes rec as one line to dir's day file for rec.At (UTC) and

@@ -591,3 +591,27 @@ func writeDispatchConfig(t *testing.T, body string) {
 		t.Fatal(err)
 	}
 }
+
+// The journal is what the cockpit's tick detail reads back, so a recorded
+// decision has to answer "why this one first?" on its own — re-deriving the
+// ladder from a week-old record is not possible.
+func TestJournalDecisions_CarryRankAndLadder(t *testing.T) {
+	got := journalDecisions([]dispatch.Decision{{
+		Candidate: dispatch.Candidate{Repo: "bridge", Issue: forge.Issue{Number: 41}},
+		Dispatch:  true,
+		Rank: dispatch.Rank{
+			Position: 2, Reason: "size: s vs m",
+			Ladder: dispatch.Ladder{Type: "feat", Size: "s"},
+		},
+	}}, true)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d rows", len(got))
+	}
+	if got[0].Rank != 2 || got[0].RankReason != "size: s vs m" {
+		t.Errorf("got %+v", got[0])
+	}
+	if got[0].Ladder.Type != "feat" || got[0].Ladder.Size != "s" {
+		t.Errorf("ladder = %+v", got[0].Ladder)
+	}
+}

@@ -95,6 +95,9 @@ func journalDecisions(ds []dispatch.Decision, tickDryRun bool) []dispatch.Journa
 			LaneReason:  c.LaneReason,
 			Decision:    journalDecisionStatus(d, tickDryRun),
 			Reason:      d.Reason,
+			Rank:        d.Rank.Position,
+			RankReason:  d.Rank.Reason,
+			Ladder:      d.Rank.Ladder,
 		})
 	}
 	return out
