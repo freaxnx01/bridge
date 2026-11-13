@@ -84,7 +84,7 @@ func TestResolveGateWithFailsClosed(t *testing.T) {
 		{Name: "auto", Repos: []string{"game-*"}, Autonomous: true},
 		{Name: "hitl", Repos: []string{"*"}},
 	}
-	repos := []repoInput{
+	repos := []dispatch.RepoInput{
 		{Forge: "github", Owner: "freaxnx01", Name: "game-wired"},
 		{Forge: "github", Owner: "freaxnx01", Name: "game-unwired"},
 		{Forge: "github", Owner: "freaxnx01", Name: "game-absent"},
@@ -155,7 +155,7 @@ func TestResolveGateWithServesFromCacheWithoutFetching(t *testing.T) {
 	}
 
 	gate := resolveGateWith(context.Background(),
-		[]repoInput{{Forge: "github", Owner: "freaxnx01", Name: "game-wired"}},
+		[]dispatch.RepoInput{{Forge: "github", Owner: "freaxnx01", Name: "game-wired"}},
 		lanes, now, fetch, path)
 
 	if !gate["game-wired"] {

@@ -127,49 +127,6 @@ func decisionsJSON(ds []dispatch.Decision) []decisionJSON {
 	return out
 }
 
-// repoInput is one repo's fetched state, kept as a plain struct so
-// collectCandidates stays testable without a network.
-type repoInput struct {
-	Forge      string
-	Owner      string
-	Name       string
-	Issues     []forge.Issue
-	Milestones []forge.Milestone
-	PRs        []forge.PullRequest
-}
-
-// collectCandidates filters each repo's issues to the eligible ones.
-// Non-GitHub repos are skipped silently: ai-implement runs on GitHub Actions,
-// so there is no pipeline to dispatch to elsewhere.
-func collectCandidates(repos []repoInput) []dispatch.Candidate {
-	var out []dispatch.Candidate
-	for _, r := range repos {
-		if r.Forge != "github" {
-			continue
-		}
-		active := dispatch.ActiveMilestone(r.Milestones)
-		due := milestoneDue(r.Milestones, active)
-		for _, i := range r.Issues {
-			if ok, _ := dispatch.Eligible(i, active, r.PRs); !ok {
-				continue
-			}
-			out = append(out, dispatch.Candidate{
-				Issue: i, Owner: r.Owner, Repo: r.Name, MilestoneDue: due,
-			})
-		}
-	}
-	return out
-}
-
-func milestoneDue(ms []forge.Milestone, title string) time.Time {
-	for _, m := range ms {
-		if m.Title == title {
-			return m.DueOn
-		}
-	}
-	return time.Time{}
-}
-
 var (
 	dispatchDryRun    bool
 	dispatchJSON      bool
@@ -257,45 +214,6 @@ func measureWindowUSD(ctx context.Context, cfg dispatch.Config, from, to time.Ti
 	return usage.SumWindow(turns, pricing, from, to) + ledger.SumSince(from), true
 }
 
-// tickTiming resolves one instant against the configured schedule: which
-// window covers it, what the budget rung is guarding, the span to measure
-// usage over, and which window occurrence the nightly counter belongs to.
-type tickTiming struct {
-	Now             time.Time
-	Window          dispatch.Window
-	InWindow        bool
-	RungOn          bool
-	Guard           time.Time // the instant the rung protects
-	MeasureFrom     time.Time
-	NightCapApplies bool
-	NightStart      time.Time
-}
-
-// resolveTiming is the single place the schedule is interpreted, so a tick and
-// a `status` read can never disagree about which bounds are in force.
-func resolveTiming(cfg dispatch.Config, now time.Time) tickTiming {
-	t := tickTiming{Now: now}
-	t.Window, t.InWindow = cfg.Schedule.InWindow(now)
-
-	guard, on := cfg.Schedule.RungGuard(now, cfg.Budget.WindowHours)
-	t.RungOn = on
-	t.Guard = guard
-	if on {
-		// Measure the quota window that ends at the guarded instant. Inside a
-		// rung window that is now; in the pre-dawn shoulder it is the coming
-		// handover, so only spend still inside the window at that point counts.
-		t.MeasureFrom = guard.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
-	}
-
-	// The nightly ceiling bounds unattended spend, so it belongs to a window
-	// whose rung is off — and its counter resets at that window's own start.
-	if t.InWindow && !t.Window.BudgetRung {
-		t.NightCapApplies = true
-		t.NightStart = t.Window.StartOf(now)
-	}
-	return t
-}
-
 // runDispatch runs one tick and journals it. Every exit path of runTick lands
 // in exactly one record, so the cockpit digest can account for every slot —
 // and journaling never changes the tick's own result.
@@ -326,7 +244,7 @@ func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 	}
 
 	now := time.Now()
-	timing := resolveTiming(cfg, now)
+	timing := dispatch.ResolveTiming(cfg, now)
 	rec.At = now
 	rec.LanesInWindow = lanesInWindow(cfg, now)
 
@@ -335,7 +253,7 @@ func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 	// the tick stops only when no lane acts at all — and that question is
 	// answered from the config alone, before any network call, which keeps an
 	// out-of-window tick the free no-op it was before lanes.
-	if dispatchAuto && !anyLaneActs(cfg, now) {
+	if dispatchAuto && !dispatch.AnyLaneActs(cfg, now) {
 		fmt.Fprintln(cmd.OutOrStdout(), "outside dispatch window — no lane acts right now")
 		rec.Outcome = dispatch.OutcomeOutsideWindow
 		return nil
@@ -369,19 +287,19 @@ func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 		lane, _ := dispatch.ResolveLane(cfg.Lanes, repo, gate)
 		return lane.Autonomous
 	}
-	openByRepo, globalOpen := countOpenAgentPRs(repos, autonomous)
+	openByRepo, globalOpen := dispatch.CountOpenAgentPRs(repos, autonomous)
 
 	decisions := dispatch.ApplyCaps(acting, cfg,
 		dispatch.Counts{
 			OpenPRsByRepo:     openByRepo,
 			GlobalOpen:        globalOpen,
-			DispatchedTonight: state.DispatchesSince(nightStartForReport(cfg, timing, now)),
+			DispatchedTonight: state.DispatchesSince(dispatch.NightStartForReport(cfg, timing, now)),
 			NightCapApplies:   timing.NightCapApplies,
-			DispatchedByLane:  laneCounts(state, cfg, now),
+			DispatchedByLane:  dispatch.LaneCounts(state, cfg, now),
 		},
 		budget,
 	)
-	decisions = mergeInOrder(ordered, decisions, outOfWindow)
+	decisions = dispatch.MergeInOrder(ordered, decisions, outOfWindow)
 	// The retry pass's own skips never reached ApplyCaps, so they are not in
 	// `ordered` either. They are reported in every mode and applied in none.
 	decisions = append(decisions, retrySkips...)
@@ -408,12 +326,12 @@ func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 // PRs. Mirror the error handling in cmd/bridge/issues.go: keep the first
 // error, skip the failing repo, keep going — one unreachable repo must not
 // stop the whole tick.
-func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
+func fetchRepoInputs(ctx context.Context) ([]dispatch.RepoInput, error) {
 	repos, err := discoverAllRoots()
 	if err != nil {
 		return nil, err
 	}
-	var out []repoInput
+	var out []dispatch.RepoInput
 	var firstErr error
 	githubRepos, clientsResolved := 0, 0
 	for _, r := range repos {
@@ -426,7 +344,7 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 			continue
 		}
 		clientsResolved++
-		in := repoInput{Forge: r.Forge, Owner: r.Owner, Name: r.Name}
+		in := dispatch.RepoInput{Forge: r.Forge, Owner: r.Owner, Name: r.Name}
 		if in.Issues, err = gh.ListOpenIssues(ctx, r.Owner, r.Name); err != nil {
 			if firstErr == nil {
 				firstErr = err
@@ -459,21 +377,6 @@ func fetchRepoInputs(ctx context.Context) ([]repoInput, error) {
 	return out, nil
 }
 
-// anyLaneActs reports whether any lane acts at now. The implicit default lane
-// is always considered: a repo no configured lane claims still dispatches in
-// it, on the top-level schedule.
-func anyLaneActs(cfg dispatch.Config, now time.Time) bool {
-	if dispatch.DefaultLane().InWindow(cfg.Schedule, now) {
-		return true
-	}
-	for _, l := range cfg.Lanes {
-		if l.InWindow(cfg.Schedule, now) {
-			return true
-		}
-	}
-	return false
-}
-
 // partitionForTick splits candidates into those whose lane acts now and skip
 // decisions for the rest. A manual tick skips the split entirely: `dispatch
 // now` was never window-gated, and partitioning it would turn a documented
@@ -485,81 +388,10 @@ func partitionForTick(ordered []dispatch.Candidate, cfg dispatch.Config, now tim
 	return dispatch.PartitionByWindow(ordered, cfg.Schedule, now)
 }
 
-// mergeInOrder puts the decision groups back into the order Order produced.
-// ApplyCaps only ever sees the acting candidates, so appending the
-// out-of-window skips afterwards would render --dry-run — the review surface —
-// out of ladder order.
-func mergeInOrder(ordered []dispatch.Candidate, groups ...[]dispatch.Decision) []dispatch.Decision {
-	type key struct {
-		repo   string
-		number int
-	}
-	byKey := make(map[key]dispatch.Decision)
-	for _, g := range groups {
-		for _, d := range g {
-			byKey[key{d.Candidate.Repo, d.Candidate.Issue.Number}] = d
-		}
-	}
-	out := make([]dispatch.Decision, 0, len(byKey))
-	for _, c := range ordered {
-		if d, ok := byKey[key{c.Repo, c.Issue.Number}]; ok {
-			out = append(out, d)
-		}
-	}
-	return out
-}
-
-// assignLanes resolves each candidate's lane in place, before ordering, so the
-// cap walk and the label write read the same decision.
-func assignLanes(cs []dispatch.Candidate, lanes []dispatch.Lane, gate dispatch.GateState) {
-	for i := range cs {
-		cs[i].Lane, cs[i].LaneReason = dispatch.ResolveLane(lanes, cs[i].Repo, gate)
-	}
-}
-
-// countOpenAgentPRs counts open PRs that close one of the repo's own issues.
-// Only those are pipeline output, so a hand-written PR never consumes a slot.
-//
-// An autonomous lane's PRs are left out of the global total entirely: that cap
-// is the operator's review capacity, and nobody reviews them. They still count
-// per repo, where the bound is conflicting concurrent PRs rather than review.
-func countOpenAgentPRs(repos []repoInput, autonomous func(repo string) bool) (map[string]int, int) {
-	byRepo := make(map[string]int, len(repos))
-	total := 0
-	for _, r := range repos {
-		// Resolved once per repo: the answer cannot change within one repo, and
-		// ResolveLane walks every lane's globs.
-		skipGlobal := autonomous(r.Name)
-		for _, pr := range r.PRs {
-			for _, i := range r.Issues {
-				if dispatch.ClosesIssue(pr.Body, i.Number) {
-					byRepo[r.Name]++
-					if !skipGlobal {
-						total++
-					}
-					break
-				}
-			}
-		}
-	}
-	return byRepo, total
-}
-
-// laneCounts reads each configured lane's spent counter for the occurrence it
-// is currently in. The implicit default lane is bounded by the nightly cap, not
-// by a lane ceiling, so it needs no entry here.
-func laneCounts(state dispatch.State, cfg dispatch.Config, now time.Time) map[string]int {
-	out := make(map[string]int, len(cfg.Lanes))
-	for _, l := range cfg.Lanes {
-		out[l.Name] = state.DispatchesInLane(l.Name, l.WindowStart(cfg.Schedule, now))
-	}
-	return out
-}
-
 // applyDecisions writes the one label the dispatcher owns, then persists the
 // ledger and the nightly counter. It never writes agent:* or model:* — model
 // choice belongs to agent-workflow's classify-task.sh.
-func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing tickTiming, cfg dispatch.Config) error {
+func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing dispatch.Timing, cfg dispatch.Config) error {
 	_, err := applyDecisionsBooked(ctx, ds, state, timing, cfg)
 	return err
 }
@@ -567,7 +399,7 @@ func applyDecisions(ctx context.Context, ds []dispatch.Decision, state dispatch.
 // applyDecisionsBooked is applyDecisions plus the runs it booked. The journal
 // needs that list to tell a dispatch that happened from one the tick only
 // meant to make: booking is the same line the ledger draws.
-func applyDecisionsBooked(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing tickTiming, cfg dispatch.Config) ([]usage.Run, error) {
+func applyDecisionsBooked(ctx context.Context, ds []dispatch.Decision, state dispatch.State, timing dispatch.Timing, cfg dispatch.Config) ([]usage.Run, error) {
 	var runs []usage.Run
 	var dispatchErr error
 
@@ -717,7 +549,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 	}
 
 	now := time.Now()
-	timing := resolveTiming(cfg, now)
+	timing := dispatch.ResolveTiming(cfg, now)
 	measureFrom := timing.MeasureFrom
 	if measureFrom.IsZero() {
 		// Unguarded right now, but the operator still wants a reading, so show
@@ -761,7 +593,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 	// "how many did it dispatch overnight?" is a fair question at 09:00, and
 	// answering n/a made the number unrecoverable from the CLI. Only the label
 	// changes with whether the cap is currently in force.
-	nightCount := state.DispatchesSince(nightStartForReport(cfg, timing, now))
+	nightCount := state.DispatchesSince(dispatch.NightStartForReport(cfg, timing, now))
 	if timing.NightCapApplies {
 		fmt.Fprintf(w, "dispatched tonight: %d/%d\n", nightCount, cfg.Limits.MaxDispatchesPerNight)
 	} else {
@@ -779,7 +611,7 @@ func runDispatchStatus(cmd *cobra.Command, _ []string) error {
 		fmt.Fprintf(w, "budget window: %gh — used $%.2f of $%.2f (%.0f%%)\n",
 			cfg.Budget.WindowHours, budget.UsedUSD, budget.LimitUSD, pct)
 	}
-	fmt.Fprintf(w, "budget rung: %s\n", rungLabel(timing))
+	fmt.Fprintf(w, "budget rung: %s\n", dispatch.RungLabel(timing))
 	if state.LastTick.IsZero() {
 		fmt.Fprintln(w, "last tick: never")
 	} else {
@@ -825,42 +657,4 @@ func laneStatuses(cfg dispatch.Config, state dispatch.State, now time.Time) []la
 		})
 	}
 	return out
-}
-
-// nightStartForReport resolves the occurrence the nightly counter belongs to
-// for display. Inside an unattended window that is the tick's own boundary;
-// elsewhere it is the latest unattended window's start, so `status` can still
-// report what the last night spent instead of dropping the number.
-func nightStartForReport(cfg dispatch.Config, timing tickTiming, now time.Time) time.Time {
-	if !timing.NightStart.IsZero() {
-		return timing.NightStart
-	}
-	var latest time.Time
-	for _, w := range cfg.Schedule.Windows {
-		if w.BudgetRung {
-			continue
-		}
-		if s := w.StartOf(now); !s.IsZero() && (latest.IsZero() || s.After(latest)) {
-			latest = s
-		}
-	}
-	return latest
-}
-
-// rungLabel describes whether the budget rung is policing this moment, and
-// which window that decision came from.
-func rungLabel(t tickTiming) string {
-	switch {
-	case t.RungOn && t.InWindow && t.Window.BudgetRung:
-		return fmt.Sprintf("active (window %s-%s)", t.Window.From, t.Window.To)
-	case t.RungOn:
-		// The shoulder: still in an unguarded window, but close enough to the
-		// handover that this spend survives into the operator's quota window.
-		return fmt.Sprintf("active (reserving headroom for the %s handover)",
-			t.Guard.Format("15:04"))
-	case !t.InWindow:
-		return "inactive (outside every configured window)"
-	default:
-		return fmt.Sprintf("inactive (window %s-%s)", t.Window.From, t.Window.To)
-	}
 }

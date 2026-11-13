@@ -63,7 +63,7 @@ func lanesInWindow(cfg dispatch.Config, now time.Time) []string {
 }
 
 // repoNames renders the fetched repos as owner/name, in fetch order.
-func repoNames(repos []repoInput) []string {
+func repoNames(repos []dispatch.RepoInput) []string {
 	out := make([]string, 0, len(repos))
 	for _, r := range repos {
 		out = append(out, r.Owner+"/"+r.Name)

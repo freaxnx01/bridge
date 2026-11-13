@@ -80,7 +80,7 @@ func saveLaneGateCache(path string, c laneGateCache) error {
 //
 // Every failure path answers false: an unreadable policy must route work to a
 // human, never into unattended merge.
-func resolveGate(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, now time.Time) dispatch.GateState {
+func resolveGate(ctx context.Context, repos []dispatch.RepoInput, lanes []dispatch.Lane, now time.Time) dispatch.GateState {
 	return resolveGateWith(ctx, repos, lanes, now, fetchAgentWorkflow, laneGatePath())
 }
 
@@ -102,7 +102,7 @@ func fetchAgentWorkflow(ctx context.Context, owner, repo string) ([]byte, bool, 
 }
 
 // resolveGateWith is resolveGate with its fetcher and cache path injected.
-func resolveGateWith(ctx context.Context, repos []repoInput, lanes []dispatch.Lane, now time.Time,
+func resolveGateWith(ctx context.Context, repos []dispatch.RepoInput, lanes []dispatch.Lane, now time.Time,
 	fetch laneGateFetcher, cachePath string) dispatch.GateState {
 	gate := dispatch.GateState{}
 	cache := loadLaneGateCache(cachePath)

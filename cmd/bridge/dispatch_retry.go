@@ -22,7 +22,7 @@ type retryReader interface {
 // a re-dispatch can fix, and the skip rows for the ones it looked at and left
 // alone. Non-GitHub repos are skipped silently: only GitHub Actions posts the
 // run marker the decision reads.
-func collectRetries(ctx context.Context, gh retryReader, repos []repoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
+func collectRetries(ctx context.Context, gh retryReader, repos []dispatch.RepoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
 	var cands []dispatch.Candidate
 	var skips []dispatch.Decision
 	for _, r := range repos {
@@ -38,7 +38,7 @@ func collectRetries(ctx context.Context, gh retryReader, repos []repoInput, now 
 
 // retriesForRepo evaluates one repo's retry candidates. A repo with none costs
 // no API call at all — the label predicate decides that before any fetch.
-func retriesForRepo(ctx context.Context, gh retryReader, r repoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
+func retriesForRepo(ctx context.Context, gh retryReader, r dispatch.RepoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
 	var pending []forge.Issue
 	var skips []dispatch.Decision
 	for _, i := range r.Issues {
@@ -92,10 +92,10 @@ func retriesForRepo(ctx context.Context, gh retryReader, r repoInput, now time.T
 
 // retryCandidate builds the candidate for one retry issue, with the same repo
 // context collectCandidates gives a new dispatch so both go through one ladder.
-func retryCandidate(r repoInput, i forge.Issue, reason string) dispatch.Candidate {
+func retryCandidate(r dispatch.RepoInput, i forge.Issue, reason string) dispatch.Candidate {
 	return dispatch.Candidate{
 		Issue: i, Owner: r.Owner, Repo: r.Name,
-		MilestoneDue: milestoneDue(r.Milestones, dispatch.ActiveMilestone(r.Milestones)),
+		MilestoneDue: dispatch.MilestoneDue(r.Milestones, dispatch.ActiveMilestone(r.Milestones)),
 		Retry:        true, RetryReason: reason,
 	}
 }
@@ -111,9 +111,9 @@ func skipRetry(c dispatch.Candidate, reason string) dispatch.Decision {
 //
 // The second return is the retry rows that were decided before the caps ran —
 // they are reported, never applied.
-func tickCandidates(ctx context.Context, repos []repoInput, cfg dispatch.Config, gate dispatch.GateState, now time.Time, retryOnly bool) ([]dispatch.Candidate, []dispatch.Decision) {
+func tickCandidates(ctx context.Context, repos []dispatch.RepoInput, cfg dispatch.Config, gate dispatch.GateState, now time.Time, retryOnly bool) ([]dispatch.Candidate, []dispatch.Decision) {
 	retries, retrySkips := collectRetriesForTick(ctx, repos, now)
-	assignLanes(retries, cfg.Lanes, gate)
+	dispatch.AssignLanes(retries, cfg.Lanes, gate)
 	for i := range retrySkips {
 		retrySkips[i].Candidate.Lane, retrySkips[i].Candidate.LaneReason =
 			dispatch.ResolveLane(cfg.Lanes, retrySkips[i].Candidate.Repo, gate)
@@ -121,8 +121,8 @@ func tickCandidates(ctx context.Context, repos []repoInput, cfg dispatch.Config,
 	ordered := dispatch.Order(retries, cfg.RepoPriority)
 
 	if !retryOnly {
-		fresh := collectCandidates(repos)
-		assignLanes(fresh, cfg.Lanes, gate)
+		fresh := dispatch.CollectCandidates(repos)
+		dispatch.AssignLanes(fresh, cfg.Lanes, gate)
 		ordered = append(ordered, dispatch.Order(fresh, cfg.RepoPriority)...)
 	}
 	return ordered, retrySkips
@@ -131,7 +131,7 @@ func tickCandidates(ctx context.Context, repos []repoInput, cfg dispatch.Config,
 // collectRetriesForTick resolves the GitHub client the retry pass reads
 // through. Without one there is nothing to read, and passing a typed-nil
 // client as the interface would turn that into a nil dereference.
-func collectRetriesForTick(ctx context.Context, repos []repoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
+func collectRetriesForTick(ctx context.Context, repos []dispatch.RepoInput, now time.Time) ([]dispatch.Candidate, []dispatch.Decision) {
 	gh, ok := clientFor("github").(*forge.GithubClient)
 	if !ok || gh == nil {
 		return nil, nil

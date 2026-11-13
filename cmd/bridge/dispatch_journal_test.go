@@ -268,7 +268,7 @@ func TestDispatchJournalDir_UnderTheCacheRoot(t *testing.T) {
 }
 
 func TestRepoNames_OwnerSlashName(t *testing.T) {
-	got := repoNames([]repoInput{{Owner: "freaxnx01", Name: "bridge"}, {Owner: "freaxnx01", Name: "quotes"}})
+	got := repoNames([]dispatch.RepoInput{{Owner: "freaxnx01", Name: "bridge"}, {Owner: "freaxnx01", Name: "quotes"}})
 	if !equalStrings(got, []string{"freaxnx01/bridge", "freaxnx01/quotes"}) {
 		t.Errorf("got %v", got)
 	}
