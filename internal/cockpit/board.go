@@ -51,6 +51,14 @@ type IssueCard struct {
 	URL    string   `json:"url"`
 	Labels []string `json:"labels"`
 	Reason string   `json:"reason,omitempty"`
+	// Verdict is the live dispatch preview's answer for this card: "next" when
+	// the next acting tick would dispatch it, "skip" when a gate stops it, and
+	// empty when no preview covered it. VerdictReason carries the skip's reason,
+	// Lane the autonomy lane it resolved to, and LaneReason a downgrade.
+	Verdict       string `json:"verdict,omitempty"`
+	VerdictReason string `json:"verdictReason,omitempty"`
+	Lane          string `json:"lane,omitempty"`
+	LaneReason    string `json:"laneReason,omitempty"`
 }
 
 // SourceError records a data source that failed to refresh.
@@ -77,6 +85,9 @@ type Board struct {
 	IntervalsSeconds map[string]int       `json:"intervalsSeconds"` // same keys
 	Errors           []SourceError        `json:"errors"`
 	Skipped          []SkippedForge       `json:"skipped"` // forges with no client, one entry each
+	// Gates are the dispatcher's bounds as of the live preview, nil when there
+	// is none (no preview source, or it has not succeeded once yet).
+	Gates *dispatch.Gates `json:"gates,omitempty"`
 }
 
 // RepoData is the collected state of one repo. Comments holds the run-report
@@ -98,6 +109,9 @@ type Input struct {
 	Repos          []RepoData
 	Sessions       []agentview.Session
 	DispatchPaused bool
+	// Preview is the dispatcher's read-only verdict on the next acting tick,
+	// nil when none is available.
+	Preview *dispatch.Tick
 }
 
 // dated is a card plus the issue creation time it is sorted by.
@@ -131,8 +145,10 @@ func BuildBoard(in Input) Board {
 		ready = append(ready, classifyIssues(&cols, rd)...)
 		cols.running = append(cols.running, pipelineRuns(rd)...)
 	}
-	for _, c := range dispatch.Order(ready, nil) {
-		b.Ready = append(b.Ready, card(c.Issue, c.Owner+"/"+c.Repo, ""))
+	b.Ready = readyCards(ready, in.Preview)
+	if in.Preview != nil {
+		gates := in.Preview.Gates
+		b.Gates = &gates
 	}
 	b.Running = append(b.Running, cols.running...)
 	b.Running = append(b.Running, sessionCards(in)...)
@@ -140,6 +156,61 @@ func BuildBoard(in Input) Board {
 	b.Held = sortedCards(cols.held)
 	b.NeedsEnrichment = sortedCards(cols.needs)
 	return b
+}
+
+// readyCards builds the Ready column. With a preview it is the dispatcher's
+// own order, each card carrying the verdict the next acting tick would reach;
+// without one it is the board's ladder order and no verdicts. A Ready issue
+// the preview never saw — collected after it ran — keeps its place at the end
+// rather than disappearing from the column.
+func readyCards(ready []dispatch.Candidate, preview *dispatch.Tick) []IssueCard {
+	ordered := dispatch.Order(ready, nil)
+	if preview == nil {
+		out := make([]IssueCard, 0, len(ordered))
+		for _, c := range ordered {
+			out = append(out, card(c.Issue, c.Owner+"/"+c.Repo, ""))
+		}
+		return out
+	}
+
+	byKey := make(map[cardKey]dispatch.Candidate, len(ordered))
+	for _, c := range ordered {
+		byKey[cardKey{c.Owner + "/" + c.Repo, c.Issue.Number}] = c
+	}
+	out := make([]IssueCard, 0, len(ordered))
+	seen := make(map[cardKey]bool, len(ordered))
+	for _, d := range preview.Decisions {
+		k := cardKey{d.Candidate.Owner + "/" + d.Candidate.Repo, d.Candidate.Issue.Number}
+		c, ok := byKey[k]
+		if !ok || seen[k] {
+			continue
+		}
+		seen[k] = true
+		out = append(out, judged(card(c.Issue, k.repo, ""), d))
+	}
+	for _, c := range ordered {
+		if k := (cardKey{c.Owner + "/" + c.Repo, c.Issue.Number}); !seen[k] {
+			out = append(out, card(c.Issue, k.repo, ""))
+		}
+	}
+	return out
+}
+
+// cardKey identifies one issue across repos.
+type cardKey struct {
+	repo   string // "owner/name"
+	number int
+}
+
+// judged stamps a preview decision onto a card.
+func judged(c IssueCard, d dispatch.Decision) IssueCard {
+	c.Lane, c.LaneReason = d.Candidate.Lane.Name, d.Candidate.LaneReason
+	if d.Dispatch {
+		c.Verdict = "next"
+		return c
+	}
+	c.Verdict, c.VerdictReason = "skip", d.Reason
+	return c
 }
 
 func repoName(rd RepoData) string { return rd.Owner + "/" + rd.Name }

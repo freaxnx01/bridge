@@ -159,7 +159,51 @@ func cockpitSources(resolve clientResolver) cockpit.Sources {
 			state, err := dispatch.ReadState(dispatchStatePath())
 			return err == nil && state.Paused
 		},
+		Preview: previewTick,
 	}
+}
+
+// previewTick evaluates what the next acting dispatch tick would decide, with
+// no side effect of any kind: config and state are re-read each call (the
+// operator edits them while serve runs), and nothing is written back.
+//
+// The retry pass is left out on purpose — it costs a workflow-run listing and
+// a comment read per candidate, which an open board endpoint must not spend on
+// a 10-minute timer. Retries lead the real tick's order, so the preview is the
+// dispatch pass alone.
+func previewTick(ctx context.Context, repos []dispatch.RepoInput) (dispatch.Tick, error) {
+	cfg, err := dispatch.LoadConfig(dispatchConfigPath())
+	if err != nil {
+		return dispatch.Tick{}, fmt.Errorf("dispatch config: %w", err)
+	}
+	state, err := dispatch.ReadState(dispatchStatePath())
+	if err != nil {
+		return dispatch.Tick{}, fmt.Errorf("dispatch state: %w", err)
+	}
+
+	now := time.Now()
+	gate := resolveGate(ctx, repos, cfg.Lanes, now)
+	usedUSD, usedKnown := previewBudget(ctx, cfg, dispatch.NextActingInstant(cfg, now), now)
+	return dispatch.Evaluate(dispatch.TickInput{
+		Repos: repos, Config: cfg, State: state, Gate: gate,
+		UsedUSD: usedUSD, UsedKnown: usedKnown, Now: now, Mode: dispatch.GateNextWindow,
+	}), nil
+}
+
+// previewBudget measures the window the previewed tick would be guarded by.
+// Usage can only be read up to now, so a rung guarding a window that has not
+// started yet falls back to the plain trailing window — the same reading
+// `dispatch status` gives outside a guarded moment.
+func previewBudget(ctx context.Context, cfg dispatch.Config, at, now time.Time) (float64, bool) {
+	timing := dispatch.ResolveTiming(cfg, at)
+	if !timing.RungOn {
+		return 0, true
+	}
+	from := timing.MeasureFrom
+	if from.After(now) {
+		from = now.Add(-time.Duration(cfg.Budget.WindowHours * float64(time.Hour)))
+	}
+	return measureWindowUSD(ctx, cfg, from, now)
 }
 
 // pipelineHandler builds the Pipeline API on top of a running collector. ctx is

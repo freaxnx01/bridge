@@ -261,3 +261,99 @@ func TestBuildBoard_RunningCards_CarryForge(t *testing.T) {
 		})
 	}
 }
+
+// previewTick is a dispatch preview deciding the issues given, in the order
+// given, with the first one dispatching.
+func previewTick(ds ...dispatch.Decision) *dispatch.Tick {
+	return &dispatch.Tick{
+		Decisions: ds,
+		Gates:     dispatch.Gates{At: t0, WindowOpen: true, GlobalCap: 3},
+	}
+}
+
+func previewDecision(number int, dispatchIt bool, reason string) dispatch.Decision {
+	return dispatch.Decision{
+		Candidate: dispatch.Candidate{
+			Owner: "o", Repo: "r", Issue: issue(number),
+			Lane: dispatch.Lane{Name: "auto"},
+		},
+		Dispatch: dispatchIt,
+		Reason:   reason,
+		Rank:     dispatch.Rank{Position: number},
+	}
+}
+
+func TestBuildBoard_WithPreview_ReadyInPreviewOrderWithVerdicts(t *testing.T) {
+	b := BuildBoard(Input{
+		Repos: []RepoData{repo(issue(1), issue(2))},
+		Preview: previewTick(
+			previewDecision(2, true, ""),
+			previewDecision(1, false, "repo at WIP 1/1"),
+		),
+	})
+
+	if len(b.Ready) != 2 {
+		t.Fatalf("ready = %+v", b.Ready)
+	}
+	if b.Ready[0].Number != 2 || b.Ready[0].Verdict != "next" {
+		t.Errorf("first card = %+v", b.Ready[0])
+	}
+	if b.Ready[1].Number != 1 || b.Ready[1].Verdict != "skip" || b.Ready[1].VerdictReason != "repo at WIP 1/1" {
+		t.Errorf("second card = %+v", b.Ready[1])
+	}
+	if b.Ready[0].Lane != "auto" {
+		t.Errorf("lane = %q", b.Ready[0].Lane)
+	}
+	if b.Gates == nil || !b.Gates.WindowOpen {
+		t.Errorf("gates = %+v", b.Gates)
+	}
+}
+
+func TestBuildBoard_WithoutPreview_UnchangedOrderAndNoVerdicts(t *testing.T) {
+	b := build(repo(issue(2), issue(1)))
+
+	if len(b.Ready) != 2 {
+		t.Fatalf("ready = %+v", b.Ready)
+	}
+	// The board's own ladder order: oldest first, #1 created before #2.
+	if b.Ready[0].Number != 1 || b.Ready[1].Number != 2 {
+		t.Errorf("order = %d, %d", b.Ready[0].Number, b.Ready[1].Number)
+	}
+	for _, c := range b.Ready {
+		if c.Verdict != "" || c.VerdictReason != "" {
+			t.Errorf("card = %+v", c)
+		}
+	}
+	if b.Gates != nil {
+		t.Errorf("gates = %+v", b.Gates)
+	}
+}
+
+// A Ready issue the preview never saw — collected after it ran — keeps its
+// place at the end rather than disappearing from the column.
+func TestBuildBoard_ReadyIssueMissingFromPreview_KeptWithoutAVerdict(t *testing.T) {
+	b := BuildBoard(Input{
+		Repos:   []RepoData{repo(issue(1), issue(2))},
+		Preview: previewTick(previewDecision(2, true, "")),
+	})
+
+	if len(b.Ready) != 2 {
+		t.Fatalf("ready = %+v", b.Ready)
+	}
+	if b.Ready[1].Number != 1 || b.Ready[1].Verdict != "" {
+		t.Errorf("trailing card = %+v", b.Ready[1])
+	}
+}
+
+// A lane downgrade is the question the observation week exists to answer, so
+// it shows on the card whatever the verdict.
+func TestBuildBoard_PreviewLaneDowngrade_ShowsOnTheCard(t *testing.T) {
+	d := previewDecision(1, true, "")
+	d.Candidate.LaneReason = "auto→hitl: agent.yml does not opt into ai-merge"
+
+	b := BuildBoard(Input{Repos: []RepoData{repo(issue(1))}, Preview: previewTick(d)})
+
+	if b.Ready[0].LaneReason != d.Candidate.LaneReason {
+		t.Errorf("laneReason = %q", b.Ready[0].LaneReason)
+	}
+}
