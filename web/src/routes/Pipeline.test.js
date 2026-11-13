@@ -322,3 +322,24 @@ describe('Pipeline', () => {
     expect((await screen.findAllByText(text)).length).toBeGreaterThan(0)
   })
 })
+
+describe('Pipeline gate strip', () => {
+  it('shows the dispatcher gates above the columns when the board carries them', async () => {
+    pipeline.set(board({
+      gates: {
+        at: new Date().toISOString(), windowOpen: true, rungOn: true,
+        usedUsd: 2, allowedUsd: 9.6, budgetKnown: true,
+        nightCount: 1, nightCap: 5, globalOpen: 2, globalCap: 3, paused: false, lanes: [],
+      },
+    }))
+    render(Pipeline)
+    expect(screen.getByLabelText('Dispatcher gates')).toBeTruthy()
+    expect(screen.getByText('night 1/5')).toBeTruthy()
+  })
+
+  it('shows no gate strip without gates', () => {
+    pipeline.set(board())
+    render(Pipeline)
+    expect(screen.queryByLabelText('Dispatcher gates')).toBeNull()
+  })
+})

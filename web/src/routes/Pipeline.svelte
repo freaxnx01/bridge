@@ -4,6 +4,7 @@
   import RunningCard from '../lib/components/RunningCard.svelte';
   import IssueCard from '../lib/components/IssueCard.svelte';
   import FilterEmpty from '../lib/components/FilterEmpty.svelte';
+  import GateStrip from '../lib/components/GateStrip.svelte';
   import { authedPost, ensureToken } from '../lib/auth.js';
   import { repoFilter, matches, isFiltered } from '../lib/stores/repoFilter.js';
   import { oldestSource, ageSeconds, formatAge } from '../lib/freshness.js';
@@ -96,6 +97,10 @@
 </script>
 
 <div class="pipeline">
+  {#if board?.gates}
+    <GateStrip gates={board.gates} />
+  {/if}
+
   {#if board?.dispatchPaused}
     <p class="note">⏸ Dispatch paused: ready issues are not started automatically.</p>
   {/if}

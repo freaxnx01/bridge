@@ -21,3 +21,32 @@ describe('IssueCard reason badge', () => {
     expect(document.querySelector('.reason')).toBeNull()
   })
 })
+
+describe('IssueCard dispatch verdict', () => {
+  it('badges the next issue the dispatcher would pick', () => {
+    render(IssueCard, { card: card({ verdict: 'next', lane: 'auto' }), action: 'dispatch' })
+    expect(screen.getByText('next').classList.contains('verdict-next')).toBe(true)
+  })
+
+  it('badges a skip with its reason', () => {
+    render(IssueCard, {
+      card: card({ verdict: 'skip', verdictReason: 'per-repo cap 1/1' }),
+      action: 'dispatch',
+    })
+    expect(screen.getByText('skip: per-repo cap 1/1')).toBeTruthy()
+  })
+
+  it('shows no verdict badge when the card has none', () => {
+    render(IssueCard, { card: card(), action: 'dispatch' })
+    expect(document.querySelector('.verdict')).toBeNull()
+  })
+
+  it('shows the lane and its downgrade reason', () => {
+    render(IssueCard, {
+      card: card({ verdict: 'next', lane: 'hitl', laneReason: 'auto→hitl: no ai-merge' }),
+      action: 'dispatch',
+    })
+    expect(screen.getByText('lane hitl')).toBeTruthy()
+    expect(screen.getByText('auto→hitl: no ai-merge')).toBeTruthy()
+  })
+})
