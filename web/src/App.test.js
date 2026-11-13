@@ -103,3 +103,16 @@ describe('App', () => {
     expect(heading.closest('section').querySelector('svg')).not.toBeNull()
   })
 })
+
+describe('App — Dispatcher area', () => {
+  beforeEach(() => {
+    globalThis.fetch = vi.fn(async () => ({ ok: true, json: async () => ({ summary: [], ticks: [] }) }))
+  })
+
+  it('reaches the Dispatcher view via the nav', async () => {
+    const { default: App } = await import('./App.svelte')
+    render(App)
+    await fireEvent.click(screen.getByRole('button', { name: 'Dispatcher' }))
+    expect(await screen.findByText('No dispatch ticks recorded yet.')).toBeTruthy()
+  })
+})
