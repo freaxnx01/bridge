@@ -33,7 +33,8 @@ func CollectCandidates(repos []RepoInput) []Candidate {
 				continue
 			}
 			out = append(out, Candidate{
-				Issue: i, Owner: r.Owner, Repo: r.Name, MilestoneDue: due,
+				Issue: i, Owner: r.Owner, Repo: r.Name,
+				Milestone: active, MilestoneDue: due,
 			})
 		}
 	}

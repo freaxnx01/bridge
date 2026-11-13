@@ -93,9 +93,11 @@ func retriesForRepo(ctx context.Context, gh retryReader, r dispatch.RepoInput, n
 // retryCandidate builds the candidate for one retry issue, with the same repo
 // context collectCandidates gives a new dispatch so both go through one ladder.
 func retryCandidate(r dispatch.RepoInput, i forge.Issue, reason string) dispatch.Candidate {
+	active := dispatch.ActiveMilestone(r.Milestones)
 	return dispatch.Candidate{
 		Issue: i, Owner: r.Owner, Repo: r.Name,
-		MilestoneDue: dispatch.MilestoneDue(r.Milestones, dispatch.ActiveMilestone(r.Milestones)),
+		Milestone:    active,
+		MilestoneDue: dispatch.MilestoneDue(r.Milestones, active),
 		Retry:        true, RetryReason: reason,
 	}
 }

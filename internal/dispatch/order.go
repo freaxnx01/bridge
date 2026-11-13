@@ -12,9 +12,12 @@ import (
 // Candidate is one issue considered for dispatch, with the repo context the
 // ordering ladder needs.
 type Candidate struct {
-	Issue        forge.Issue
-	Owner        string
-	Repo         string // bare name, e.g. "quotes"
+	Issue forge.Issue
+	Owner string
+	Repo  string // bare name, e.g. "quotes"
+	// Milestone is the active milestone's title, carried for display alongside
+	// MilestoneDue, which is the date the ladder actually sorts by.
+	Milestone    string
 	MilestoneDue time.Time
 	// Lane is the autonomy lane this candidate dispatches in, resolved before
 	// ordering. LaneReason records a downgrade so --dry-run can explain it.
