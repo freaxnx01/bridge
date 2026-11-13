@@ -784,28 +784,6 @@ func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
 	}
 }
 
-// The window gate is --auto only. `bridge dispatch now` is the operator asking
-// for a tick, and before lanes it ran regardless of the schedule; a schedule
-// with a gap (documented in docs/dispatch.md) must keep behaving that way.
-func TestPartitionForTickManualTickIsNeverWindowGated(t *testing.T) {
-	cfg := dispatch.DefaultConfig()
-	cfg.Schedule = dispatch.Schedule{Windows: []dispatch.Window{
-		{Span: dispatch.Span{From: "03:00", To: "03:01"}},
-	}}
-	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local) // outside that window
-	cands := []dispatch.Candidate{{Repo: "bridge", Lane: dispatch.DefaultLane()}}
-
-	acting, skipped := partitionForTick(cands, cfg, now, false)
-	if len(acting) != 1 || len(skipped) != 0 {
-		t.Errorf("manual tick must consider every candidate: acting=%d skipped=%+v", len(acting), skipped)
-	}
-
-	acting, skipped = partitionForTick(cands, cfg, now, true)
-	if len(acting) != 0 || len(skipped) != 1 {
-		t.Errorf("--auto must honour the window: acting=%d skipped=%d", len(acting), len(skipped))
-	}
-}
-
 func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	cfg := dispatch.DefaultConfig()
@@ -841,5 +819,28 @@ func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
 	}
 	if len(ledger.Runs) != 0 {
 		t.Errorf("a dry-run lane must book no runs: %+v", ledger.Runs)
+	}
+}
+
+// --json is what an operator reads a tick back from, so it has to answer "why
+// this one first?" without re-deriving the ladder from the labels.
+func TestDecisionsJSON_CarriesRankAndLadder(t *testing.T) {
+	js := decisionsJSON([]dispatch.Decision{{
+		Candidate: dispatch.Candidate{Repo: "bridge", Issue: forge.Issue{Number: 41}},
+		Dispatch:  true,
+		Rank: dispatch.Rank{
+			Position: 2, Reason: "type: bug vs feat",
+			Ladder: dispatch.Ladder{Type: "bug", Size: "s"},
+		},
+	}})
+
+	if len(js) != 1 {
+		t.Fatalf("got %d rows", len(js))
+	}
+	if js[0].Rank != 2 || js[0].RankReason != "type: bug vs feat" {
+		t.Errorf("got %+v", js[0])
+	}
+	if js[0].Ladder.Type != "bug" || js[0].Ladder.Size != "s" {
+		t.Errorf("ladder = %+v", js[0].Ladder)
 	}
 }

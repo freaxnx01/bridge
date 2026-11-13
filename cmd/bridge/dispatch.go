@@ -96,6 +96,13 @@ type decisionJSON struct {
 	// skipped by a cap needs both.
 	Kind        string `json:"kind"`
 	RetryReason string `json:"retry_reason,omitempty"`
+	// Rank is the candidate's 1-based place in the tick's order, RankReason the
+	// ladder rung it differs from the next candidate on, and Ladder its reading
+	// on every rung — the three answer "why here?" without re-deriving the
+	// ladder from labels.
+	Rank       int             `json:"rank"`
+	RankReason string          `json:"rank_reason,omitempty"`
+	Ladder     dispatch.Ladder `json:"ladder"`
 }
 
 // decisionKind names the pass a decision came from.
@@ -122,6 +129,10 @@ func decisionsJSON(ds []dispatch.Decision) []decisionJSON {
 
 			Kind:        decisionKind(d.Candidate),
 			RetryReason: d.Candidate.RetryReason,
+
+			Rank:       d.Rank.Position,
+			RankReason: d.Rank.Reason,
+			Ladder:     d.Rank.Ladder,
 		})
 	}
 	return out
@@ -267,8 +278,7 @@ func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 	rec.Repos = repoNames(repos)
 
 	gate := resolveGate(ctx, repos, cfg.Lanes, now)
-	ordered, retrySkips := tickCandidates(ctx, repos, cfg, gate, now, dispatchRetryOnly)
-	acting, outOfWindow := partitionForTick(ordered, cfg, now, dispatchAuto)
+	retries, retrySkips := collectRetriesForTick(ctx, repos, now)
 
 	// The rung is keyed on what it guards, not on --auto: a manual tick burns
 	// the same quota, and a pre-dawn tick burns the window the operator will
@@ -278,31 +288,23 @@ func runTick(cmd *cobra.Command, rec *dispatch.JournalRecord) error {
 	if timing.RungOn {
 		usedUSD, usedKnown = measureWindowUSD(ctx, cfg, timing.MeasureFrom, now)
 	}
-	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, usedUSD, usedKnown)
+
+	// The window gate stays --auto only, as before: GateNone is the manual
+	// tick's "decide everything, the operator asked for it".
+	mode := dispatch.GateNone
+	if dispatchAuto {
+		mode = dispatch.GateNow
+	}
+	tick := dispatch.Evaluate(dispatch.TickInput{
+		Repos: repos, Config: cfg, State: state, Gate: gate,
+		Retries: retries, RetrySkips: retrySkips, RetryOnly: dispatchRetryOnly,
+		UsedUSD: usedUSD, UsedKnown: usedKnown, Now: now, Mode: mode,
+	})
+	decisions := tick.Decisions
 	if timing.RungOn {
-		rec.Budget = journalBudget(budget)
+		rec.Budget = journalBudget(tick.Gates)
 	}
-
-	autonomous := func(repo string) bool {
-		lane, _ := dispatch.ResolveLane(cfg.Lanes, repo, gate)
-		return lane.Autonomous
-	}
-	openByRepo, globalOpen := dispatch.CountOpenAgentPRs(repos, autonomous)
-
-	decisions := dispatch.ApplyCaps(acting, cfg,
-		dispatch.Counts{
-			OpenPRsByRepo:     openByRepo,
-			GlobalOpen:        globalOpen,
-			DispatchedTonight: state.DispatchesSince(dispatch.NightStartForReport(cfg, timing, now)),
-			NightCapApplies:   timing.NightCapApplies,
-			DispatchedByLane:  dispatch.LaneCounts(state, cfg, now),
-		},
-		budget,
-	)
-	decisions = dispatch.MergeInOrder(ordered, decisions, outOfWindow)
-	// The retry pass's own skips never reached ApplyCaps, so they are not in
-	// `ordered` either. They are reported in every mode and applied in none.
-	decisions = append(decisions, retrySkips...)
+	rec.Gates = &tick.Gates
 	rec.Decisions = journalDecisions(decisions, dispatchDryRun)
 
 	if dispatchJSON {
@@ -375,17 +377,6 @@ func fetchRepoInputs(ctx context.Context) ([]dispatch.RepoInput, error) {
 		slog.Warn("dispatch: no GitHub client available — check GH_TOKEN/BRIDGE_GITHUB_API", "github_repos", githubRepos)
 	}
 	return out, nil
-}
-
-// partitionForTick splits candidates into those whose lane acts now and skip
-// decisions for the rest. A manual tick skips the split entirely: `dispatch
-// now` was never window-gated, and partitioning it would turn a documented
-// schedule gap into a tick that dispatches nothing.
-func partitionForTick(ordered []dispatch.Candidate, cfg dispatch.Config, now time.Time, auto bool) ([]dispatch.Candidate, []dispatch.Decision) {
-	if !auto {
-		return ordered, nil
-	}
-	return dispatch.PartitionByWindow(ordered, cfg.Schedule, now)
 }
 
 // applyDecisions writes the one label the dispatcher owns, then persists the

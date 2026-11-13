@@ -106,30 +106,6 @@ func skipRetry(c dispatch.Candidate, reason string) dispatch.Decision {
 	return dispatch.Decision{Candidate: c, Dispatch: false, Reason: reason}
 }
 
-// tickCandidates gathers one tick's work: the retry pass first, then the new
-// dispatches, each ordered by the ladder on its own. Retries lead because a
-// failed issue already carries a run's worth of sunk cost, so finishing it
-// beats starting something new under the same caps.
-//
-// The second return is the retry rows that were decided before the caps ran —
-// they are reported, never applied.
-func tickCandidates(ctx context.Context, repos []dispatch.RepoInput, cfg dispatch.Config, gate dispatch.GateState, now time.Time, retryOnly bool) ([]dispatch.Candidate, []dispatch.Decision) {
-	retries, retrySkips := collectRetriesForTick(ctx, repos, now)
-	dispatch.AssignLanes(retries, cfg.Lanes, gate)
-	for i := range retrySkips {
-		retrySkips[i].Candidate.Lane, retrySkips[i].Candidate.LaneReason =
-			dispatch.ResolveLane(cfg.Lanes, retrySkips[i].Candidate.Repo, gate)
-	}
-	ordered := dispatch.Order(retries, cfg.RepoPriority)
-
-	if !retryOnly {
-		fresh := dispatch.CollectCandidates(repos)
-		dispatch.AssignLanes(fresh, cfg.Lanes, gate)
-		ordered = append(ordered, dispatch.Order(fresh, cfg.RepoPriority)...)
-	}
-	return ordered, retrySkips
-}
-
 // collectRetriesForTick resolves the GitHub client the retry pass reads
 // through. Without one there is nothing to read, and passing a typed-nil
 // client as the interface would turn that into a nil dereference.

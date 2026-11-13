@@ -71,10 +71,10 @@ func repoNames(repos []dispatch.RepoInput) []string {
 	return out
 }
 
-// journalBudget records the rung's reading. Unknown is inverted into Known so
-// a reader never has to spot a negative to see that the number is unusable.
-func journalBudget(b dispatch.BudgetState) *dispatch.JournalBudget {
-	return &dispatch.JournalBudget{UsedUSD: b.UsedUSD, LimitUSD: b.LimitUSD, Known: !b.Unknown}
+// journalBudget records the rung's reading, taken from the gates the tick was
+// decided under so the record and the decisions can never disagree.
+func journalBudget(g dispatch.Gates) *dispatch.JournalBudget {
+	return &dispatch.JournalBudget{UsedUSD: g.UsedUSD, LimitUSD: g.AllowedUSD, Known: g.BudgetKnown}
 }
 
 // journalDecisions renders the tick's decisions. A live decision starts as

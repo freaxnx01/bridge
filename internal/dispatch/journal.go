@@ -67,17 +67,20 @@ const (
 // JournalRecord is one dispatch tick. The json shape is a contract with the
 // cockpit digest: add fields, never rename or repurpose one.
 type JournalRecord struct {
-	V             int               `json:"v"`
-	At            time.Time         `json:"at"`
-	Trigger       string            `json:"trigger"`
-	Mode          string            `json:"mode"`
-	RetryOnly     bool              `json:"retry_only,omitempty"`
-	Outcome       string            `json:"outcome"`
-	Error         string            `json:"error,omitempty"`
-	LanesInWindow []string          `json:"lanes_in_window"`
-	Repos         []string          `json:"repos,omitempty"`
-	Budget        *JournalBudget    `json:"budget,omitempty"`
-	Decisions     []JournalDecision `json:"decisions,omitempty"`
+	V             int            `json:"v"`
+	At            time.Time      `json:"at"`
+	Trigger       string         `json:"trigger"`
+	Mode          string         `json:"mode"`
+	RetryOnly     bool           `json:"retry_only,omitempty"`
+	Outcome       string         `json:"outcome"`
+	Error         string         `json:"error,omitempty"`
+	LanesInWindow []string       `json:"lanes_in_window"`
+	Repos         []string       `json:"repos,omitempty"`
+	Budget        *JournalBudget `json:"budget,omitempty"`
+	// Gates is every bound in force for the tick. It supersedes Budget, which
+	// stays for the readers written against the first shape.
+	Gates     *Gates            `json:"gates,omitempty"`
+	Decisions []JournalDecision `json:"decisions,omitempty"`
 }
 
 // JournalBudget is the budget rung's reading, present only when the rung is on.

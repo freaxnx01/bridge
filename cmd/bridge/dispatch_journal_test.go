@@ -275,11 +275,11 @@ func TestRepoNames_OwnerSlashName(t *testing.T) {
 }
 
 func TestJournalBudget_CarriesReadingAndKnown(t *testing.T) {
-	got := journalBudget(dispatch.BudgetState{UsedUSD: 4.5, LimitUSD: 9.6, Unknown: true})
+	got := journalBudget(dispatch.Gates{UsedUSD: 4.5, AllowedUSD: 9.6, BudgetKnown: false})
 	if got == nil || got.UsedUSD != 4.5 || got.LimitUSD != 9.6 || got.Known {
 		t.Errorf("got %+v", got)
 	}
-	if known := journalBudget(dispatch.BudgetState{}); !known.Known {
+	if known := journalBudget(dispatch.Gates{BudgetKnown: true}); !known.Known {
 		t.Errorf("a measured reading is known, got %+v", known)
 	}
 }
