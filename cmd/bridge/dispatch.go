@@ -14,6 +14,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/freaxnx01/bridge/internal/dispatch"
+	"github.com/freaxnx01/bridge/internal/dispatchrun"
 	"github.com/freaxnx01/bridge/internal/forge"
 	"github.com/freaxnx01/bridge/internal/usage"
 )
@@ -206,23 +207,10 @@ func transcriptRoot() string {
 	return filepath.Join(home, ".claude", "projects")
 }
 
-// measureWindowUSD sums interactive and pipeline consumption over the trailing
-// quota window. The bool reports whether the number can be trusted: false means
-// fail closed, and is never the same as a measured zero.
+// measureWindowUSD sums the trailing quota window from this host's transcript
+// root and run ledger.
 func measureWindowUSD(ctx context.Context, cfg dispatch.Config, from, to time.Time) (float64, bool) {
-	turns, err := usage.ScanTranscripts(ctx, transcriptRoot(), from)
-	if err != nil {
-		slog.Warn("dispatch: cannot read Claude transcripts — guarded dispatch will be blocked", "error", err)
-		return 0, false
-	}
-	ledger, err := usage.LoadLedger(dispatchLedgerPath())
-	if err != nil {
-		slog.Warn("dispatch: cannot read the usage ledger — guarded dispatch will be blocked", "error", err)
-		return 0, false
-	}
-
-	pricing := usage.DefaultPricing().Merge(cfg.Budget.Pricing)
-	return usage.SumWindow(turns, pricing, from, to) + ledger.SumSince(from), true
+	return dispatchrun.MeasureWindowUSD(ctx, cfg, transcriptRoot(), dispatchLedgerPath(), from, to)
 }
 
 // runDispatch runs one tick and journals it. Every exit path of runTick lands
