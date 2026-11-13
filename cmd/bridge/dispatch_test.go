@@ -51,27 +51,6 @@ func TestRenderDecisionsEmpty(t *testing.T) {
 	}
 }
 
-func TestCollectCandidatesSkipsNonGithubAndIneligible(t *testing.T) {
-	repos := []repoInput{
-		{Forge: "github", Owner: "o", Name: "quotes",
-			Issues: []forge.Issue{
-				{Number: 41, Body: "a real description\n## Implementation Plan\n- step", Labels: []string{"feat"}},
-				{Number: 42, Body: "d", Labels: []string{"needs-enrichment"}},
-				{Number: 31, Body: ""}, // capture-created, no body, no labels
-			}},
-		{Forge: "forgejo", Owner: "f", Name: "notes",
-			Issues: []forge.Issue{{Number: 1, Body: "d\n## Implementation Plan\n- step", Labels: []string{"feat"}}}},
-	}
-
-	got := collectCandidates(repos)
-	if len(got) != 1 {
-		t.Fatalf("got %d candidates: %+v", len(got), got)
-	}
-	if got[0].Issue.Number != 41 || got[0].Repo != "quotes" {
-		t.Errorf("got %+v", got[0])
-	}
-}
-
 func TestSetPausedTogglesState(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	cmd := &cobra.Command{}
@@ -312,71 +291,6 @@ func TestRunDispatch_DryRunJSON_SkipsApplyDecisions(t *testing.T) {
 	}
 }
 
-func TestMeasureWindowUSDCountsBothSources(t *testing.T) {
-	projects := t.TempDir()
-	cache := t.TempDir()
-	t.Setenv("BRIDGE_CLAUDE_PROJECTS", projects)
-	t.Setenv("XDG_CACHE_HOME", cache)
-
-	now := time.Now().UTC()
-
-	// One interactive turn: 1M output tokens of opus at 75 USD/Mtok.
-	line := `{"type":"assistant","timestamp":"` + now.Add(-time.Hour).Format(time.RFC3339) +
-		`","message":{"model":"claude-opus-4-7","usage":{"input_tokens":0,"output_tokens":1000000,` +
-		`"cache_read_input_tokens":0,"cache_creation_input_tokens":0}}}`
-	dir := filepath.Join(projects, "proj")
-	if err := os.MkdirAll(dir, 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(filepath.Join(dir, "a.jsonl"), []byte(line+"\n"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	// One dispatched run in the ledger.
-	var l usage.Ledger
-	l.Append(usage.Run{At: now.Add(-time.Minute), Repo: "bridge", Issue: 254, EstUSD: 2})
-	if err := usage.WriteLedger(dispatchLedgerPath(), l); err != nil {
-		t.Fatal(err)
-	}
-
-	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), now.Add(-5*time.Hour), now)
-	if !ok {
-		t.Fatal("measurement should be known")
-	}
-	if diff := got - 77.0; diff > 0.01 || diff < -0.01 {
-		t.Errorf("want 75 interactive + 2 pipeline = 77, got %v", got)
-	}
-}
-
-func TestMeasureWindowUSDMissingSourcesAreZeroNotUnknown(t *testing.T) {
-	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
-	t.Setenv("XDG_CACHE_HOME", t.TempDir())
-
-	got, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now().Add(-5*time.Hour), time.Now())
-	if !ok || got != 0 {
-		t.Errorf("a fresh install has measured zero usage, not unknown: got=%v ok=%v", got, ok)
-	}
-}
-
-func TestMeasureWindowUSDUnreadableLedgerIsUnknown(t *testing.T) {
-	t.Setenv("BRIDGE_CLAUDE_PROJECTS", filepath.Join(t.TempDir(), "absent"))
-	cache := t.TempDir()
-	t.Setenv("XDG_CACHE_HOME", cache)
-
-	// Corrupt ledger: readable file, invalid JSON.
-	path := dispatchLedgerPath()
-	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
-		t.Fatal(err)
-	}
-	if err := os.WriteFile(path, []byte("{not json"), 0o600); err != nil {
-		t.Fatal(err)
-	}
-
-	if _, ok := measureWindowUSD(context.Background(), dispatch.DefaultConfig(), time.Now().Add(-5*time.Hour), time.Now()); ok {
-		t.Error("a corrupt ledger must report unknown so the rung fails closed")
-	}
-}
-
 func TestTranscriptRootHonoursTheEnvOverride(t *testing.T) {
 	t.Setenv("BRIDGE_CLAUDE_PROJECTS", "/tmp/somewhere")
 	if got := transcriptRoot(); got != "/tmp/somewhere" {
@@ -533,63 +447,9 @@ func TestRecordRunsNoRunsLeavesTheLedgerAlone(t *testing.T) {
 	}
 }
 
-// The quota window is rolling, so spend late in the night is still inside it
-// when the operator starts work. resolveTiming must therefore arm the rung in
-// the shoulder before a rung window and measure only the span that survives to
-// the handover.
-func TestResolveTimingGuardsTheMorningHandover(t *testing.T) {
-	cfg := dispatch.DefaultConfig() // 18:00-07:00 no rung, 07:00-18:00 rung; 5h window
-	day := func(h, m int) time.Time { return time.Date(2026, 9, 18, h, m, 0, 0, time.Local) }
-
-	tests := []struct {
-		name            string
-		now             time.Time
-		wantRung        bool
-		wantMeasureFrom time.Time
-		wantNightCap    bool
-	}{
-		{
-			name: "deep night burns freely", now: day(23, 0),
-			wantRung: false, wantNightCap: true,
-		},
-		{
-			// 01:00 + 5h = 06:00, aged out before the handover.
-			name: "01:00 is still outside the shoulder", now: day(1, 0),
-			wantRung: false, wantNightCap: true,
-		},
-		{
-			// 05:00 + 5h = 10:00: this spend is in the operator's window at
-			// 07:00, so it is measured against the 02:00-07:00 span.
-			name: "05:00 is guarded for the 07:00 handover", now: day(5, 0),
-			wantRung: true, wantMeasureFrom: day(2, 0), wantNightCap: true,
-		},
-		{
-			name: "midday measures the plain trailing window", now: day(12, 0),
-			wantRung: true, wantMeasureFrom: day(7, 0), wantNightCap: false,
-		},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			got := resolveTiming(cfg, tc.now)
-			if got.RungOn != tc.wantRung {
-				t.Fatalf("RungOn=%v want %v", got.RungOn, tc.wantRung)
-			}
-			if tc.wantRung && !got.MeasureFrom.Equal(tc.wantMeasureFrom) {
-				t.Errorf("MeasureFrom=%v want %v", got.MeasureFrom, tc.wantMeasureFrom)
-			}
-			if got.NightCapApplies != tc.wantNightCap {
-				t.Errorf("NightCapApplies=%v want %v", got.NightCapApplies, tc.wantNightCap)
-			}
-		})
-	}
-}
-
-// The concrete failure the shoulder exists to stop: the night has already
-// spent the operator's window, and a 05:00 tick must refuse rather than hand
-// over a window with no headroom left.
 func TestShoulderRefusesWhenTheHandoverWindowIsAlreadySpent(t *testing.T) {
 	cfg := dispatch.DefaultConfig()
-	timing := resolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
+	timing := dispatch.ResolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
 	if !timing.RungOn {
 		t.Fatal("05:00 must be guarded")
 	}
@@ -613,7 +473,7 @@ func TestShoulderRefusesWhenTheHandoverWindowIsAlreadySpent(t *testing.T) {
 // And the converse: an unspent handover window still lets the night work.
 func TestShoulderAllowsWhenTheHandoverWindowHasHeadroom(t *testing.T) {
 	cfg := dispatch.DefaultConfig()
-	timing := resolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
+	timing := dispatch.ResolveTiming(cfg, time.Date(2026, 9, 18, 5, 0, 0, 0, time.Local))
 	budget := dispatch.NewBudgetState(cfg.Budget, timing.RungOn, 1.0, true)
 	ds := dispatch.ApplyCaps(
 		[]dispatch.Candidate{{Repo: "bridge", Issue: forge.Issue{Number: 254}}},
@@ -799,58 +659,6 @@ func TestDecisionsJSONCarriesTheLane(t *testing.T) {
 	}
 }
 
-func TestAssignLanes(t *testing.T) {
-	lanes := []dispatch.Lane{
-		{Name: "auto", Repos: []string{"game-*"}, Autonomous: true},
-		{Name: "hitl", Repos: []string{"*"}},
-	}
-	cs := []dispatch.Candidate{
-		{Repo: "game-tschau-sepp", Issue: forge.Issue{Number: 1}},
-		{Repo: "game-huusli-jagd", Issue: forge.Issue{Number: 2}},
-		{Repo: "bridge", Issue: forge.Issue{Number: 3}},
-	}
-
-	assignLanes(cs, lanes, dispatch.GateState{"game-tschau-sepp": true})
-
-	if cs[0].Lane.Name != "auto" || cs[0].LaneReason != "" {
-		t.Errorf("gated repo stays in auto: %+v", cs[0])
-	}
-	if cs[1].Lane.Name != "hitl" || cs[1].LaneReason == "" {
-		t.Errorf("ungated repo falls back with a reason: %+v", cs[1])
-	}
-	if cs[2].Lane.Name != "hitl" {
-		t.Errorf("catch-all: %+v", cs[2])
-	}
-}
-
-func TestCountOpenAgentPRsExcludesAutonomousRepos(t *testing.T) {
-	repos := []repoInput{
-		{Forge: "github", Owner: "freaxnx01", Name: "game-tschau-sepp",
-			Issues: []forge.Issue{{Number: 1}},
-			PRs:    []forge.PullRequest{{Body: "Closes #1"}}},
-		{Forge: "github", Owner: "freaxnx01", Name: "bridge",
-			Issues: []forge.Issue{{Number: 9}},
-			PRs:    []forge.PullRequest{{Body: "Closes #9"}}},
-	}
-	autonomous := func(repo string) bool { return repo == "game-tschau-sepp" }
-
-	byRepo, global := countOpenAgentPRs(repos, autonomous)
-
-	if global != 1 {
-		t.Errorf("only human-reviewed PRs spend review capacity: global=%d want 1", global)
-	}
-	// The per-repo count still has to include it — per_repo bounds conflicting
-	// PRs in one repo, which is true in either lane.
-	if byRepo["game-tschau-sepp"] != 1 {
-		t.Errorf("per-repo count: %+v", byRepo)
-	}
-}
-
-// The ledger and the local state are independent stores. A failing ledger
-// write must not also discard the nightly counter and LastTick — losing both
-// would let the next tick spend the same headroom again, fail-open in two
-// dimensions at once. The ledger path is poisoned with a directory so its
-// write fails while the state write (a sibling file) still succeeds.
 func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch {
@@ -911,64 +719,6 @@ func TestRunDispatchPersistsStateWhenTheLedgerWriteFails(t *testing.T) {
 	}
 }
 
-// The window gate is --auto only. `bridge dispatch now` is the operator asking
-// for a tick, and before lanes it ran regardless of the schedule; a schedule
-// with a gap (documented in docs/dispatch.md) must keep behaving that way.
-func TestPartitionForTickManualTickIsNeverWindowGated(t *testing.T) {
-	cfg := dispatch.DefaultConfig()
-	cfg.Schedule = dispatch.Schedule{Windows: []dispatch.Window{
-		{Span: dispatch.Span{From: "03:00", To: "03:01"}},
-	}}
-	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local) // outside that window
-	cands := []dispatch.Candidate{{Repo: "bridge", Lane: dispatch.DefaultLane()}}
-
-	acting, skipped := partitionForTick(cands, cfg, now, false)
-	if len(acting) != 1 || len(skipped) != 0 {
-		t.Errorf("manual tick must consider every candidate: acting=%d skipped=%+v", len(acting), skipped)
-	}
-
-	acting, skipped = partitionForTick(cands, cfg, now, true)
-	if len(acting) != 0 || len(skipped) != 1 {
-		t.Errorf("--auto must honour the window: acting=%d skipped=%d", len(acting), len(skipped))
-	}
-}
-
-func TestAnyLaneActs(t *testing.T) {
-	now := time.Date(2026, 9, 7, 13, 0, 0, 0, time.Local)
-	gap := dispatch.Schedule{Windows: []dispatch.Window{{Span: dispatch.Span{From: "03:00", To: "03:01"}}}}
-
-	tests := []struct {
-		name string
-		cfg  dispatch.Config
-		want bool
-	}{
-		{"no lanes, schedule covers now", dispatch.Config{Schedule: dispatch.DefaultConfig().Schedule}, true},
-		{"no lanes, schedule gap", dispatch.Config{Schedule: gap}, false},
-		{"a 24h lane acts even in a schedule gap", dispatch.Config{
-			Schedule: gap,
-			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "00:00", To: "00:00"}}}},
-		}, true},
-		{"lanes all asleep, and the default lane is in a gap", dispatch.Config{
-			Schedule: gap,
-			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "22:00", To: "23:00"}}}},
-		}, false},
-		{"lanes asleep but the default lane's schedule covers now", dispatch.Config{
-			Schedule: dispatch.DefaultConfig().Schedule,
-			Lanes:    []dispatch.Lane{{Name: "auto", Windows: []dispatch.Span{{From: "22:00", To: "23:00"}}}},
-		}, true},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			if got := anyLaneActs(tc.cfg, now); got != tc.want {
-				t.Errorf("got %v want %v", got, tc.want)
-			}
-		})
-	}
-}
-
-// A dry-run lane applies no labels, but its own counter has to persist across
-// ticks — otherwise a half-hourly timer reports the same max_dispatches worth
-// of "WOULD dispatch" decisions 48 times a day and `status` shows 0 spent.
 func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
 	t.Setenv("XDG_CACHE_HOME", t.TempDir())
 	cfg := dispatch.DefaultConfig()
@@ -977,7 +727,7 @@ func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
 	cfg.Lanes = []dispatch.Lane{lane}
 
 	now := time.Now()
-	timing := tickTiming{Now: now}
+	timing := dispatch.Timing{Now: now}
 	ds := []dispatch.Decision{
 		{Candidate: dispatch.Candidate{Owner: "freaxnx01", Repo: "game-a",
 			Issue: forge.Issue{Number: 1}, Lane: lane}, Dispatch: true},
@@ -1004,5 +754,28 @@ func TestApplyDecisionsPersistsTheDryRunLaneCounter(t *testing.T) {
 	}
 	if len(ledger.Runs) != 0 {
 		t.Errorf("a dry-run lane must book no runs: %+v", ledger.Runs)
+	}
+}
+
+// --json is what an operator reads a tick back from, so it has to answer "why
+// this one first?" without re-deriving the ladder from the labels.
+func TestDecisionsJSON_CarriesRankAndLadder(t *testing.T) {
+	js := decisionsJSON([]dispatch.Decision{{
+		Candidate: dispatch.Candidate{Repo: "bridge", Issue: forge.Issue{Number: 41}},
+		Dispatch:  true,
+		Rank: dispatch.Rank{
+			Position: 2, Reason: "type: bug vs feat",
+			Ladder: dispatch.Ladder{Type: "bug", Size: "s"},
+		},
+	}})
+
+	if len(js) != 1 {
+		t.Fatalf("got %d rows", len(js))
+	}
+	if js[0].Rank != 2 || js[0].RankReason != "type: bug vs feat" {
+		t.Errorf("got %+v", js[0])
+	}
+	if js[0].Ladder.Type != "bug" || js[0].Ladder.Size != "s" {
+		t.Errorf("ladder = %+v", js[0].Ladder)
 	}
 }

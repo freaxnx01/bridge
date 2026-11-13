@@ -11,6 +11,7 @@
       Inbox{#if inboxCount > 0}<span class="badge">{inboxCount}</span>{/if}
     </button>
     <button type="button" class="nav" aria-current={area === 'pipeline' ? 'page' : undefined} class:active={area === 'pipeline'} onclick={() => onnavigate('pipeline')}>Pipeline</button>
+    <button type="button" class="nav" aria-current={area === 'dispatcher' ? 'page' : undefined} class:active={area === 'dispatcher'} onclick={() => onnavigate('dispatcher')}>Dispatcher</button>
     {#each placeholders as name (name)}
       <button type="button" class="nav" disabled title="Coming later">{name}</button>
     {/each}

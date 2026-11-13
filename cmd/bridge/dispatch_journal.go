@@ -63,7 +63,7 @@ func lanesInWindow(cfg dispatch.Config, now time.Time) []string {
 }
 
 // repoNames renders the fetched repos as owner/name, in fetch order.
-func repoNames(repos []repoInput) []string {
+func repoNames(repos []dispatch.RepoInput) []string {
 	out := make([]string, 0, len(repos))
 	for _, r := range repos {
 		out = append(out, r.Owner+"/"+r.Name)
@@ -71,10 +71,10 @@ func repoNames(repos []repoInput) []string {
 	return out
 }
 
-// journalBudget records the rung's reading. Unknown is inverted into Known so
-// a reader never has to spot a negative to see that the number is unusable.
-func journalBudget(b dispatch.BudgetState) *dispatch.JournalBudget {
-	return &dispatch.JournalBudget{UsedUSD: b.UsedUSD, LimitUSD: b.LimitUSD, Known: !b.Unknown}
+// journalBudget records the rung's reading, taken from the gates the tick was
+// decided under so the record and the decisions can never disagree.
+func journalBudget(g dispatch.Gates) *dispatch.JournalBudget {
+	return &dispatch.JournalBudget{UsedUSD: g.UsedUSD, LimitUSD: g.AllowedUSD, Known: g.BudgetKnown}
 }
 
 // journalDecisions renders the tick's decisions. A live decision starts as
@@ -95,6 +95,9 @@ func journalDecisions(ds []dispatch.Decision, tickDryRun bool) []dispatch.Journa
 			LaneReason:  c.LaneReason,
 			Decision:    journalDecisionStatus(d, tickDryRun),
 			Reason:      d.Reason,
+			Rank:        d.Rank.Position,
+			RankReason:  d.Rank.Reason,
+			Ladder:      d.Rank.Ladder,
 		})
 	}
 	return out

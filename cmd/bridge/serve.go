@@ -21,6 +21,7 @@ import (
 	"github.com/freaxnx01/bridge/internal/capture"
 	"github.com/freaxnx01/bridge/internal/cockpit"
 	"github.com/freaxnx01/bridge/internal/core"
+	"github.com/freaxnx01/bridge/internal/dispatch"
 	"github.com/freaxnx01/bridge/internal/forge"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
 	"github.com/freaxnx01/bridge/internal/overview"
@@ -250,6 +251,13 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	// within detailTTL and only for issues the inbox already lists — a page
 	// looping it cannot burn the token's REST quota or read anything else.
 	apiMux.Handle("/api/inbox/", inboxH)
+	// The dispatcher's own history: read-only and open, like GET /api/pipeline.
+	// It reads the tick journal off disk — no forge call, no local state write.
+	apiMux.Handle("/api/dispatch/", &api.DispatchHandler{
+		Ticks: func(since time.Time) ([]dispatch.JournalRecord, error) {
+			return dispatch.ReadJournal(dispatchJournalDir(), since)
+		},
+	})
 	apiMux.Handle("/api/pipeline", pipelineH) // GET only; the handler answers other methods with 405
 	apiMux.Handle("/api/pipeline/refresh", guarded)
 	apiMux.Handle("/api/pipeline/enrich", guarded)

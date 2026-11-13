@@ -1,4 +1,4 @@
-package main
+package dispatchrun
 
 import (
 	"context"
@@ -75,16 +75,16 @@ func TestLoadLaneGateCacheMissingFileIsEmpty(t *testing.T) {
 	}
 }
 
-// resolveGateWith is the one network-touching path in lane resolution, and the
+// ResolveGate is the one network-touching path in lane resolution, and the
 // "never dispatch into unattended merge" guarantee rests on every one of its
 // failure modes answering false.
-func TestResolveGateWithFailsClosed(t *testing.T) {
+func TestResolveGate_EveryFailureMode_AnswersFalse(t *testing.T) {
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.Local)
 	lanes := []dispatch.Lane{
 		{Name: "auto", Repos: []string{"game-*"}, Autonomous: true},
 		{Name: "hitl", Repos: []string{"*"}},
 	}
-	repos := []repoInput{
+	repos := []dispatch.RepoInput{
 		{Forge: "github", Owner: "freaxnx01", Name: "game-wired"},
 		{Forge: "github", Owner: "freaxnx01", Name: "game-unwired"},
 		{Forge: "github", Owner: "freaxnx01", Name: "game-absent"},
@@ -108,7 +108,7 @@ func TestResolveGateWithFailsClosed(t *testing.T) {
 	}
 
 	path := filepath.Join(t.TempDir(), "lane-gate.json")
-	gate := resolveGateWith(context.Background(), repos, lanes, now, fetch, path)
+	gate := ResolveGate(context.Background(), repos, lanes, now, fetch, path)
 
 	want := map[string]bool{
 		"game-wired":   true,
@@ -139,7 +139,7 @@ func TestResolveGateWithFailsClosed(t *testing.T) {
 	}
 }
 
-func TestResolveGateWithServesFromCacheWithoutFetching(t *testing.T) {
+func TestResolveGate_FreshCacheEntry_IsServedWithoutFetching(t *testing.T) {
 	now := time.Date(2026, 9, 21, 12, 0, 0, 0, time.Local)
 	lanes := []dispatch.Lane{{Name: "auto", Repos: []string{"game-*"}, Autonomous: true}}
 	path := filepath.Join(t.TempDir(), "lane-gate.json")
@@ -154,8 +154,8 @@ func TestResolveGateWithServesFromCacheWithoutFetching(t *testing.T) {
 		return nil, false, nil
 	}
 
-	gate := resolveGateWith(context.Background(),
-		[]repoInput{{Forge: "github", Owner: "freaxnx01", Name: "game-wired"}},
+	gate := ResolveGate(context.Background(),
+		[]dispatch.RepoInput{{Forge: "github", Owner: "freaxnx01", Name: "game-wired"}},
 		lanes, now, fetch, path)
 
 	if !gate["game-wired"] {

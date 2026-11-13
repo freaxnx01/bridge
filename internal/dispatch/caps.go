@@ -6,11 +6,14 @@ import (
 )
 
 // Decision is one candidate's outcome, carrying the reason so --dry-run can
-// explain every skip.
+// explain every skip, and the ladder reading that put it where it is.
 type Decision struct {
 	Candidate Candidate
 	Dispatch  bool
 	Reason    string
+	// Rank is where the candidate landed in the tick's order and which rung
+	// decided it against the next one. Zero for a row the ladder never saw.
+	Rank Rank
 }
 
 // Counts are the tick's pre-existing counts: how many agent PRs are already
@@ -80,22 +83,17 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 		}
 		switch {
 		case budget.Enabled && budget.Unknown:
-			out = append(out, Decision{c, false, "budget-unknown"})
+			out = append(out, Decision{Candidate: c, Reason: "budget-unknown"})
 		case budget.Enabled && spent+budget.PerRunUSD > budget.LimitUSD:
-			out = append(out, Decision{c, false,
-				fmt.Sprintf("budget-exhausted %.2f/%.2f USD", spent, budget.LimitUSD)})
+			out = append(out, Decision{Candidate: c, Reason: fmt.Sprintf("budget-exhausted %.2f/%.2f USD", spent, budget.LimitUSD)})
 		case laneCap > 0 && byLane[lane.Name] >= laneCap:
-			out = append(out, Decision{c, false,
-				fmt.Sprintf("lane cap %d/%d (%s)", byLane[lane.Name], laneCap, lane.Name)})
+			out = append(out, Decision{Candidate: c, Reason: fmt.Sprintf("lane cap %d/%d (%s)", byLane[lane.Name], laneCap, lane.Name)})
 		case counts.NightCapApplies && !lane.Autonomous && night >= cfg.Limits.MaxDispatchesPerNight:
-			out = append(out, Decision{c, false,
-				fmt.Sprintf("night cap %d/%d", night, cfg.Limits.MaxDispatchesPerNight)})
+			out = append(out, Decision{Candidate: c, Reason: fmt.Sprintf("night cap %d/%d", night, cfg.Limits.MaxDispatchesPerNight)})
 		case !lane.Autonomous && global >= cfg.Limits.GlobalOpenPRs:
-			out = append(out, Decision{c, false,
-				fmt.Sprintf("global cap %d/%d", global, cfg.Limits.GlobalOpenPRs)})
+			out = append(out, Decision{Candidate: c, Reason: fmt.Sprintf("global cap %d/%d", global, cfg.Limits.GlobalOpenPRs)})
 		case inFlight >= limit:
-			out = append(out, Decision{c, false,
-				fmt.Sprintf("repo at WIP %d/%d", inFlight, limit)})
+			out = append(out, Decision{Candidate: c, Reason: fmt.Sprintf("repo at WIP %d/%d", inFlight, limit)})
 		default:
 			// The lane counter and the per-repo count are private to one lane —
 			// every repo resolves to exactly one lane — so a dry-run lane
@@ -115,7 +113,7 @@ func ApplyCaps(ordered []Candidate, cfg Config, counts Counts, budget BudgetStat
 					night++
 				}
 			}
-			out = append(out, Decision{c, true, ""})
+			out = append(out, Decision{Candidate: c, Dispatch: true})
 		}
 	}
 	return out
@@ -145,8 +143,7 @@ func PartitionByWindow(ordered []Candidate, s Schedule, now time.Time) ([]Candid
 			act = append(act, c)
 			continue
 		}
-		skipped = append(skipped, Decision{c, false,
-			fmt.Sprintf("outside lane window (%s)", c.Lane.Name)})
+		skipped = append(skipped, Decision{Candidate: c, Reason: fmt.Sprintf("outside lane window (%s)", c.Lane.Name)})
 	}
 	return act, skipped
 }
