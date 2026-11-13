@@ -42,11 +42,16 @@ two post-review design amendments).
       `bridge-dispatch.service.d/dry-run.conf` overriding `ExecStart` to
       `bridge dispatch --auto --dry-run`. Decisions land in
       `journalctl --user -u bridge-dispatch`. No `dispatch.json` yet (defaults).
-- [ ] **Go live with the dispatch timer** after a week of reviewed dry-run
-      ticks (from ~2026-11-18): delete the `dry-run.conf` drop-in, then
-      `systemctl --user daemon-reload`. Calibrate `budget.window_budget_usd`
-      first — at install the rung read $364–418 used vs $9.60 allowed
-      (~3800%), so every daytime (07–18) tick skips everything.
+- [x] **Go live with the dispatch timer** — done 2026-11-13 (Fri) for the
+      weekend: `dry-run.conf` drop-in removed. `~/.config/bridge/dispatch.json`
+      now sets `limits.per_repo: 2` with an override `ai-instructions: 1`
+      (#56 is gated on the unmerged part-1 PR #57). bridge's past-due
+      milestones `general-september-2026` / `general-october-2026` closed so
+      #387/#328 are eligible. Simulated first night: agent-workflow #366 + #550,
+      then global cap 3/3 (ai-instructions #57 counts toward it).
+- [ ] **Calibrate `budget.window_budget_usd`** — still blocks every daytime
+      tick while working ($82 used vs $9.60 allowed on 2026-11-13). See the
+      `/usage` comparison item above.
 - [x] Rebuild and install the binary carrying the rung — done 2026-09-20,
       `bridge v2.9.0-104-g0946f00`. The previously installed build predated
       the feature entirely.
