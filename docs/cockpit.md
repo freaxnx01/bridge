@@ -5,7 +5,9 @@ the **Inbox**: the issues that need a person, with everything that is merely
 running or retrying as a one-line status. The **Pipeline board** — what is
 running, what is ready to dispatch, what is held, and what still needs
 enrichment, across all local clones — is the second area, reachable from the
-header, which carries the Inbox card count as a badge. Design:
+header, which carries the Inbox card count as a badge. The **Dispatcher** area
+shows what the dispatch timer picked, or would have picked, and why (see
+"Dispatcher area" below). Design:
 [`docs/superpowers/specs/2026-10-24-bridge-cockpit-design.md`](superpowers/specs/2026-10-24-bridge-cockpit-design.md)
 and [`2026-11-11-issue-inbox-design.md`](superpowers/specs/2026-11-11-issue-inbox-design.md),
 wireframes and flows: [`docs/design/cockpit/`](design/cockpit/).
@@ -68,7 +70,7 @@ away, so a fresh report shows within about a minute instead of at the next
 | Column | Contents |
 |---|---|
 | Running | Pipeline workflow runs (queued / in progress), issues labelled `enrichment-ongoing`, and live agent sessions. The count covers active work only: idle sessions fold into **Idle sessions**, and an `enrichment-ongoing` issue unchanged for 6 h+ folds into **Stuck enriching** (a label a finished run never cleared; each card offers **Clear lock** and **Clear & re-enrich**). A pipeline run shows its runtime in minutes, orange from 30 min, red from 60 min |
-| Ready | Issues that pass `dispatch.Eligible`, in dispatch order |
+| Ready | Issues that pass `dispatch.Eligible`, in the dispatcher's own order (`repo_priority` from `dispatch.json` included), each with a verdict badge (see below) |
 | Held | Otherwise eligible issues blocked by `outside active milestone` or `open PR` |
 | Needs enrichment | Issues labelled `needs-enrichment` or `❓ to-be-defined` |
 
@@ -76,6 +78,42 @@ away, so a fresh report shows within about a minute instead of at the next
 it also requires an `## Implementation Plan` heading in the issue body (see
 [`dispatch.md`](dispatch.md)). Ready/Held are only computed for GitHub repos that
 carry `.github/workflows/agent.yml` or `agent-implement.yml` ("wired").
+
+### Dispatch verdicts and the gate strip
+
+After each issues refresh (10 min) the collector runs the dispatcher's own
+decision function (`dispatch.Evaluate`, the same code a real tick runs) over the
+collected repos, as of the **next acting window**: window gating is ignored, and
+the budget rung and nightly cap are evaluated as they will apply at the next
+window opening. So a Ready badge answers "what will the next tick inside a window
+pick", which stays informative all day. `dispatch.json` and the dispatch state are
+re-read on every refresh, so config edits show without restarting `serve`.
+
+- **Ready badge:** `next` (would dispatch) or `skip: <reason>`, plus the lane and a
+  lane-downgrade reason when set.
+- **Gate strip** above the columns (and on the Dispatcher area): the *current*
+  state, i.e. window open or closed and the next opening, budget rung used/allowed,
+  nightly count/cap, global open PRs/cap, paused, last tick, and each lane's mode
+  and count. Same figures as `bridge dispatch status`.
+
+A failed preview shows under `errors` with source `dispatch`; the last good
+preview is kept.
+
+## Dispatcher area
+
+Reads the dispatch journal (see "Dispatch journal" in [`dispatch.md`](dispatch.md)),
+so it shows dry-run and live ticks alike. Read-only: no buttons.
+
+- **Summary (top):** one row per issue seen as a candidate in the period (1 / 7 /
+  30 days, default 7): how many timer ticks evaluated it, how many would have
+  picked it, and its most frequent reason. Only `trigger: timer` ticks count, so a
+  hand-run `dispatch now` does not double-count a night. "Picked" includes a
+  dry-run lane's would-dispatch.
+- **Timeline:** one chip per tick with its picked count (dimmed at 0). Clicking a
+  summary row filters the timeline to the ticks where that issue was a candidate
+  and opens the latest.
+- **Tick detail:** the ranked list from that tick: rank, verdict, deciding rung,
+  skip reason, and the gates at that moment.
 
 ## Labels read
 
@@ -125,8 +163,11 @@ All JSON. `GET` is open (LAN), `POST` is guarded (see Auth).
 }
 ```
 
-`IssueCard` is `{forge, repo, number, title, url, labels[], reason?}`; `reason`
-is set on Held cards. Empty sections are `[]`, never `null`.
+`IssueCard` is `{forge, repo, number, title, url, labels[], reason?, verdict?,
+verdictReason?, lane?, laneReason?}`; `reason` is set on Held cards, `verdict`
+(`next` | `skip`) and the rest on Ready cards when the dispatch preview ran. The
+board also carries `gates` (the gate-strip figures, see `dispatch.md`), omitted
+when the preview has not run. Empty sections are `[]`, never `null`.
 
 `skipped` lists forges the board has no client for (today: Azure DevOps), one
 entry per forge with its repo count, sorted by forge; those repos are not
@@ -173,6 +214,28 @@ than a minute ago (see Refresh intervals and rate limits):
 | 404 | Malformed path, the repo is not a wired GitHub repo the collector knows, or the issue is not one of its inbox candidates |
 | 405 | Wrong method (`Allow: GET`) |
 | 502 | The forge call failed; the detail is in the server log, never in the body |
+
+### `GET /api/dispatch/history?days=7`
+
+`days` is 1–30 (default 7); anything else is `400`.
+
+```json
+{
+  "summary": [{"repo": "owner/name", "issue": 12, "title": "",
+               "evaluatedTicks": 14, "pickedTicks": 3, "topReason": "type: bug vs feat"}],
+  "ticks": [{"at": "RFC3339", "mode": "dry-run|live", "trigger": "timer|manual",
+             "outcome": "decided", "pickedCount": 1, "skippedCount": 6,
+             "candidates": [{"repo": "owner/name", "issue": 12, "dispatch": true}]}]
+}
+```
+
+`topReason` is the most frequent `rank_reason` among the ticks that picked the
+issue, else its most frequent skip reason.
+
+### `GET /api/dispatch/ticks/{at}`
+
+One full journal record (`at` as RFC3339, exactly as in `ticks[].at`). `400` for a
+malformed timestamp, `404` when no tick has that time.
 
 ### `POST /api/pipeline/refresh`
 
