@@ -862,3 +862,114 @@ func TestBoard_NoUnsupported_SkippedIsEmptyArray(t *testing.T) {
 		t.Fatalf("board JSON = %s, want \"skipped\":[]", raw)
 	}
 }
+
+// previewSource is a fake dispatch preview: it records the repos it was given
+// and answers with a decision per issue, or an error once armed.
+type previewSource struct {
+	mu    sync.Mutex
+	calls int
+	seen  [][]dispatch.RepoInput
+	fail  bool
+}
+
+func (p *previewSource) arm(fail bool) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.fail = fail
+}
+
+func (p *previewSource) lastRepos() []dispatch.RepoInput {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.seen) == 0 {
+		return nil
+	}
+	return p.seen[len(p.seen)-1]
+}
+
+func (p *previewSource) preview(_ context.Context, repos []dispatch.RepoInput) (dispatch.Tick, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.calls++
+	p.seen = append(p.seen, repos)
+	if p.fail {
+		return dispatch.Tick{}, errors.New("dispatch.json is not valid JSON")
+	}
+	var ds []dispatch.Decision
+	for _, r := range repos {
+		for _, i := range r.Issues {
+			ds = append(ds, dispatch.Decision{
+				Candidate: dispatch.Candidate{Owner: r.Owner, Repo: r.Name, Issue: i,
+					Lane: dispatch.Lane{Name: "auto"}},
+				Reason: "repo at WIP 1/1",
+			})
+		}
+	}
+	return dispatch.Tick{Decisions: ds, Gates: dispatch.Gates{WindowOpen: true, GlobalCap: 3}}, nil
+}
+
+// A preview that starts failing must not blank the board's verdicts: the last
+// good answer is still the best one available, and the failure shows as a
+// source error instead.
+func TestCollector_PreviewError_ListedAndPreviousKept(t *testing.T) {
+	r := ghRepo("a")
+	w := newWorld(r)
+	w.wired[key(r)] = true
+	w.issues[key(r)] = []forge.Issue{gh(1)}
+	p := &previewSource{}
+	src := w.sources()
+	src.Preview = p.preview
+	c := NewCollector(src, Intervals{}, time.Now, nil)
+
+	c.CollectIssues(context.Background())
+	if v := c.Board().Ready[0].Verdict; v != "skip" {
+		t.Fatalf("first pass verdict = %q", v)
+	}
+
+	p.arm(true)
+	c.CollectIssues(context.Background())
+
+	b := c.Board()
+	if b.Ready[0].Verdict != "skip" || b.Gates == nil {
+		t.Errorf("the last good preview must survive: %+v", b.Ready[0])
+	}
+	if !slices.ContainsFunc(b.Errors, func(e SourceError) bool { return e.Source == "dispatch" }) {
+		t.Errorf("errors = %+v", b.Errors)
+	}
+}
+
+func TestCollector_PreviewReceivesOnlyGitHubRepos(t *testing.T) {
+	github, forgejo := ghRepo("a"), core.Repo{Forge: "forgejo", Owner: "o", Name: "b", Path: "/r/b"}
+	w := newWorld(github, forgejo)
+	w.wired[key(github)], w.wired[key(forgejo)] = true, true
+	w.issues[key(github)] = []forge.Issue{gh(1)}
+	w.issues[key(forgejo)] = []forge.Issue{gh(2)}
+	p := &previewSource{}
+	src := w.sources()
+	src.Preview = p.preview
+	c := NewCollector(src, Intervals{}, time.Now, nil)
+
+	c.CollectIssues(context.Background())
+
+	got := p.lastRepos()
+	if len(got) != 1 || got[0].Name != "a" {
+		t.Errorf("preview repos = %+v", got)
+	}
+}
+
+// Without a Preview source the board is exactly what it was before dispatch
+// verdicts existed.
+func TestCollector_NoPreviewSource_BoardHasNoGates(t *testing.T) {
+	r := ghRepo("a")
+	w := newWorld(r)
+	w.wired[key(r)] = true
+	w.issues[key(r)] = []forge.Issue{gh(1)}
+	c := NewCollector(w.sources(), Intervals{}, time.Now, nil)
+
+	c.CollectIssues(context.Background())
+
+	b := c.Board()
+	if b.Gates != nil || b.Ready[0].Verdict != "" {
+		t.Errorf("board = %+v", b.Ready[0])
+	}
+}

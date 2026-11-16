@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cockpit: **Dispatcher area** (week summary per issue, tick timeline and per-tick
+  ranked list), a **gate strip** with the dispatcher's caps and budget, and
+  `next`/`skip` **verdict badges** on Ready cards from a live preview that runs the
+  same `dispatch.Evaluate` as a real tick. New `GET /api/dispatch/history` and
+  `GET /api/dispatch/ticks/{at}`; `GET /api/pipeline` gains `gates`. (#387)
+- `bridge dispatch`: each decision records its `rank`, deciding rung
+  (`rank_reason`) and `ladder` in the journal and in `--json`; the journal record
+  gains `gates`. (#387)
+
 - `bridge dispatch`: every tick appends a record to a per-day JSON-lines **dispatch
   journal** under the bridge cache dir (trigger, mode, lanes in window, repos, budget
   reading, each decision with its outcome), kept 30 days; the cockpit digest reads it. (#379)

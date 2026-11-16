@@ -470,6 +470,16 @@ One record, line-wrapped here for reading:
 
 **`budget`** is present only when the rung is on for that tick (see "Usage-budget rung" above). `known: false` means usage could not be measured, which is what makes the rung refuse everything — it is never the same as a measured zero.
 
+**`gates`** (added by #387) is every bound in force for the tick, the same figures `bridge dispatch status` prints: `windowOpen` and `nextOpening`, the budget rung (`rungOn`, `usedUsd`, `allowedUsd`, `budgetKnown`), `nightCount`/`nightCap`, `globalOpen`/`globalCap`, `openByRepo`, `paused`, `lastTick`, and each lane's mode and count under `lanes`. It supersedes `budget`, which stays for readers written against the first shape.
+
+**Ranking.** Each decision also carries `rank`, `rank_reason` and `ladder`:
+
+- `rank` is the candidate's 1-based place in the tick's full order, over **all** candidates, gated or not: it describes the order, not who was acted on.
+- `rank_reason` is the **deciding rung**: the first ladder rung (see "Priority" above) on which this candidate differs from the **next** candidate in that order, with both values, e.g. `type: bug vs feat` or `milestone due: 2026-11-20 vs none`. The last candidate has none.
+- `ladder` is the candidate's own reading on every rung (`repo_pattern`, `milestone`, `milestone_due`, `type`, `size`, `created`), recorded rather than re-derived so a week-old record still explains itself after the labels have moved on.
+
+`bridge dispatch --json` emits the same three fields per decision (additive; existing fields unchanged). The text table is unchanged.
+
 `lanes_in_window` and `repos` are the tick's inputs: which lanes acted at `at` (read from the config, no network, so the early-exit paths can still answer it) and which repos were fetched, as `owner/name`.
 
 **Retention is 30 days.** After each append, day files dated more than 30 days before the new record's UTC day are deleted; any other file in the directory is left alone.

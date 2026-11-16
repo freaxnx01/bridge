@@ -18,6 +18,13 @@
   const size = $derived((card.labels ?? []).find((l) => l.startsWith('size:')));
   const meta = $derived([type, size, card.forge !== 'github' ? card.forge : null].filter(Boolean).join(' · '));
 
+  // The live dispatch preview's answer for this card. "next" means the next
+  // acting tick would dispatch it; a skip always names the gate that stopped it.
+  const verdictText = $derived.by(() => {
+    if (card.verdict === 'next') return 'next';
+    return card.verdictReason ? `skip: ${card.verdictReason}` : 'skip';
+  });
+
   async function start() {
     token = await ensureToken();
     if (token) state = 'confirm';
@@ -53,6 +60,13 @@
     <div class="line2">
       {meta}{#if card.reason}{meta ? ' · ' : ''}<span class="reason">{card.reason}</span>{/if}
     </div>
+    {#if card.verdict}
+      <div class="line2 verdict">
+        <span class={card.verdict === 'next' ? 'verdict-next' : 'verdict-skip'}>{verdictText}</span>
+        {#if card.lane}<span class="lane">lane {card.lane}</span>{/if}
+        {#if card.laneReason}<span class="reason">{card.laneReason}</span>{/if}
+      </div>
+    {/if}
     {#if state === 'launched'}
       <div class="result ok">✓ Started · {result.slot}{#if result.rcUrl} · <a href={result.rcUrl} target="_blank" rel="noopener noreferrer">Open RC ↗</a>{/if}</div>
     {:else if state === 'alreadyRunning'}
@@ -71,3 +85,21 @@
     <ConfirmDialog repo={card.repo} number={card.number} {action} onconfirm={confirm} oncancel={() => (state = 'idle')} />
   {/if}
 </li>
+
+<style>
+  .verdict {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4em;
+  }
+  .verdict-next {
+    font-weight: 700;
+    color: var(--ok, #2aa198);
+  }
+  .verdict-skip {
+    color: var(--muted, #93a1a1);
+  }
+  .lane {
+    opacity: 0.8;
+  }
+</style>

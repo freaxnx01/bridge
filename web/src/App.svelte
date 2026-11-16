@@ -6,6 +6,7 @@
   import TokenDialog from './lib/components/TokenDialog.svelte';
   import Inbox from './routes/Inbox.svelte';
   import Pipeline from './routes/Pipeline.svelte';
+  import Dispatcher from './routes/Dispatcher.svelte';
   import { pipeline } from './lib/stores/pipeline.js';
   import { inbox, loadInbox, startInboxPolling } from './lib/stores/inbox.js';
   import { repos, loadRepos } from './lib/stores/repos.js';
@@ -63,8 +64,9 @@
   onToken={() => requestToken()}
 />
 
-<!-- The Architecture tab shows a static diagram: there is nothing to filter. -->
-{#if area !== 'arch'}
+<!-- Architecture is a static diagram and Dispatcher is the dispatcher's own
+     record rather than a repo view: neither has anything to filter. -->
+{#if area !== 'arch' && area !== 'dispatcher'}
   <RepoFilterBar repos={$repos} filter={$repoFilter} {counts} />
 {/if}
 
@@ -73,6 +75,8 @@
     <Inbox />
   {:else if area === 'pipeline'}
     <Pipeline />
+  {:else if area === 'dispatcher'}
+    <Dispatcher />
   {:else}
     <section class="arch">
       <h2>Architecture</h2>

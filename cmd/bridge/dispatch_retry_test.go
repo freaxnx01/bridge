@@ -80,8 +80,8 @@ func failedIssue(number int, labels ...string) forge.Issue {
 	return forge.Issue{Number: number, Title: "T", Labels: labels}
 }
 
-func githubRepoInput(issues ...forge.Issue) repoInput {
-	return repoInput{Forge: "github", Owner: "freaxnx01", Name: "bridge", Issues: issues}
+func githubRepoInput(issues ...forge.Issue) dispatch.RepoInput {
+	return dispatch.RepoInput{Forge: "github", Owner: "freaxnx01", Name: "bridge", Issues: issues}
 }
 
 func TestCollectRetries_FailedRateLimitStop_Selected(t *testing.T) {
@@ -90,7 +90,7 @@ func TestCollectRetries_FailedRateLimitStop_Selected(t *testing.T) {
 	}}
 
 	cands, skips := collectRetries(context.Background(), gh,
-		[]repoInput{githubRepoInput(failedIssue(43))}, retryTickNow())
+		[]dispatch.RepoInput{githubRepoInput(failedIssue(43))}, retryTickNow())
 
 	if len(cands) != 1 {
 		t.Fatalf("want 1 retry candidate, got %d: %+v", len(cands), cands)
@@ -115,7 +115,7 @@ func TestCollectRetries_FailedRateLimitStop_Selected(t *testing.T) {
 
 func TestCollectRetries_NoPredicateMatch_NoAPICalls(t *testing.T) {
 	gh := &fakeRetryReader{}
-	repos := []repoInput{
+	repos := []dispatch.RepoInput{
 		githubRepoInput(
 			forge.Issue{Number: 41, Labels: []string{"ai-implement"}},
 			forge.Issue{Number: 42, Labels: []string{"feat"}},
@@ -137,7 +137,7 @@ func TestCollectRetries_ParkedFailed_SkippedWithoutFetch(t *testing.T) {
 	gh := &fakeRetryReader{}
 
 	cands, skips := collectRetries(context.Background(), gh,
-		[]repoInput{githubRepoInput(failedIssue(43, "ai-implement", "ai:failed", "parked"))},
+		[]dispatch.RepoInput{githubRepoInput(failedIssue(43, "ai-implement", "ai:failed", "parked"))},
 		retryTickNow())
 
 	if len(cands) != 0 {
@@ -161,7 +161,7 @@ func TestCollectRetries_RunsUnreadable_FailsClosed(t *testing.T) {
 	}
 
 	cands, skips := collectRetries(context.Background(), gh,
-		[]repoInput{githubRepoInput(failedIssue(43))}, retryTickNow())
+		[]dispatch.RepoInput{githubRepoInput(failedIssue(43))}, retryTickNow())
 
 	if len(cands) != 0 {
 		t.Errorf("not knowing whether a run is in flight must never read as 'not in flight': %+v", cands)
@@ -179,7 +179,7 @@ func TestCollectRetries_IssueUnreadable_OnlyThatOne(t *testing.T) {
 		issueErr: map[int]error{43: errors.New("boom")},
 		issues:   map[int][]forge.Comment{44: {markerComment(rateLimitMarker, retryMarkerAt)}},
 	}
-	repos := []repoInput{githubRepoInput(failedIssue(43), failedIssue(44))}
+	repos := []dispatch.RepoInput{githubRepoInput(failedIssue(43), failedIssue(44))}
 
 	cands, skips := collectRetries(context.Background(), gh, repos, retryTickNow())
 
@@ -238,7 +238,7 @@ func TestCollectRetries_SkipReasons_Table(t *testing.T) {
 			in := githubRepoInput(tc.issue)
 			in.PRs = tc.prs
 			cands, skips := collectRetries(context.Background(), gh,
-				[]repoInput{in}, retryMarkerAt.Add(2*time.Hour))
+				[]dispatch.RepoInput{in}, retryMarkerAt.Add(2*time.Hour))
 
 			if len(cands) != 0 {
 				t.Errorf("want no selection, got %+v", cands)
@@ -814,7 +814,7 @@ func TestApplyDecisions_RetryInDryRunLane_NoWritesCounterAdvances(t *testing.T) 
 		Owner: "freaxnx01", Repo: "game-a", Issue: forge.Issue{Number: 1}, Lane: lane,
 		Retry: true, RetryReason: "rate_limit, retries exhausted"}, Dispatch: true}}
 
-	if err := applyDecisions(context.Background(), ds, dispatch.State{}, tickTiming{Now: now}, cfg); err != nil {
+	if err := applyDecisions(context.Background(), ds, dispatch.State{}, dispatch.Timing{Now: now}, cfg); err != nil {
 		t.Fatalf("applyDecisions: %v", err)
 	}
 

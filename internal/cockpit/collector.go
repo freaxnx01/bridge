@@ -27,6 +27,9 @@ const (
 	sourceIssues   = "issues"
 	sourceRuns     = "runs"
 	sourceSessions = "sessions"
+	// sourceDispatch is not a CollectedAt key: the preview refreshes with the
+	// issues source. It names the live preview's errors on the board.
+	sourceDispatch = "dispatch"
 )
 
 // SSE event names the collector publishes, one per payload it serves.
@@ -66,6 +69,10 @@ type Sources struct {
 	Issue    func(ctx context.Context, r core.Repo, number int) (forge.Issue, []forge.Comment, error)
 	Sessions func(ctx context.Context) ([]agentview.Session, error)
 	Paused   func() bool
+	// Preview evaluates what the next acting dispatch tick would do with the
+	// repos given, read-only. It may be nil, which turns the board's verdict
+	// badges and gate strip off rather than failing.
+	Preview func(ctx context.Context, repos []dispatch.RepoInput) (dispatch.Tick, error)
 }
 
 // Intervals are the refresh periods per source. A zero interval disables the ticker.
@@ -100,6 +107,7 @@ type Collector struct {
 	collectedAt map[string]time.Time
 	errs        map[string]SourceError
 	unsupported map[string]string // repo key → forge the board has no client for
+	preview     *dispatch.Tick
 	board       Board
 	boardJSON   []byte
 	inbox       Inbox
@@ -209,7 +217,20 @@ func (c *Collector) Board() Board {
 	b.IntervalsSeconds = maps.Clone(b.IntervalsSeconds)
 	b.Errors = slices.Clone(b.Errors)
 	b.Skipped = slices.Clone(b.Skipped)
+	b.Gates = clonedGates(b.Gates)
 	return b
+}
+
+// clonedGates deep-copies the gate block so a caller holding the board cannot
+// write through to the collector's own copy.
+func clonedGates(g *dispatch.Gates) *dispatch.Gates {
+	if g == nil {
+		return nil
+	}
+	out := *g
+	out.OpenByRepo = maps.Clone(g.OpenByRepo)
+	out.Lanes = slices.Clone(g.Lanes)
+	return &out
 }
 
 // Inbox returns a copy of the latest inbox.
@@ -315,7 +336,44 @@ func (c *Collector) CollectIssues(ctx context.Context) {
 	c.collectedAt[sourceIssues] = c.now()
 	c.mu.Unlock()
 	c.pruneComments(next)
+	c.refreshPreview(ctx, next)
 	c.publish()
+}
+
+// refreshPreview re-asks the dispatcher what it would do with this snapshot.
+// It runs outside the lock — it reads config, state and the budget window off
+// disk — and a failure keeps the last good preview: a stale verdict beats no
+// verdict, and the error shows on the board under source "dispatch".
+func (c *Collector) refreshPreview(ctx context.Context, repos []RepoData) {
+	if c.src.Preview == nil {
+		return
+	}
+	tick, err := c.src.Preview(ctx, dispatchInputs(repos))
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if err != nil {
+		c.setErrLocked(sourceDispatch, err)
+		return
+	}
+	delete(c.errs, sourceDispatch)
+	c.preview = &tick
+}
+
+// dispatchInputs is the snapshot as the dispatcher reads it. Only GitHub repos
+// go in: ai-implement runs on GitHub Actions, so there is no pipeline to
+// dispatch to elsewhere, and the CLI tick fetches the same set.
+func dispatchInputs(repos []RepoData) []dispatch.RepoInput {
+	out := make([]dispatch.RepoInput, 0, len(repos))
+	for _, rd := range repos {
+		if rd.Forge != "github" {
+			continue
+		}
+		out = append(out, dispatch.RepoInput{
+			Forge: rd.Forge, Owner: rd.Owner, Name: rd.Name,
+			Issues: rd.Issues, Milestones: rd.Milestones, PRs: rd.PRs,
+		})
+	}
+	return out
 }
 
 // CollectRuns refreshes workflow runs for repos that have an open
@@ -742,7 +800,8 @@ func (c *Collector) publish() {
 // rebuildLocked recomputes board and inbox and reports, per payload, whether
 // it differs from the previous one apart from CollectedAt.
 func (c *Collector) rebuildLocked() (board, inbox bool) {
-	b := BuildBoard(Input{Repos: slices.Clone(c.repos), Sessions: c.sessions, DispatchPaused: c.src.Paused()})
+	b := BuildBoard(Input{Repos: slices.Clone(c.repos), Sessions: c.sessions,
+		DispatchPaused: c.src.Paused(), Preview: c.preview})
 	b.IntervalsSeconds = map[string]int{
 		sourceIssues:   int(c.iv.Issues / time.Second),
 		sourceRuns:     int(c.iv.Runs / time.Second),

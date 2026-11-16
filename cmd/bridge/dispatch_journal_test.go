@@ -268,18 +268,18 @@ func TestDispatchJournalDir_UnderTheCacheRoot(t *testing.T) {
 }
 
 func TestRepoNames_OwnerSlashName(t *testing.T) {
-	got := repoNames([]repoInput{{Owner: "freaxnx01", Name: "bridge"}, {Owner: "freaxnx01", Name: "quotes"}})
+	got := repoNames([]dispatch.RepoInput{{Owner: "freaxnx01", Name: "bridge"}, {Owner: "freaxnx01", Name: "quotes"}})
 	if !equalStrings(got, []string{"freaxnx01/bridge", "freaxnx01/quotes"}) {
 		t.Errorf("got %v", got)
 	}
 }
 
 func TestJournalBudget_CarriesReadingAndKnown(t *testing.T) {
-	got := journalBudget(dispatch.BudgetState{UsedUSD: 4.5, LimitUSD: 9.6, Unknown: true})
+	got := journalBudget(dispatch.Gates{UsedUSD: 4.5, AllowedUSD: 9.6, BudgetKnown: false})
 	if got == nil || got.UsedUSD != 4.5 || got.LimitUSD != 9.6 || got.Known {
 		t.Errorf("got %+v", got)
 	}
-	if known := journalBudget(dispatch.BudgetState{}); !known.Known {
+	if known := journalBudget(dispatch.Gates{BudgetKnown: true}); !known.Known {
 		t.Errorf("a measured reading is known, got %+v", known)
 	}
 }
@@ -589,5 +589,29 @@ func writeDispatchConfig(t *testing.T, body string) {
 	}
 	if err := os.WriteFile(dispatchConfigPath(), []byte(body), 0o600); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// The journal is what the cockpit's tick detail reads back, so a recorded
+// decision has to answer "why this one first?" on its own — re-deriving the
+// ladder from a week-old record is not possible.
+func TestJournalDecisions_CarryRankAndLadder(t *testing.T) {
+	got := journalDecisions([]dispatch.Decision{{
+		Candidate: dispatch.Candidate{Repo: "bridge", Issue: forge.Issue{Number: 41}},
+		Dispatch:  true,
+		Rank: dispatch.Rank{
+			Position: 2, Reason: "size: s vs m",
+			Ladder: dispatch.Ladder{Type: "feat", Size: "s"},
+		},
+	}}, true)
+
+	if len(got) != 1 {
+		t.Fatalf("got %d rows", len(got))
+	}
+	if got[0].Rank != 2 || got[0].RankReason != "size: s vs m" {
+		t.Errorf("got %+v", got[0])
+	}
+	if got[0].Ladder.Type != "feat" || got[0].Ladder.Size != "s" {
+		t.Errorf("ladder = %+v", got[0].Ladder)
 	}
 }
