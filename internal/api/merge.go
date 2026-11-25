@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"strings"
 )
 
 // MergeRequest asks for one agent PR to be merged. HeadSHA is the head the
@@ -81,7 +80,7 @@ func decodeMergeRequest(w http.ResponseWriter, r *http.Request) (MergeRequest, b
 		return req, false
 	}
 	switch {
-	case strings.Count(req.Repo, "/") != 1 || strings.HasPrefix(req.Repo, "/") || strings.HasSuffix(req.Repo, "/"):
+	case !repoIsOwnerName(req.Repo):
 		writeError(w, http.StatusBadRequest, "repo must be owner/name")
 	case req.Number <= 0:
 		writeError(w, http.StatusBadRequest, "number must be positive")

@@ -192,10 +192,15 @@ while the old data stays on the board. To spare the GitHub rate limit:
   it is answered from the collector's comment cache. The endpoint is open, so
   without the window any page the operator visits could loop it and exhaust the
   token's hourly REST quota.
+- The merge card's diff is read only when the operator taps `[diff ▸]`: one
+  call, cached per `(repo, pr, headSha)`, and only ever for a PR the inbox is
+  already showing. It is the single per-request forge read in the cockpit.
 
 ## API
 
-All JSON. `GET` is open (LAN), `POST` is guarded (see Auth).
+All JSON. `GET` is open (LAN) with one exception — `GET /api/inbox/diff`, the
+only read that serves source code, needs the bearer token — and `POST` is
+guarded (see Auth).
 
 ### `GET /api/pipeline`
 
@@ -256,14 +261,17 @@ A `merge` card carries one extra field, omitted on every other kind:
                       "headSha": "40-hex", "current": true, "blocking": 0, "nits": 2,
                       "source": "marker|fallback"},
            "checks": {"state": "green|running|failing|none", "passed": 6, "total": 6},
-           "files": [{"path": "a.go", "additions": 3, "deletions": 1}], "filesTruncated": false,
+           "files": [{"path": "a.go", "status": "modified", "additions": 3, "deletions": 1}],
+           "filesTruncated": false,
            "stale": false, "canMerge": true, "reason": ""}}
 ```
 
 `review` is `null` when no trusted comment carried a verdict; `blocking` and
 `nits` are omitted for the `fallback` source, which does not carry counts.
 `reason` is `""` exactly when `canMerge` is true, and the card's own `reason` is
-`ready to merge` or that same blocker.
+`ready to merge` or that same blocker. `files` carries no `patch`: this endpoint
+is open, so it never serves source code — the patches come from
+`GET /api/inbox/diff` below.
 
 ### `GET /api/inbox/{owner}/{repo}/{number}`
 
@@ -392,6 +400,52 @@ After a successful merge the repo is re-collected in the background, so the card
 leaves the inbox on the next `inbox-updated` event rather than at the next
 10-minute tick.
 
+### `GET /api/inbox/diff?repo=owner/name&number=<issue>`
+
+The read-only per-file diff of the PR on an issue's merge card, loaded lazily
+when the operator taps `[diff ▸]`. `number` is the **issue**; the PR is
+whichever one the card shows.
+
+**This is the only token-guarded `GET`.** Every other read is open on the LAN,
+but the diff is the one that serves source code — of private repos included —
+so it needs `BRIDGE_API_TOKEN` as `Authorization: Bearer <token>`
+(`requireTokenConfigured` + `requireBearer`). There is deliberately **no**
+Origin check, unlike the writes: browsers send no `Origin` on a same-origin
+`GET`, and a bearer header is never attached cross-site, so the read is not
+CSRF-able and an Origin requirement would only break legitimate clients.
+
+The issue must be a `merge` card of the current snapshot; otherwise the answer
+is `409 not on the inbox` and **no forge call is made**. There is no way to ask
+for an arbitrary PR's code.
+
+```json
+{"pr": 9, "headSha": "40-hex", "truncated": false,
+ "files": [{"path": "a.go", "status": "modified", "additions": 3, "deletions": 1,
+            "patch": "@@ -1,3 +1,4 @@\n…", "patchMissing": false}]}
+```
+
+`patchMissing` is true when the forge reported no patch at all — a binary file,
+or one too large for it to diff — which an empty `patch` alone cannot be told
+apart from an empty file. `status` is GitHub's own (`added`, `modified`,
+`removed`, `renamed`, …). The first 100 files are served, like the card;
+`truncated` repeats the card's `filesTruncated`. Empty `files` is `[]`, never
+`null`.
+
+Answers are cached in memory keyed `(repo, pr, headSha)`, LRU of 32 entries: a
+card reopened at the same head costs no forge call, a push changes the head SHA
+and therefore the key, and a failed read is never cached. This single lazy
+per-click read is the one exception to the collector's "no per-request forge
+fan-out" rule.
+
+| Status | Meaning |
+|---|---|
+| 400 | `repo` not `owner/name`, or `number` not a positive integer |
+| 401 | Missing or wrong bearer token |
+| 405 | Wrong method (`Allow: GET`) |
+| 409 | `not on the inbox` — the issue is not a `merge` card of the current snapshot, or its repo is not wired |
+| 502 | `forge call failed` (the forge detail is in the server log, never in the body) |
+| 503 | `BRIDGE_API_TOKEN` is not set (the diff fails closed, like the writes) |
+
 ### SSE
 
 `GET /api/events` emits `pipeline-updated` whenever the board changes and
@@ -424,6 +478,7 @@ rejected for any other agent.
 ## Auth
 
 - Writes need `BRIDGE_API_TOKEN` as `Authorization: Bearer <token>`. If it is unset, the write endpoints answer `503` and do nothing.
+- `GET /api/inbox/diff` needs the same token (but no `Origin`): it is the one read that serves source code. See its section above.
 - The `Origin` header must be `localhost:<port>`, `127.0.0.1:<port>`, or an entry in `BRIDGE_COCKPIT_ORIGINS` (comma-separated `host[:port]`). The allowlist is explicit and never derived from the request's `Host`, which defends against DNS rebinding.
 - `bridge-serve.service` binds `0.0.0.0:7777` because FlowHub needs `/api/capture` over the LAN. Reads are therefore LAN-open, as they were before; writes still need token and origin.
 - The page stores the token in the browser after you enter it once with the 🔑 button.

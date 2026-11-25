@@ -194,6 +194,45 @@ func mergeInboxCard(ctx context.Context, cards mergeCards, repos func() ([]core.
 	return mergePR(ctx, m, bots, req)
 }
 
+// inboxDiff is the DiffHandler's Diff: the per-file diff of the PR the issue's
+// merge card is currently showing, read through cache so a card reopened at the
+// same head costs no forge call. An issue that is not a merge card is refused
+// before anything is resolved — the diff reads no arbitrary PR.
+func inboxDiff(ctx context.Context, cards mergeCards, repos func() ([]core.Repo, error),
+	resolve clientResolver, cache *cockpit.DiffCache, owner, name string, number int) (cockpit.Diff, error) {
+	card, ok := cards.MergeCard(owner, name, number)
+	if !ok || card.Kind != cockpit.CardMerge || card.Merge == nil {
+		return cockpit.Diff{}, fmt.Errorf("%w: %s/%s#%d", cockpit.ErrNotCandidate, owner, name, number)
+	}
+	ev := card.Merge
+	key := cockpit.DiffKey{Repo: owner + "/" + name, PR: ev.PR, HeadSHA: ev.HeadSHA}
+	return cache.Get(ctx, key, func(ctx context.Context) (cockpit.Diff, error) {
+		files, err := prFiles(ctx, repos, resolve, owner, name, ev.PR)
+		if err != nil {
+			return cockpit.Diff{}, err
+		}
+		return cockpit.NewDiff(ev.PR, ev.HeadSHA, files, ev.FilesTruncated), nil
+	})
+}
+
+// prFiles reads one PR's changed files with the repo owner's own client.
+func prFiles(ctx context.Context, repos func() ([]core.Repo, error), resolve clientResolver,
+	owner, name string, pr int) ([]forge.PRFile, error) {
+	r, err := mergeRepo(repos, owner, name)
+	if err != nil {
+		return nil, err
+	}
+	m, err := repoMerger(resolve, r)
+	if err != nil {
+		return nil, err
+	}
+	files, err := m.ListPullRequestFiles(ctx, owner, name, pr)
+	if err != nil {
+		return nil, fmt.Errorf("pr files %s/%s#%d: %w", owner, name, pr, err)
+	}
+	return files, nil
+}
+
 // mergeRepo finds the clone the merge applies to.
 func mergeRepo(repos func() ([]core.Repo, error), owner, name string) (core.Repo, error) {
 	all, err := repos()

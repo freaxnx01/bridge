@@ -261,7 +261,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return res, nil
 		},
 	}
-	registerInboxRoutes(apiMux, inboxH, apiToken, origins)
+	// One cache for the process: the diff is read lazily per click, and a card
+	// reopened at the same head must not cost another forge call.
+	diffCache := cockpit.NewDiffCache(diffCacheSize)
+	diffH := &api.DiffHandler{
+		Diff: func(c context.Context, owner, name string, number int) (cockpit.Diff, error) {
+			return inboxDiff(c, collector, reposWithMeta, clients, diffCache, owner, name, number)
+		},
+	}
+	registerInboxRoutes(apiMux, inboxH, diffH, apiToken, origins)
 	// The dispatcher's own history: read-only and open, like GET /api/pipeline.
 	// It reads the tick journal off disk — no forge call, no local state write.
 	apiMux.Handle("/api/dispatch/", &api.DispatchHandler{
@@ -320,9 +328,15 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	return nil
 }
 
+// diffCacheSize is how many pull-request diffs the cockpit keeps in memory.
+// Patches are the largest thing it caches, and the operator works through a
+// handful of cards at a time.
+const diffCacheSize = 32
+
 // registerInboxRoutes mounts the inbox: its reads are open, and its one write,
 // the merge, is guarded like the pipeline actions.
-func registerInboxRoutes(mux *http.ServeMux, h *api.InboxHandler, token string, origins originAllowlist) {
+func registerInboxRoutes(mux *http.ServeMux, h *api.InboxHandler, diffH *api.DiffHandler,
+	token string, origins originAllowlist) {
 	mux.Handle("/api/inbox", h) // read-only, open like GET /api/pipeline
 	// The issue detail. Open too, but it is the only open endpoint that can
 	// reach the forge, so the collector answers it from its comment cache
@@ -334,4 +348,9 @@ func registerInboxRoutes(mux *http.ServeMux, h *api.InboxHandler, token string, 
 	// actions use: token configured, bearer, same origin.
 	mux.Handle("/api/inbox/merge", requireTokenConfigured(token,
 		requireBearer(token, requireSameOrigin(origins, h.MergeHandler()))))
+	// The diff: the only read that serves source code, so it is the only
+	// token-guarded GET. No Origin check — a browser sends no Origin on a
+	// same-origin GET, and a bearer header is never attached cross-site, so
+	// the read is not CSRF-able.
+	mux.Handle("/api/inbox/diff", requireTokenConfigured(token, requireBearer(token, diffH)))
 }

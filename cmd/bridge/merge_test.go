@@ -30,6 +30,7 @@ type fakeMerger struct {
 	files    []forge.PRFile
 
 	prErr    error
+	filesErr error
 	mergeErr error
 	delErr   error
 
@@ -54,8 +55,9 @@ func (f *fakeMerger) ListCommitStatuses(_ context.Context, _, _, _ string) ([]fo
 	return f.statuses, nil
 }
 
-func (f *fakeMerger) ListPullRequestFiles(_ context.Context, _, _ string, _ int) ([]forge.PRFile, error) {
-	return f.files, nil
+func (f *fakeMerger) ListPullRequestFiles(_ context.Context, owner, repo string, number int) ([]forge.PRFile, error) {
+	f.calls = append(f.calls, "files "+ref(owner, repo, number))
+	return f.files, f.filesErr
 }
 
 func (f *fakeMerger) MergePullRequest(_ context.Context, owner, repo string, number int, sha, method string) error {
