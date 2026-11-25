@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- Cockpit inbox: **merge card** for agent PRs awaiting a human merge — the PR's
+  `## Summary`, the AI review verdict checked against the current head, the
+  checks and the changed files — with a guarded `POST /api/inbox/merge` that
+  squash-merges pinned to the head SHA the card showed and deletes the head
+  branch. Trusted pipeline identities come from `BRIDGE_PIPELINE_BOTS`. (#382)
 - Cockpit: **Dispatcher area** (week summary per issue, tick timeline and per-tick
   ranked list), a **gate strip** with the dispatcher's caps and budget, and
   `next`/`skip` **verdict badges** on Ready cards from a live preview that runs the
