@@ -190,3 +190,6 @@ session summaries, auto-labeling, WebUI panels — see issue tracker for these).
 
 ## Inbox
 - [ ] Local golangci-lint on srvdmsk8s01 is built with go1.25 but go.mod targets go 1.26.11, so `golangci-lint run` fails ("Go language version (go1.25) used to build golangci-lint is lower than the targeted Go version"). Rebuild/upgrade golangci-lint with go ≥1.26 (seen 2026-11-11 while enriching #366).
+- [x] Create a `backlog` milestone in bridge (`/milestone new backlog`) — bridge has none, so ADR-010's "every open issue has a milestone" can't be met; then assign #405 to it (2026-11-25).
+- [ ] Run `/enrich 382` (merge from cockpit) — still `needs-enrichment`, so dispatch skips it; most direct lever against the review bottleneck (2026-11-25).
+- [ ] Run `/enrich 383` (diff in the merge card) — same reason as #382 (2026-11-25).
