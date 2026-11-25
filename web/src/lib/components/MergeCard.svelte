@@ -124,18 +124,20 @@
       <button type="button" class="link" onclick={() => (state = 'idle')}>dismiss</button>
     </p>
   {/if}
-</li>
 
-{#if state === 'confirm'}
-  <ConfirmDialog
-    repo={card.repo}
-    number={card.number}
-    action="merge"
-    detail={ev}
-    onconfirm={confirm}
-    oncancel={() => (state = 'idle')}
-  />
-{/if}
+  <!-- Inside the card so the list holds only list items; the backdrop is
+       position: fixed, so it still covers the page. -->
+  {#if state === 'confirm'}
+    <ConfirmDialog
+      repo={card.repo}
+      number={card.number}
+      action="merge"
+      detail={ev}
+      onconfirm={confirm}
+      oncancel={() => (state = 'idle')}
+    />
+  {/if}
+</li>
 
 <style>
   .merge-card {
@@ -168,7 +170,7 @@
     font-weight: 600;
   }
   .glyph {
-    color: var(--ok, var(--muted));
+    color: var(--ok);
   }
   .age,
   .meta,
