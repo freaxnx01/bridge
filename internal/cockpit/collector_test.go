@@ -36,6 +36,9 @@ type fakeWorld struct {
 	runCalls    map[string]int
 	issueCalls  map[string]int
 	detailCalls map[string]int
+	evidence    map[string]MergeEvidence
+	mergeErr    map[string]error
+	mergeCalls  map[string]int
 	sessions    []agentview.Session
 	sessErr     error
 	paused      bool
@@ -50,6 +53,8 @@ func newWorld(repos ...core.Repo) *fakeWorld {
 		detailIssue: map[string]forge.Issue{},
 		prCalls:     map[string]int{}, msCalls: map[string]int{}, runCalls: map[string]int{},
 		issueCalls: map[string]int{}, detailCalls: map[string]int{},
+		evidence: map[string]MergeEvidence{}, mergeErr: map[string]error{},
+		mergeCalls: map[string]int{},
 	}
 }
 
@@ -167,6 +172,21 @@ func (w *fakeWorld) sources() Sources {
 			}
 			return w.issueLocked(r, number), w.comments[k], nil
 		},
+		MergeEvidence: func(_ context.Context, r core.Repo, pr forge.PullRequest) (MergeEvidence, error) {
+			w.mu.Lock()
+			defer w.mu.Unlock()
+			k := fmt.Sprintf("%s#%d", key(r), pr.Number)
+			w.mergeCalls[k]++
+			if err := w.mergeErr[k]; err != nil {
+				return MergeEvidence{}, err
+			}
+			if ev, ok := w.evidence[k]; ok {
+				return ev, nil
+			}
+			// What a real source always reports: which PR this is about.
+			return MergeEvidence{PR: pr.Number, PRURL: pr.URL, HeadSHA: pr.HeadSHA}, nil
+		},
+		Bots:     mergeBots,
 		Sessions: func(context.Context) ([]agentview.Session, error) { return w.sessions, w.sessErr },
 		Paused:   func() bool { return w.paused },
 	}
@@ -971,5 +991,177 @@ func TestCollector_NoPreviewSource_BoardHasNoGates(t *testing.T) {
 	b := c.Board()
 	if b.Gates != nil || b.Ready[0].Verdict != "" {
 		t.Errorf("board = %+v", b.Ready[0])
+	}
+}
+
+// mergeWorld is a wired repo whose issue 5 is ai:done, with the PRs given.
+func mergeWorld(t *testing.T, prs ...forge.PullRequest) *fakeWorld {
+	t.Helper()
+	w := newWorld(ghRepo("a"))
+	w.wired["o/a"] = true
+	w.issues["o/a"] = []forge.Issue{gh(5, dispatch.LabelAIDone)}
+	w.prs["o/a"] = prs
+	return w
+}
+
+// pipelinePR is an open PR by the Actions bot closing issue 5.
+func pipelinePR(number int, head, author string) forge.PullRequest {
+	return forge.PullRequest{
+		Number: number, Body: "Closes #5", Author: author, State: "open",
+		HeadSHA: head, HeadRef: "ai/5", BaseRef: "main", URL: "https://x/pull/9",
+	}
+}
+
+func TestCollector_MergeEvidence_OnlyTrustedSingleClosingPR(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"),
+		pipelinePR(10, mergeHead, "alice"))
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	if got := w.calls(w.mergeCalls, "o/a#9"); got != 1 {
+		t.Errorf("evidence calls for PR 9 = %d, want 1", got)
+	}
+	if got := w.calls(w.mergeCalls, "o/a#10"); got != 0 {
+		t.Errorf("evidence calls for the human PR 10 = %d, want 0", got)
+	}
+	card, ok := c.MergeCard("o", "a", 5)
+	if !ok {
+		t.Fatalf("no merge card; inbox = %+v", c.Inbox().Cards)
+	}
+	if card.Merge == nil || card.Merge.PR != 9 {
+		t.Errorf("card merge = %+v", card.Merge)
+	}
+}
+
+func TestCollector_MergeEvidence_AIMergeLaneSkipped(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"))
+	w.issues["o/a"] = []forge.Issue{gh(5, dispatch.LabelAIDone, dispatch.LabelAIReviewAIMerge)}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	if got := w.calls(w.mergeCalls, "o/a#9"); got != 0 {
+		t.Errorf("evidence calls = %d, want 0 for the self-merging lane", got)
+	}
+	if _, ok := c.MergeCard("o", "a", 5); ok {
+		t.Error("merge card for an ai-review-ai-merge issue")
+	}
+}
+
+func TestCollector_MergeEvidence_SeveralClosingPRs_ReasonWithoutRead(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"),
+		pipelinePR(11, mergeHead, "github-actions[bot]"))
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	if got := w.calls(w.mergeCalls, "o/a#9"); got != 0 {
+		t.Errorf("evidence calls = %d, want 0 when several PRs close the issue", got)
+	}
+	card, ok := c.MergeCard("o", "a", 5)
+	if !ok {
+		t.Fatal("no merge card")
+	}
+	if card.Reason != ReasonSeveralPRs || card.Merge.CanMerge {
+		t.Errorf("card = %+v, merge = %+v", card, card.Merge)
+	}
+}
+
+func TestCollector_MergeEvidence_ErrorKeepsStale(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"))
+	w.evidence["o/a#9"] = MergeEvidence{PR: 9, HeadSHA: mergeHead,
+		Checks: ChecksSummary{State: ChecksGreen, Passed: 1, Total: 1}, CanMerge: true}
+	clk := newClock(t0)
+	c := NewCollector(w.sources(), DefaultIntervals(), clk.now, nil)
+	c.CollectIssues(context.Background())
+	if card, ok := c.MergeCard("o", "a", 5); !ok || !card.Merge.CanMerge {
+		t.Fatalf("first tick: card %+v ok %v", card, ok)
+	}
+
+	w.set(func() { w.mergeErr["o/a#9"] = errors.New("boom") })
+	clk.advance(11 * time.Minute)
+	c.CollectIssues(context.Background())
+
+	card, ok := c.MergeCard("o", "a", 5)
+	if !ok {
+		t.Fatal("the card disappeared on a failed read")
+	}
+	if !card.Merge.Stale || card.Merge.CanMerge || card.Reason != ReasonStale {
+		t.Errorf("card = %+v, merge = %+v", card, card.Merge)
+	}
+	// The previous reading is still shown, so the card is not blank.
+	if card.Merge.PR != 9 || card.Merge.Checks.Total != 1 {
+		t.Errorf("stale evidence lost its last reading: %+v", card.Merge)
+	}
+	if got := c.Inbox().Errors["merge o/a#5"]; got == "" {
+		t.Errorf("errors = %v, want a merge o/a#5 entry", c.Inbox().Errors)
+	}
+}
+
+func TestCollector_MergeEvidence_NeverRead_ReasonOnly(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"))
+	w.mergeErr["o/a#9"] = errors.New("boom")
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+
+	card, ok := c.MergeCard("o", "a", 5)
+	if !ok {
+		t.Fatal("no merge card")
+	}
+	if card.Merge.PR != 9 || card.Merge.HeadSHA != mergeHead || !card.Merge.Stale || card.Merge.CanMerge {
+		t.Errorf("merge = %+v", card.Merge)
+	}
+}
+
+func TestCollector_MergeEvidence_CachedByHeadSHA(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"))
+	w.evidence["o/a#9"] = MergeEvidence{PR: 9, HeadSHA: mergeHead,
+		Checks: ChecksSummary{State: ChecksGreen, Passed: 1, Total: 1}, CanMerge: true}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+	c.CollectIssues(context.Background())
+	if got := w.calls(w.mergeCalls, "o/a#9"); got != 1 {
+		t.Errorf("evidence calls = %d, want 1 (green checks on an unchanged head)", got)
+	}
+
+	moved := "2222222222222222222222222222222222222222"
+	w.set(func() {
+		w.prs["o/a"] = []forge.PullRequest{pipelinePR(9, moved, "github-actions[bot]")}
+		w.evidence["o/a#9"] = MergeEvidence{PR: 9, HeadSHA: moved,
+			Checks: ChecksSummary{State: ChecksGreen, Passed: 1, Total: 1}, CanMerge: true}
+	})
+	c.CollectIssues(context.Background())
+	if got := w.calls(w.mergeCalls, "o/a#9"); got != 2 {
+		t.Errorf("evidence calls = %d, want 2 after the head moved", got)
+	}
+}
+
+func TestCollector_MergeEvidence_RunningChecksRereadEveryTick(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"))
+	w.evidence["o/a#9"] = MergeEvidence{PR: 9, HeadSHA: mergeHead,
+		Checks: ChecksSummary{State: ChecksRunning, Passed: 0, Total: 1}, Reason: "checks running"}
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+
+	c.CollectIssues(context.Background())
+	c.CollectIssues(context.Background())
+
+	if got := w.calls(w.mergeCalls, "o/a#9"); got != 2 {
+		t.Errorf("evidence calls = %d, want 2 while checks are running", got)
+	}
+}
+
+func TestCollector_MergeCard_UnknownIssue_False(t *testing.T) {
+	w := mergeWorld(t, pipelinePR(9, mergeHead, "github-actions[bot]"))
+	c := NewCollector(w.sources(), DefaultIntervals(), fixedNow, nil)
+	c.CollectIssues(context.Background())
+
+	if _, ok := c.MergeCard("o", "a", 6); ok {
+		t.Error("MergeCard found an issue that has no card")
+	}
+	if _, ok := c.MergeCard("o", "other", 5); ok {
+		t.Error("MergeCard found an issue in an unknown repo")
 	}
 }

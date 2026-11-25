@@ -371,3 +371,126 @@ func TestBuildInbox_Card_CarriesForge(t *testing.T) {
 		t.Errorf("body %s, want a forge field", raw)
 	}
 }
+
+// doneEvidence is all-clear merge evidence for PR 9 of issue 5.
+func doneEvidence() MergeEvidence {
+	return MergeEvidence{
+		PR: 9, PRURL: "https://x/pull/9", HeadSHA: mergeHead, BaseRef: "main",
+		Checks:   ChecksSummary{State: ChecksGreen, Passed: 3, Total: 3},
+		Review:   &ReviewVerdict{Verdict: "approve", HeadSHA: mergeHead, Current: true, Source: "marker"},
+		CanMerge: true,
+	}
+}
+
+// doneRepo is a wired repo whose issue 5 is ai:done with the given labels, has
+// its comments read, and carries the given merge evidence.
+func doneRepo(ev *MergeEvidence, labels ...string) RepoData {
+	rd := inboxRepo([]forge.Issue{inboxIssue(5, labels...)}, nil, nil)
+	rd.PRs = []forge.PullRequest{{
+		Number: 9, Body: "Closes #5", Author: "github-actions[bot]", State: "open",
+		Updated: inboxNow.Add(-30 * time.Minute),
+	}}
+	if ev != nil {
+		rd.Merge = map[int]MergeEvidence{5: *ev}
+	}
+	return rd
+}
+
+func TestBuildInbox_MergeCard_Table(t *testing.T) {
+	blocked := doneEvidence()
+	blocked.Checks = ChecksSummary{State: ChecksRunning, Passed: 1, Total: 3}
+	blocked.CanMerge, blocked.Reason = Eligibility(blocked)
+	ready := doneEvidence()
+	tests := []struct {
+		name       string
+		evidence   *MergeEvidence
+		labels     []string
+		wantBucket string
+		wantReason string
+	}{
+		{"ready to merge", &ready, []string{dispatch.LabelAIDone}, "cards", "ready to merge"},
+		{"blocked on checks", &blocked, []string{dispatch.LabelAIDone}, "cards", "checks running"},
+		{"no evidence, no card", nil, []string{dispatch.LabelAIDone}, "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bucket, card := only(t, buildInbox(doneRepo(tc.evidence, tc.labels...)))
+			if bucket != tc.wantBucket {
+				t.Fatalf("bucket = %q, want %q (card %+v)", bucket, tc.wantBucket, card)
+			}
+			if bucket == "" {
+				return
+			}
+			if card.Kind != CardMerge || card.Reason != tc.wantReason {
+				t.Errorf("kind/reason = %q/%q, want %q/%q", card.Kind, card.Reason, CardMerge, tc.wantReason)
+			}
+			if card.Merge == nil || card.Merge.PR != 9 {
+				t.Fatalf("merge = %+v, want PR 9", card.Merge)
+			}
+			// The PR's own Updated, not the issue's: the card is about the PR.
+			if want := inboxNow.Add(-30 * time.Minute); !card.Since.Equal(want) {
+				t.Errorf("since = %s, want the PR's updated %s", card.Since, want)
+			}
+		})
+	}
+}
+
+func TestBuildInbox_DoneWithFailureLabel_NoMergeCard(t *testing.T) {
+	ev := doneEvidence()
+	tests := []struct {
+		name       string
+		labels     []string
+		wantBucket string
+		wantKind   string
+		wantReason string
+	}{
+		{"review blocked wins", []string{dispatch.LabelAIDone, dispatch.LabelAIReviewBlocked},
+			"cards", CardHuman, "review blocked"},
+		{"parked wins", []string{dispatch.LabelAIDone, dispatch.LabelParked},
+			"parked", CardParked, "parked"},
+		{"paused wins", []string{dispatch.LabelAIDone, dispatch.LabelAIPaused},
+			"waiting", CardWait, "paused"},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			bucket, card := only(t, buildInbox(doneRepo(&ev, tc.labels...)))
+			if bucket != tc.wantBucket || card.Kind != tc.wantKind || card.Reason != tc.wantReason {
+				t.Fatalf("got %s/%s/%q, want %s/%s/%q",
+					bucket, card.Kind, card.Reason, tc.wantBucket, tc.wantKind, tc.wantReason)
+			}
+			if card.Merge != nil {
+				t.Errorf("merge evidence leaked onto a %s card: %+v", card.Kind, card.Merge)
+			}
+		})
+	}
+}
+
+func TestBuildInbox_MergeCard_UrgencyGroup1(t *testing.T) {
+	ev := doneEvidence()
+	merge := doneRepo(&ev, dispatch.LabelAIDone)
+	// A stopped run (group 2), newer than the merge card, must still sort after it.
+	stopped := inboxIssue(6, dispatch.LabelAIImplement, dispatch.LabelAIFailed)
+	merge.Issues = append(merge.Issues, stopped)
+	merge.Comments[6] = []forge.Comment{
+		marker(`{"v":1,"class":"task_failure","decision":"stop","attempt":1}`, inboxNow.Add(-5*time.Minute)),
+	}
+
+	ib := buildInbox(merge)
+	if len(ib.Cards) != 2 {
+		t.Fatalf("cards = %+v, want 2", ib.Cards)
+	}
+	if ib.Cards[0].Kind != CardMerge || ib.Cards[1].Kind != CardHuman {
+		t.Errorf("order = %q, %q", ib.Cards[0].Kind, ib.Cards[1].Kind)
+	}
+}
+
+func TestBuildInbox_MergeErrs_InErrors(t *testing.T) {
+	ev := doneEvidence()
+	rd := doneRepo(&ev, dispatch.LabelAIDone)
+	rd.MergeErrs = map[int]string{5: "boom"}
+
+	ib := buildInbox(rd)
+	if got := ib.Errors["merge o/a#5"]; got != "boom" {
+		t.Errorf("errors = %v, want merge o/a#5 → boom", ib.Errors)
+	}
+}

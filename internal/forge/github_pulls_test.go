@@ -2,8 +2,11 @@ package forge
 
 import (
 	"context"
+	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -129,5 +132,134 @@ func TestGithubListWorkflowRuns_OmitsEmptyFilters(t *testing.T) {
 	}
 	if uri != "/repos/o/r/actions/runs?per_page=5" {
 		t.Errorf("uri: %s", uri)
+	}
+}
+
+// recorder answers status/body and records the request's method, URI and body.
+type recorder struct {
+	method string
+	uri    string
+	body   string
+}
+
+func serveRecorded(t *testing.T, status int, body string, rec *recorder) *httptest.Server {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		raw, _ := io.ReadAll(r.Body)
+		rec.method, rec.uri, rec.body = r.Method, r.URL.RequestURI(), string(raw)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(status)
+		w.Write([]byte(body))
+	}))
+	t.Cleanup(srv.Close)
+	return srv
+}
+
+func TestMergePullRequest_SendsSquashAndSHA(t *testing.T) {
+	var rec recorder
+	srv := serveRecorded(t, http.StatusOK, `{"merged":true,"sha":"abc"}`, &rec)
+
+	err := NewGithubClient("tok", srv.URL).MergePullRequest(context.Background(), "o", "r", 7, "abc", "squash")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rec.method != "PUT" || rec.uri != "/repos/o/r/pulls/7/merge" {
+		t.Errorf("request = %s %s", rec.method, rec.uri)
+	}
+	if got := strings.TrimSpace(rec.body); got != `{"merge_method":"squash","sha":"abc"}` {
+		t.Errorf("body = %s", got)
+	}
+}
+
+func TestMergePullRequest_Refused_ReturnsAPIError(t *testing.T) {
+	var rec recorder
+	srv := serveRecorded(t, http.StatusMethodNotAllowed,
+		`{"message":"Required status check \"build\" is expected."}`, &rec)
+
+	err := NewGithubClient("tok", srv.URL).MergePullRequest(context.Background(), "o", "r", 7, "abc", "squash")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) {
+		t.Fatalf("err = %v, want *APIError", err)
+	}
+	if apiErr.Status != http.StatusMethodNotAllowed {
+		t.Errorf("status = %d, want 405", apiErr.Status)
+	}
+	if apiErr.Message != `Required status check "build" is expected.` {
+		t.Errorf("message = %q", apiErr.Message)
+	}
+}
+
+func TestMergePullRequest_NonJSONError_KeepsRawBody(t *testing.T) {
+	var rec recorder
+	srv := serveRecorded(t, http.StatusBadGateway, "upstream exploded", &rec)
+
+	err := NewGithubClient("tok", srv.URL).MergePullRequest(context.Background(), "o", "r", 7, "abc", "squash")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Message != "upstream exploded" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestDeleteBranch_NestedRef_EscapesSegments(t *testing.T) {
+	var rec recorder
+	srv := serveRecorded(t, http.StatusNoContent, "", &rec)
+
+	if err := NewGithubClient("tok", srv.URL).DeleteBranch(context.Background(), "o", "r", "feat/382-merge"); err != nil {
+		t.Fatal(err)
+	}
+	if rec.method != "DELETE" || rec.uri != "/repos/o/r/git/refs/heads/feat/382-merge" {
+		t.Errorf("request = %s %s", rec.method, rec.uri)
+	}
+}
+
+func TestDeleteBranch_AlreadyGone_Nil(t *testing.T) {
+	var rec recorder
+	srv := serveRecorded(t, http.StatusUnprocessableEntity, `{"message":"Reference does not exist"}`, &rec)
+
+	if err := NewGithubClient("tok", srv.URL).DeleteBranch(context.Background(), "o", "r", "gone"); err != nil {
+		t.Errorf("err = %v, want nil", err)
+	}
+}
+
+func TestDeleteBranch_OtherFailure_ReturnsAPIError(t *testing.T) {
+	var rec recorder
+	srv := serveRecorded(t, http.StatusForbidden, `{"message":"Protected branch"}`, &rec)
+
+	err := NewGithubClient("tok", srv.URL).DeleteBranch(context.Background(), "o", "r", "main")
+	var apiErr *APIError
+	if !errors.As(err, &apiErr) || apiErr.Status != http.StatusForbidden || apiErr.Message != "Protected branch" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGetPullRequest_HeadAndBaseRepo(t *testing.T) {
+	var uri string
+	srv := serveJSON(t, `{"number":90,"state":"open",
+	  "head":{"ref":"ai/41","sha":"abc","repo":{"full_name":"o/r"}},
+	  "base":{"ref":"main","repo":{"full_name":"o/r"}}}`, &uri)
+
+	pr, err := NewGithubClient("tok", srv.URL).GetPullRequest(context.Background(), "o", "r", 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pr.HeadRepo != "o/r" || pr.BaseRepo != "o/r" {
+		t.Errorf("head/base repo = %q/%q", pr.HeadRepo, pr.BaseRepo)
+	}
+}
+
+func TestListPRComments_ReadsIssueCommentThread(t *testing.T) {
+	var uri string
+	srv := serveJSON(t, `[{"id":1,"body":"b","user":{"login":"github-actions[bot]"},
+	  "created_at":"2026-11-25T10:00:00Z"}]`, &uri)
+
+	comments, err := NewGithubClient("tok", srv.URL).ListPRComments(context.Background(), "o", "r", 7)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(comments) != 1 || comments[0].Author != "github-actions[bot]" || comments[0].Body != "b" {
+		t.Fatalf("comments = %+v", comments)
+	}
+	if uri != "/repos/o/r/issues/7/comments?per_page=100&page=1" {
+		t.Errorf("uri = %s", uri)
 	}
 }

@@ -105,7 +105,8 @@ const runsPerRepo = 30
 // cockpitSources wires the collector to the real forges, sessions and dispatch
 // state. Clients are resolved per owner, like the MCP server does, because the
 // service gets its tokens from each forge directory's .envrc, not GH_TOKEN.
-func cockpitSources(resolve clientResolver) cockpit.Sources {
+// bots are the trusted pipeline identities the merge cards are read against.
+func cockpitSources(resolve clientResolver, bots []string) cockpit.Sources {
 	return cockpit.Sources{
 		Repos: reposWithMeta,
 		Wired: repoWired,
@@ -152,6 +153,10 @@ func cockpitSources(resolve clientResolver) cockpit.Sources {
 			}
 			return gh.GetIssue(ctx, r.Owner, r.Name, number)
 		},
+		MergeEvidence: func(ctx context.Context, r core.Repo, pr forge.PullRequest) (cockpit.MergeEvidence, error) {
+			return liveEvidence(ctx, resolve, bots, r, pr)
+		},
+		Bots: bots,
 		Sessions: func(ctx context.Context) ([]agentview.Session, error) {
 			return agentview.List(ctx, agentview.ExecRunner{})
 		},

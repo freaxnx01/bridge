@@ -93,6 +93,8 @@ type Board struct {
 // RepoData is the collected state of one repo. Comments holds the run-report
 // thread of each inbox candidate whose comments have been read at least once,
 // keyed by issue number; CommentErrs holds the last fetch error per issue.
+// Merge holds the merge evidence of each merge candidate, keyed by issue
+// number, and MergeErrs the last evidence-read error per issue.
 type RepoData struct {
 	Forge, Owner, Name, Path string
 	Wired                    bool
@@ -102,6 +104,8 @@ type RepoData struct {
 	Runs                     []forge.WorkflowRun
 	Comments                 map[int][]forge.Comment
 	CommentErrs              map[int]string
+	Merge                    map[int]MergeEvidence
+	MergeErrs                map[int]string
 }
 
 // Input is everything BuildBoard needs.

@@ -23,6 +23,10 @@ var ErrUnknownRepo = errors.New("unknown repo")
 // cannot remove a label (everything except GitHub today).
 var ErrUnsupportedForge = errors.New("lock clearing is not supported for this forge")
 
+// ErrMergeUnsupported is returned by Merge when the repo's forge client cannot
+// merge a pull request.
+var ErrMergeUnsupported = errors.New("merge is not supported for this forge")
+
 // ErrNoToken is returned by ClearLock when no token resolves for the repo's owner.
 var ErrNoToken = errors.New("no token for this owner")
 

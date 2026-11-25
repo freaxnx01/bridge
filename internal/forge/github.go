@@ -1070,11 +1070,17 @@ type ghPull struct {
 		Login string `json:"login"`
 	} `json:"user"`
 	Head struct {
-		Ref string `json:"ref"`
-		SHA string `json:"sha"`
+		Ref  string `json:"ref"`
+		SHA  string `json:"sha"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"head"`
 	Base struct {
-		Ref string `json:"ref"`
+		Ref  string `json:"ref"`
+		Repo struct {
+			FullName string `json:"full_name"`
+		} `json:"repo"`
 	} `json:"base"`
 	HTMLURL        string     `json:"html_url"`
 	CreatedAt      time.Time  `json:"created_at"`
@@ -1087,7 +1093,8 @@ type ghPull struct {
 func (p ghPull) toPullRequest() PullRequest {
 	return PullRequest{
 		Number: p.Number, Title: p.Title, Body: p.Body, Draft: p.Draft, State: p.State,
-		Author: p.User.Login, HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA, BaseRef: p.Base.Ref,
+		Author: p.User.Login, HeadRef: p.Head.Ref, HeadSHA: p.Head.SHA, HeadRepo: p.Head.Repo.FullName,
+		BaseRef: p.Base.Ref, BaseRepo: p.Base.Repo.FullName,
 		URL: p.HTMLURL, Created: p.CreatedAt, Updated: p.UpdatedAt, Merged: p.MergedAt != nil,
 		MergeableState: p.MergeableState, ChangedFiles: p.ChangedFiles,
 	}
