@@ -73,7 +73,7 @@
 <li class="merge-card">
   <button type="button" class="open" onclick={() => onopen(card)}>
     <span class="head">
-      <span class="ref"><span class="glyph">✓</span> {shortRef(card)} → PR #{ev.pr}</span>
+      <span class="ref"><span class="glyph">✓</span> {shortRef(card)}{ev.pr ? ` → PR #${ev.pr}` : ''}</span>
       <span class="age">{age}</span>
     </span>
     <span class="title">{card.title}</span>
@@ -111,7 +111,9 @@
 
   <div class="actions">
     <!-- #383 adds the read-only diff next to Open PR. -->
-    <a href={ev.prUrl} target="_blank" rel="noopener noreferrer">Open PR ↗</a>
+    {#if ev.prUrl}
+      <a href={ev.prUrl} target="_blank" rel="noopener noreferrer">Open PR ↗</a>
+    {/if}
     <!-- Merge is gone once it landed: the result line below is all there is
          left to say, and a second post would only earn the operator a 409 for
          an action that in fact succeeded. -->

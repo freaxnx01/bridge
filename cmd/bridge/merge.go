@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log/slog"
 	"slices"
 	"strings"
 
@@ -72,6 +73,8 @@ func mergePR(ctx context.Context, m merger, bots []string, req api.MergeRequest)
 	switch {
 	case !strings.EqualFold(pr.HeadSHA, req.HeadSHA):
 		return api.MergeResult{}, api.ErrNotMergeable{Reason: "head moved"}
+	case pr.BaseRef != req.BaseRef:
+		return api.MergeResult{}, api.ErrNotMergeable{Reason: "base changed"}
 	case pr.State != "open":
 		return api.MergeResult{}, api.ErrNotMergeable{Reason: "PR is not open"}
 	}
@@ -101,7 +104,8 @@ func mergePR(ctx context.Context, m merger, bots []string, req api.MergeRequest)
 // name.
 func deleteHeadBranch(ctx context.Context, m merger, owner, name string, pr forge.PullRequest) error {
 	if pr.HeadRepo == "" || pr.HeadRepo != pr.BaseRepo {
-		return fmt.Errorf("head branch is not known to live in %s/%s (head repo %q)", owner, name, pr.HeadRepo)
+		return fmt.Errorf("%w: head branch is not known to live in %s/%s (head repo %q)",
+			errBranchNotOurs, owner, name, pr.HeadRepo)
 	}
 	if err := m.DeleteBranch(ctx, owner, name, pr.HeadRef); err != nil {
 		return fmt.Errorf("delete %s: %w", pr.HeadRef, err)
@@ -186,6 +190,7 @@ func mergeInboxCard(ctx context.Context, cards mergeCards, repos func() ([]core.
 	if err != nil {
 		return api.MergeResult{}, err
 	}
+	req.BaseRef = card.Merge.BaseRef
 	return mergePR(ctx, m, bots, req)
 }
 
@@ -204,9 +209,20 @@ func mergeRepo(repos func() ([]core.Repo, error), owner, name string) (core.Repo
 
 // withBranch is the result of a landed merge, carrying what became of the head
 // branch afterwards.
+// A forge failure's text stays in the log; the client learns only that the
+// delete failed. bridge's own refusal to touch a branch it cannot prove is
+// ours is safe to show as is.
 func withBranch(err error) api.MergeResult {
-	if err != nil {
+	switch {
+	case err == nil:
+		return api.MergeResult{Merged: true, BranchDeleted: true}
+	case errors.Is(err, errBranchNotOurs):
 		return api.MergeResult{Merged: true, BranchError: err.Error()}
 	}
-	return api.MergeResult{Merged: true, BranchDeleted: true}
+	slog.Error("delete merged head branch failed", "error", err)
+	return api.MergeResult{Merged: true, BranchError: "branch delete failed (see the server log)"}
 }
+
+// errBranchNotOurs marks a head branch bridge will not delete because nothing
+// proves it lives in the base repo.
+var errBranchNotOurs = errors.New("branch not deleted")

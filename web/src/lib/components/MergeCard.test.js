@@ -91,6 +91,16 @@ describe('MergeCard', () => {
     expect(screen.getByText('checks running')).toBeTruthy()
   })
 
+  it('several closing PRs: names no PR and links none', () => {
+    show({ reason: 'several open PRs close this issue' }, {
+      pr: 0, prUrl: '', headSha: '', canMerge: false, reason: 'several open PRs close this issue',
+      checks: undefined, review: null, files: [], summary: '',
+    })
+    expect(screen.queryByText(/PR #0/)).toBeNull()
+    expect(screen.queryByRole('link', { name: /Open PR/ })).toBeNull()
+    expect(screen.getByText(/several open PRs close this issue/)).toBeTruthy()
+  })
+
   it('links the PR', () => {
     show()
     const link = screen.getByRole('link', { name: /Open PR/ })

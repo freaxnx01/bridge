@@ -17,6 +17,9 @@ type MergeRequest struct {
 	Number  int    `json:"number"`
 	PR      int    `json:"pr"`
 	HeadSHA string `json:"headSha"`
+	// BaseRef is the base branch the card showed. It is filled server-side
+	// from the snapshot, never from the request body.
+	BaseRef string `json:"-"`
 }
 
 // MergeResult is what a merge did. A branch that could not be deleted is

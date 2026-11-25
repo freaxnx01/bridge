@@ -108,7 +108,7 @@ func greenMerger() *fakeMerger {
 	}
 }
 
-var mergeReq = api.MergeRequest{Repo: "o/a", Number: 5, PR: 9, HeadSHA: mergeHead}
+var mergeReq = api.MergeRequest{Repo: "o/a", Number: 5, PR: 9, HeadSHA: mergeHead, BaseRef: "main"}
 
 var mergeBots = []string{"github-actions[bot]", "my-app[bot]"}
 
@@ -142,6 +142,22 @@ func TestMerge_UppercaseRequestSHA_MergesWithTheForgesSHA(t *testing.T) {
 	}
 	if want := "merge o/a#9 " + mergeHead + " squash"; !m.did(want) {
 		t.Errorf("calls = %q, want %q", m.calls, want)
+	}
+}
+
+// The dialog names the base it merges into; a PR retargeted since keeps its
+// head SHA, so the base is checked on its own.
+func TestMerge_BaseChanged_409NoMerge(t *testing.T) {
+	m := greenMerger()
+	m.pr.BaseRef = "release"
+
+	_, err := mergePR(context.Background(), m, mergeBots, mergeReq)
+	var notMergeable api.ErrNotMergeable
+	if !errors.As(err, &notMergeable) || notMergeable.Reason != "base changed" {
+		t.Fatalf("err = %v, want base changed", err)
+	}
+	if m.didAny("merge ") {
+		t.Errorf("calls = %q, a retargeted PR must not be merged", m.calls)
 	}
 }
 
@@ -230,6 +246,10 @@ func TestMerge_DeleteFails_Still200(t *testing.T) {
 	if !res.Merged || res.BranchDeleted || res.BranchError == "" {
 		t.Errorf("result = %+v", res)
 	}
+	// The forge's own text goes to the log, never to the client.
+	if strings.Contains(res.BranchError, "protected branch") {
+		t.Errorf("BranchError = %q, leaks the forge's error text", res.BranchError)
+	}
 }
 
 // The branch delete needs positive evidence that the head lives in the base
@@ -299,7 +319,7 @@ func (c *cardCollector) MergeCard(owner, name string, number int) (cockpit.Inbox
 func shownCard(pr int) *cardCollector {
 	return &cardCollector{ok: true, card: cockpit.InboxCard{
 		Kind: cockpit.CardMerge, Repo: "o/a", Number: 5, Reason: "ready to merge",
-		Merge: &cockpit.MergeEvidence{PR: pr, HeadSHA: mergeHead, CanMerge: true},
+		Merge: &cockpit.MergeEvidence{PR: pr, HeadSHA: mergeHead, BaseRef: "main", CanMerge: true},
 	}}
 }
 
@@ -343,6 +363,21 @@ func TestMergeInboxCard_ShownCard_MergesWithTheRepoOwnersClient(t *testing.T) {
 
 // The guard is what keeps an authenticated caller from asking bridge to merge
 // an arbitrary PR of a known repo: only the PR the inbox is showing right now.
+// The base the server checks is the one the card showed, never one the client
+// sends.
+func TestMergeInboxCard_ChecksTheShownBase(t *testing.T) {
+	cards := shownCard(9)
+	cards.card.Merge.BaseRef = "release"
+	m := greenMerger()
+	resolve := func(string, string) forge.Client { return mergeClient{fakeMerger: m} }
+
+	_, err := mergeInboxCard(context.Background(), cards, mergeRepos, resolve, mergeBots, mergeReq)
+	var notMergeable api.ErrNotMergeable
+	if !errors.As(err, &notMergeable) || notMergeable.Reason != "base changed" {
+		t.Fatalf("err = %v, want base changed", err)
+	}
+}
+
 func TestMergeInboxCard_NotTheShownPR_RefusedBeforeAnyForgeCall(t *testing.T) {
 	humanCard := shownCard(9)
 	humanCard.card.Kind = "human"
