@@ -13,10 +13,12 @@ import (
 )
 
 // InboxHandler serves the read-only inbox: GET /api/inbox and
-// GET /api/inbox/{owner}/{repo}/{number}.
+// GET /api/inbox/{owner}/{repo}/{number}. Merge is the one write it owns, on
+// its own guarded route (see MergeHandler), not reachable through ServeHTTP.
 type InboxHandler struct {
 	Inbox  func() cockpit.Inbox
 	Detail func(ctx context.Context, owner, repo string, number int) (cockpit.IssueDetail, error)
+	Merge  func(ctx context.Context, req MergeRequest) (MergeResult, error)
 }
 
 func (h *InboxHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {

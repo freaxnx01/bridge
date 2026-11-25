@@ -237,20 +237,41 @@ func runServe(cmd *cobra.Command, _ []string) error {
 	apiMux.Handle("/api/agents", agentsH)
 
 	clients := cachedClients(clientForMCP(reposRoots()))
-	collector := cockpit.NewCollector(cockpitSources(clients), cockpit.DefaultIntervals(), time.Now, func(ev string) {
+	bots := pipelineBots(os.Getenv("BRIDGE_PIPELINE_BOTS"))
+	collector := cockpit.NewCollector(cockpitSources(clients, bots), cockpit.DefaultIntervals(), time.Now, func(ev string) {
 		hub.Broadcast(web.Event{Type: ev})
 	})
 	go collector.Run(ctx)
 	pipelineH := pipelineHandler(ctx, collector, reposWithMeta, clients)
 	origins := newOriginAllowlist(servePort, os.Getenv("BRIDGE_COCKPIT_ORIGINS"))
 	guarded := requireTokenConfigured(apiToken, requireBearer(apiToken, requireSameOrigin(origins, pipelineH)))
-	inboxH := &api.InboxHandler{Inbox: collector.Inbox, Detail: collector.IssueDetail}
+	inboxH := &api.InboxHandler{
+		Inbox:  collector.Inbox,
+		Detail: collector.IssueDetail,
+		Merge: func(c context.Context, req api.MergeRequest) (api.MergeResult, error) {
+			res, err := mergeInboxCard(c, collector, reposWithMeta, clients, bots, req)
+			if err != nil {
+				return res, err
+			}
+			// On the server ctx, like the launch path: the refresh must outlive
+			// the request that triggered it, so the merged card leaves the inbox
+			// without waiting for the 10-minute issues tick.
+			owner, name, _ := strings.Cut(req.Repo, "/")
+			go collector.CollectRepo(ctx, owner, name)
+			return res, nil
+		},
+	}
 	apiMux.Handle("/api/inbox", inboxH) // read-only, open like GET /api/pipeline
 	// The issue detail. Open too, but it is the only open endpoint that can
 	// reach the forge, so the collector answers it from its comment cache
 	// within detailTTL and only for issues the inbox already lists — a page
 	// looping it cannot burn the token's REST quota or read anything else.
 	apiMux.Handle("/api/inbox/", inboxH)
+	// The one write the inbox owns. Registered as its own exact pattern, which
+	// wins over /api/inbox/ in ServeMux, and behind the same guard the pipeline
+	// actions use: token configured, bearer, same origin.
+	apiMux.Handle("/api/inbox/merge", requireTokenConfigured(apiToken,
+		requireBearer(apiToken, requireSameOrigin(origins, inboxH.MergeHandler()))))
 	// The dispatcher's own history: read-only and open, like GET /api/pipeline.
 	// It reads the tick journal off disk — no forge call, no local state write.
 	apiMux.Handle("/api/dispatch/", &api.DispatchHandler{
