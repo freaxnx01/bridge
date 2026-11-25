@@ -1,6 +1,8 @@
 package cockpit
 
 import (
+	"encoding/json"
+	"strings"
 	"testing"
 	"time"
 
@@ -332,6 +334,36 @@ func TestBuildEvidence_NoSummarySection_EmptyAndStillMergeable(t *testing.T) {
 	}
 	if !e.CanMerge {
 		t.Errorf("canMerge = false, reason %q", e.Reason)
+	}
+}
+
+func TestBuildEvidence_FilesCarryNoPatch(t *testing.T) {
+	pr := forge.PullRequest{Number: 9, HeadSHA: mergeHead, ChangedFiles: 2}
+	files := []forge.PRFile{
+		{Path: "a.go", Status: "modified", Additions: 1, Patch: "@@ -1 +1 @@\n+x"},
+		{Path: "b.go", Status: "added", Additions: 2, Patch: "@@ -0,0 +1 @@\n+y"},
+	}
+	e := BuildEvidence(pr, nil, nil, nil, files, mergeBots)
+
+	for i, f := range e.Files {
+		if f.Patch != "" {
+			t.Errorf("files[%d].Patch = %q, want empty", i, f.Patch)
+		}
+		if f.Status == "" || f.Additions == 0 {
+			t.Errorf("files[%d] lost its metadata: %+v", i, f)
+		}
+	}
+	raw, err := json.Marshal(e)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(raw), `"patch"`) {
+		t.Errorf("evidence JSON carries a patch: %s", raw)
+	}
+	// The caller's own slice must not be reused: the collector hands the same
+	// files to the diff path, which needs the patches.
+	if files[0].Patch == "" {
+		t.Error("BuildEvidence cleared the caller's patch")
 	}
 }
 

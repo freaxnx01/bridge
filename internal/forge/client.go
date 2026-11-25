@@ -252,11 +252,15 @@ type PullRequest struct {
 	ChangedFiles   int       `json:"changed_files,omitempty"`
 }
 
-// PRFile is one file changed by a pull request.
+// PRFile is one file changed by a pull request. Patch is the file's unified
+// diff hunks, empty when the forge reported none (a binary or too-large file)
+// — it is source code, so a caller that serves the file list openly clears it.
 type PRFile struct {
 	Path      string `json:"path"`
+	Status    string `json:"status,omitempty"` // added | modified | removed | renamed | …
 	Additions int    `json:"additions"`
 	Deletions int    `json:"deletions"`
+	Patch     string `json:"patch,omitempty"`
 }
 
 // CheckRun is a check-run on a commit. Conclusion is empty until the run
