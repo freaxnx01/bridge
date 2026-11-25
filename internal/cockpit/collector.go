@@ -66,7 +66,14 @@ type Sources struct {
 	Runs       func(ctx context.Context, r core.Repo) ([]forge.WorkflowRun, error)
 	// Issue reads one issue plus its full comment thread — the inbox's run
 	// markers, and the live issue detail.
-	Issue    func(ctx context.Context, r core.Repo, number int) (forge.Issue, []forge.Comment, error)
+	Issue func(ctx context.Context, r core.Repo, number int) (forge.Issue, []forge.Comment, error)
+	// MergeEvidence reads everything a merge card needs about one agent PR
+	// (the PR itself, its review comments, checks and files) and decides on it.
+	// It may be nil, which turns merge cards off rather than failing.
+	MergeEvidence func(ctx context.Context, r core.Repo, pr forge.PullRequest) (MergeEvidence, error)
+	// Bots are the trusted pipeline identities: a PR or a review comment by
+	// anyone else never counts towards a merge card.
+	Bots     []string
 	Sessions func(ctx context.Context) ([]agentview.Session, error)
 	Paused   func() bool
 	// Preview evaluates what the next acting dispatch tick would do with the
@@ -96,10 +103,11 @@ type Collector struct {
 	issuesBusy atomic.Bool
 	runsBusy   atomic.Bool
 
-	// cacheMu guards the comment cache alone: it is filled from the per-repo
-	// fan-out goroutines, which run without mu.
+	// cacheMu guards the comment and merge-evidence caches alone: they are
+	// filled from the per-repo fan-out goroutines, which run without mu.
 	cacheMu  sync.Mutex
 	comments map[issueKey]cachedComments
+	evidence map[prKey]cachedEvidence
 
 	mu          sync.Mutex
 	repos       []RepoData
@@ -120,6 +128,20 @@ type issueKey struct {
 	number int
 }
 
+// prKey identifies one pull request across repos.
+type prKey struct {
+	repo string // "owner/name"
+	pr   int
+}
+
+// cachedEvidence is one PR's merge evidence plus the head SHA it was read at —
+// a push changes the SHA and invalidates the reading — and when it was read.
+type cachedEvidence struct {
+	headSHA  string
+	readAt   time.Time
+	evidence MergeEvidence
+}
+
 // cachedComments is one issue's thread plus the Updated it was read at: a new
 // comment moves Updated, so an unchanged Updated means an unchanged thread.
 // readAt is when the read happened, which is what detailTTL is measured against.
@@ -135,6 +157,7 @@ func NewCollector(src Sources, iv Intervals, now func() time.Time, onChange func
 	c := &Collector{
 		src: src, iv: iv, now: now, onChange: onChange,
 		comments:    map[issueKey]cachedComments{},
+		evidence:    map[prKey]cachedEvidence{},
 		collectedAt: map[string]time.Time{}, errs: map[string]SourceError{},
 		unsupported: map[string]string{},
 	}
@@ -616,7 +639,138 @@ func (c *Collector) fetchIssues(ctx context.Context, r core.Repo) repoResult {
 		}
 	}
 	rd.Comments, rd.CommentErrs = c.fetchComments(ctx, r, issues)
+	rd.Merge, rd.MergeErrs = c.fetchMergeEvidence(ctx, r, issues, rd.PRs)
 	return repoResult{data: rd}
+}
+
+// fetchMergeEvidence gathers the evidence of every merge candidate: an ai:done
+// issue, not parked, whose lane does not merge itself, with exactly one open PR
+// closing it that a trusted pipeline identity opened. A failure is per issue
+// and never fails the repo, like a failed comment read.
+func (c *Collector) fetchMergeEvidence(ctx context.Context, r core.Repo,
+	issues []forge.Issue, prs []forge.PullRequest) (map[int]MergeEvidence, map[int]string) {
+	if c.src.MergeEvidence == nil {
+		return nil, nil
+	}
+	out := map[int]MergeEvidence{}
+	var errs map[int]string
+	for _, i := range issues {
+		if !isMergeCandidate(i.Labels) {
+			continue
+		}
+		closing := ClosingPipelinePRs(prs, i.Number, c.src.Bots)
+		switch {
+		case len(closing) == 0:
+			continue
+		case len(closing) > 1:
+			// An anomaly for a person to look at, not something to resolve by
+			// picking one — and not worth a forge read either.
+			out[i.Number] = MergeEvidence{Reason: ReasonSeveralPRs}
+			continue
+		}
+		ev, err := c.mergeEvidenceFor(ctx, r, closing[0])
+		if err != nil {
+			errs = recordCommentErr(errs, i.Number, err)
+		}
+		out[i.Number] = ev
+	}
+	c.pruneEvidence(repoKey(r), out)
+	return out, errs
+}
+
+// isMergeCandidate reports whether an issue's labels make it a merge card
+// candidate. The ai-review-ai-merge lane merges its own PRs, so it never needs
+// a person — and an issue a person parked is not waiting on a merge.
+func isMergeCandidate(labels []string) bool {
+	return hasAny(labels, dispatch.LabelAIDone) && !dispatch.IsParked(labels) &&
+		!hasAny(labels, dispatch.LabelAIReviewAIMerge)
+}
+
+// mergeEvidenceFor returns the PR's evidence, from the cache when it was read
+// at this head SHA and settled, else live. A failed read answers with the last
+// good evidence marked stale plus the error, so the card stays and the merge is
+// refused rather than decided on a reading that may have moved.
+func (c *Collector) mergeEvidenceFor(ctx context.Context, r core.Repo, pr forge.PullRequest) (MergeEvidence, error) {
+	k := prKey{repoKey(r), pr.Number}
+	if ev, ok := c.freshEvidence(k, pr.HeadSHA); ok {
+		return ev, nil
+	}
+	ev, err := c.src.MergeEvidence(ctx, r, pr)
+	if err != nil {
+		return c.staleEvidence(k, pr), fmt.Errorf("merge evidence %s#%d: %w", k.repo, pr.Number, err)
+	}
+	c.storeEvidence(k, pr.HeadSHA, ev)
+	return ev, nil
+}
+
+// freshEvidence returns the cached evidence when it was read at this head SHA,
+// within the issues interval, and its checks had settled. Checks that were
+// running or absent move without a push, so they are re-read every tick.
+func (c *Collector) freshEvidence(k prKey, headSHA string) (MergeEvidence, bool) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	e, ok := c.evidence[k]
+	if !ok || !strings.EqualFold(e.headSHA, headSHA) || c.now().Sub(e.readAt) >= c.iv.Issues {
+		return MergeEvidence{}, false
+	}
+	if e.evidence.Checks.State == ChecksRunning || e.evidence.Checks.State == ChecksNone {
+		return MergeEvidence{}, false
+	}
+	return e.evidence, true
+}
+
+// staleEvidence is the last good evidence for the PR marked stale, or a bare
+// record naming the PR when there has never been one.
+func (c *Collector) staleEvidence(k prKey, pr forge.PullRequest) MergeEvidence {
+	ev := MergeEvidence{PR: pr.Number, PRURL: pr.URL, HeadSHA: pr.HeadSHA}
+	c.cacheMu.Lock()
+	if e, ok := c.evidence[k]; ok {
+		ev = e.evidence
+	}
+	c.cacheMu.Unlock()
+	ev.Stale = true
+	ev.CanMerge, ev.Reason = Eligibility(ev)
+	return ev
+}
+
+func (c *Collector) storeEvidence(k prKey, headSHA string, ev MergeEvidence) {
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	c.evidence[k] = cachedEvidence{headSHA: headSHA, readAt: c.now(), evidence: ev}
+}
+
+// pruneEvidence drops the cached evidence of the repo's PRs that are no longer
+// merge candidates, so a merged or closed PR stops costing memory.
+func (c *Collector) pruneEvidence(repo string, live map[int]MergeEvidence) {
+	keep := map[int]bool{}
+	for _, ev := range live {
+		keep[ev.PR] = true
+	}
+	c.cacheMu.Lock()
+	defer c.cacheMu.Unlock()
+	maps.DeleteFunc(c.evidence, func(k prKey, _ cachedEvidence) bool {
+		return k.repo == repo && !keep[k.pr]
+	})
+}
+
+// MergeCard returns the issue's merge card from the latest snapshot. It is what
+// the merge endpoint checks before touching the forge: a merge may only ever be
+// asked for something the inbox is currently showing.
+func (c *Collector) MergeCard(owner, name string, number int) (InboxCard, bool) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	repo := owner + "/" + name
+	for _, card := range c.inbox.Cards {
+		if card.Kind != CardMerge || card.Repo != repo || card.Number != number {
+			continue
+		}
+		if card.Merge != nil {
+			ev := *card.Merge
+			card.Merge = &ev
+		}
+		return card, true
+	}
+	return InboxCard{}, false
 }
 
 // fetchComments reads the comment thread of every inbox candidate, skipping an

@@ -9,13 +9,19 @@ import (
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
-// Inbox card kinds, mapped from dispatch.Action.
+// Inbox card kinds, mapped from dispatch.Action — plus CardMerge, which is not
+// an Action at all: it is the ai:done issue whose agent PR waits for a person
+// to merge it, which dispatch has nothing left to say about.
 const (
 	CardHuman  = "human"
 	CardRetry  = "retry"
 	CardWait   = "wait"
 	CardParked = "parked"
+	CardMerge  = "merge"
 )
+
+// reasonReadyToMerge is a merge card's reason when nothing blocks the merge.
+const reasonReadyToMerge = "ready to merge"
 
 // inboxLabels are the labels that can produce anything but ActionNone. An
 // issue carrying none of them is skipped without reading its comments.
@@ -46,6 +52,8 @@ type InboxCard struct {
 	Reason string              `json:"reason"` // Action.Reason verbatim
 	Since  time.Time           `json:"since"`  // Run.Posted, else the issue's Updated
 	Run    *dispatch.RunRecord `json:"run,omitempty"`
+	// Merge is the PR evidence of a CardMerge card, and nil on every other kind.
+	Merge *MergeEvidence `json:"merge,omitempty"`
 }
 
 // Inbox is the whole payload of the cockpit's start page.
@@ -95,7 +103,7 @@ func BuildInbox(in InboxInput) Inbox {
 				ib.Cards = append(ib.Cards, c)
 			}
 		}
-		ib.Errors = withCommentErrs(ib.Errors, rd)
+		ib.Errors = withMergeErrs(withCommentErrs(ib.Errors, rd), rd)
 	}
 	slices.SortStableFunc(ib.Cards, func(x, y InboxCard) int {
 		if d := urgency(x) - urgency(y); d != 0 {
@@ -141,7 +149,9 @@ func classify(rd RepoData, i forge.Issue, now time.Time) (InboxCard, bool) {
 	action := dispatch.NextAction(s)
 	kind, ok := cardKind(action)
 	if !ok {
-		return InboxCard{}, false
+		// Nothing left for the dispatcher means the run succeeded: the only card
+		// still owed is the merge of the PR it opened.
+		return mergeCard(rd, i)
 	}
 	c := InboxCard{
 		Forge: rd.Forge, Repo: repoName(rd), Number: i.Number, Title: i.Title, URL: i.URL,
@@ -151,6 +161,39 @@ func classify(rd RepoData, i forge.Issue, now time.Time) (InboxCard, bool) {
 		c.Run, c.Since = &s.Run, s.Run.Posted
 	}
 	return c, true
+}
+
+// mergeCard is the card of an ai:done issue the collector gathered merge
+// evidence for. It reports false for anything else — without evidence there is
+// nothing to show and nothing to merge.
+func mergeCard(rd RepoData, i forge.Issue) (InboxCard, bool) {
+	if !hasAny(i.Labels, dispatch.LabelAIDone) {
+		return InboxCard{}, false
+	}
+	ev, ok := rd.Merge[i.Number]
+	if !ok {
+		return InboxCard{}, false
+	}
+	reason := ev.Reason
+	if ev.CanMerge {
+		reason = reasonReadyToMerge
+	}
+	return InboxCard{
+		Forge: rd.Forge, Repo: repoName(rd), Number: i.Number, Title: i.Title, URL: i.URL,
+		Kind: CardMerge, Reason: reason, Since: prUpdated(rd, i, ev), Merge: &ev,
+	}, true
+}
+
+// prUpdated is the card's age anchor: the PR's own Updated, because a merge
+// card is about the PR waiting, not about the issue. It falls back to the
+// issue's when the PR is not in the snapshot.
+func prUpdated(rd RepoData, i forge.Issue, ev MergeEvidence) time.Time {
+	for _, p := range rd.PRs {
+		if p.Number == ev.PR && !p.Updated.IsZero() {
+			return p.Updated
+		}
+	}
+	return i.Updated
 }
 
 // cardKind maps an action onto a bucket. Parked is its own kind: the pipeline
@@ -170,9 +213,12 @@ func cardKind(a dispatch.Action) (string, bool) {
 	return "", false
 }
 
-// urgency is a card's sort group: review first, then stopped runs, then
-// retries, then the cards bridge knows nothing about.
+// urgency is a card's sort group: review and merges first, then stopped runs,
+// then retries, then the cards bridge knows nothing about.
 func urgency(c InboxCard) int {
+	if c.Kind == CardMerge {
+		return 1
+	}
 	if c.Kind != CardHuman {
 		return 3
 	}
@@ -197,6 +243,18 @@ func withCommentErrs(errs map[string]string, rd RepoData) map[string]string {
 			errs = map[string]string{}
 		}
 		errs[fmt.Sprintf("comments %s#%d", repoName(rd), number)] = msg
+	}
+	return errs
+}
+
+// withMergeErrs adds one entry per failed merge-evidence read, keyed like the
+// comment errors.
+func withMergeErrs(errs map[string]string, rd RepoData) map[string]string {
+	for number, msg := range rd.MergeErrs {
+		if errs == nil {
+			errs = map[string]string{}
+		}
+		errs[fmt.Sprintf("merge %s#%d", repoName(rd), number)] = msg
 	}
 	return errs
 }
