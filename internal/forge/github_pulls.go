@@ -1,15 +1,89 @@
 package forge
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
+	"net/http"
 	"net/url"
 	"strconv"
+	"strings"
 	"time"
 )
 
 func repoPath(owner, repo string) string {
 	return "/repos/" + url.PathEscape(owner) + "/" + url.PathEscape(repo)
+}
+
+// do sends a request whose response body the caller does not need, and turns
+// any status ≥ 400 into an *APIError carrying the forge's own message. body is
+// marshalled as JSON when non-nil.
+func (c *GithubClient) do(ctx context.Context, method, path string, body any) error {
+	var reader io.Reader
+	if body != nil {
+		buf, err := json.Marshal(body)
+		if err != nil {
+			return err
+		}
+		reader = bytes.NewReader(buf)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, reader)
+	if err != nil {
+		return err
+	}
+	if c.token != "" {
+		req.Header.Set("Authorization", "Bearer "+c.token)
+	}
+	req.Header.Set("Accept", "application/vnd.github+json")
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	resp, err := c.http.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }() // best-effort close
+	if resp.StatusCode < 400 {
+		return nil
+	}
+	raw, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("github %s %s: %s: read body: %w", method, path, resp.Status, err)
+	}
+	return &APIError{Status: resp.StatusCode, Message: apiMessage(raw)}
+}
+
+// MergePullRequest merges a pull request with the given method, pinned to sha:
+// GitHub refuses the merge when the head has moved since, so the merge can only
+// ever land the commit the caller decided on.
+func (c *GithubClient) MergePullRequest(ctx context.Context, owner, repo string, number int, sha, method string) error {
+	body := struct {
+		MergeMethod string `json:"merge_method"`
+		SHA         string `json:"sha"`
+	}{MergeMethod: method, SHA: sha}
+	return c.do(ctx, http.MethodPut, fmt.Sprintf("%s/pulls/%d/merge", repoPath(owner, repo), number), body)
+}
+
+// DeleteBranch deletes a branch ref. A branch that is already gone — GitHub's
+// own delete_branch_on_merge got there first — counts as deleted, so the call
+// is idempotent.
+func (c *GithubClient) DeleteBranch(ctx context.Context, owner, repo, ref string) error {
+	path := repoPath(owner, repo) + "/git/refs/heads/" + escapePathSegments(ref)
+	err := c.do(ctx, http.MethodDelete, path, nil)
+	var apiErr *APIError
+	if errors.As(err, &apiErr) && strings.Contains(apiErr.Message, "Reference does not exist") {
+		return nil
+	}
+	return err
+}
+
+// ListPRComments returns a pull request's issue-comment thread. A PR is an
+// issue for that endpoint, so this is the issue reader under its PR name.
+func (c *GithubClient) ListPRComments(ctx context.Context, owner, repo string, number int) ([]Comment, error) {
+	return c.listIssueComments(ctx, owner, repo, number)
 }
 
 // GetPullRequest returns one pull request, including the fields only the

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"time"
@@ -16,6 +17,31 @@ var ErrRepoExists = errors.New("repo already exists")
 // (typically much tighter) code-search rate limit is exhausted, so callers
 // can distinguish "search is throttled" from "search found nothing."
 var ErrSearchRateLimited = errors.New("code search rate limit exceeded")
+
+// APIError is a forge's own refusal of a write: the HTTP status it answered
+// with and the message it gave. Callers that have to show the forge's wording
+// (a merge GitHub refuses on branch protection) read Message; everyone else
+// treats it as a plain error.
+type APIError struct {
+	Status  int
+	Message string
+}
+
+func (e *APIError) Error() string {
+	return fmt.Sprintf("forge refused with %d: %s", e.Status, e.Message)
+}
+
+// apiMessage is the "message" field of a forge's JSON error body, falling back
+// to the trimmed raw body when it is not JSON (a proxy's HTML page, say).
+func apiMessage(body []byte) string {
+	var m struct {
+		Message string `json:"message"`
+	}
+	if err := json.Unmarshal(body, &m); err == nil && m.Message != "" {
+		return m.Message
+	}
+	return strings.TrimSpace(string(body))
+}
 
 // CodeMatch is one matching line from a code search.
 type CodeMatch struct {
@@ -204,6 +230,8 @@ func (m milestoneWire) toMilestone(number int) Milestone {
 
 // PullRequest is a pull request. Body is needed to resolve "Closes #N".
 // MergeableState and ChangedFiles are only populated by the single-PR endpoint.
+// HeadRepo and BaseRepo are "owner/name"; equal means the head branch lives in
+// the base repo rather than a fork.
 type PullRequest struct {
 	Number         int       `json:"number"`
 	Title          string    `json:"title"`
@@ -213,7 +241,9 @@ type PullRequest struct {
 	Author         string    `json:"author,omitempty"`
 	HeadRef        string    `json:"head_ref,omitempty"`
 	HeadSHA        string    `json:"head_sha,omitempty"`
+	HeadRepo       string    `json:"head_repo,omitempty"`
 	BaseRef        string    `json:"base_ref,omitempty"`
+	BaseRepo       string    `json:"base_repo,omitempty"`
 	URL            string    `json:"url,omitempty"`
 	Created        time.Time `json:"created,omitempty"`
 	Updated        time.Time `json:"updated,omitempty"`
