@@ -91,7 +91,9 @@ The verdict is read from PR comments by trusted identities only: ADR-022's
 `<!-- ai-review: {…} -->` marker (v1) when present, else the
 `<!-- review-pr:<sha> -->` anchor plus a ``verdict: `…` `` line. The latest
 verdict on the PR's **current** head SHA wins; one only on an older commit
-reads as `review on older commit`.
+reads as `review on older commit`. The comparison ignores case and accepts an
+abbreviated SHA (7 hex or more) as naming the head it is a prefix of, so a
+short anchor is not mistaken for a verdict on another commit.
 
 Evidence is gathered on the issues tick and cached per `(repo, PR, head SHA)` —
 a push invalidates it, and checks that are still running or absent are re-read
@@ -366,8 +368,11 @@ and click fails at GitHub even if bridge's re-check raced. Nothing is bypassed:
 no admin merge, no retry with other parameters.
 
 Success (`200`): `{"merged": true, "branchDeleted": true}`. The head branch is
-deleted afterwards (`DELETE /git/refs/heads/<head_ref>`), and only when it
-lives in the base repo — never a fork's. A failed delete does not fail the
+deleted afterwards (`DELETE /git/refs/heads/<head_ref>`), and only when the
+PR's `head.repo` names the base repo — never a fork's, and never when GitHub
+reports no head repo at all (a deleted fork), because a blank head repo read as
+"ours" would delete whatever base branch shares the head ref's name. A failed
+delete does not fail the
 merge: the answer is still `200`, with `"branchDeleted": false` and
 `"branchError": "…"`. A ref that is already gone (the repo's own
 `delete_branch_on_merge` got there first) counts as deleted.
@@ -427,7 +432,8 @@ rejected for any other agent.
   authorship **and** for the review verdict. A repo whose pipeline runs under
   its own App (`PIPELINE_APP_ID`) posts re-reviews as that App's bot, so list
   that login here too — otherwise its re-review never counts and the card says
-  `review on older commit`. A verdict comment by anyone else is ignored, which
+  `review on older commit`. Logins are matched case-insensitively, the way
+  GitHub treats them. A verdict comment by anyone else is ignored, which
   is what stops an approval anyone could post from enabling Merge.
 
 ## Known limits

@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"github.com/freaxnx01/bridge/internal/api"
+	"github.com/freaxnx01/bridge/internal/cockpit"
+	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -215,19 +217,38 @@ func TestMerge_DeleteFails_Still200(t *testing.T) {
 	}
 }
 
-func TestMerge_ForkHead_NoDelete(t *testing.T) {
-	m := greenMerger()
-	m.pr.HeadRepo = "contributor/a"
+// The branch delete needs positive evidence that the head lives in the base
+// repo. A fork's branch is not ours, and a head repo GitHub no longer reports
+// (head.repo is null once the fork is gone) is not evidence that it ever was —
+// read as "ours" it would delete whatever base branch shares the head ref name.
+func TestMerge_HeadNotProvablyInBaseRepo_NoDelete(t *testing.T) {
+	cases := []struct {
+		name     string
+		headRepo string
+		baseRepo string
+		headRef  string
+	}{
+		{"head in a fork", "contributor/a", "o/a", "feat/5-x"},
+		{"fork deleted, head repo null", "", "o/a", "feat/5-x"},
+		{"fork deleted, head ref names a base branch", "", "o/a", "main"},
+		{"neither repo reported", "", "", "feat/5-x"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := greenMerger()
+			m.pr.HeadRepo, m.pr.BaseRepo, m.pr.HeadRef = tc.headRepo, tc.baseRepo, tc.headRef
 
-	res, err := mergePR(context.Background(), m, mergeBots, mergeReq)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if m.didAny("delete ") {
-		t.Errorf("calls = %q, a fork's branch is not ours to delete", m.calls)
-	}
-	if !res.Merged || res.BranchDeleted || res.BranchError == "" {
-		t.Errorf("result = %+v", res)
+			res, err := mergePR(context.Background(), m, mergeBots, mergeReq)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if m.didAny("delete ") {
+				t.Errorf("calls = %q, the head branch is not ours to delete", m.calls)
+			}
+			if !res.Merged || res.BranchDeleted || res.BranchError == "" {
+				t.Errorf("result = %+v", res)
+			}
+		})
 	}
 }
 
@@ -243,6 +264,176 @@ func TestMerge_PRReadFails_Error(t *testing.T) {
 	var refused api.ErrForgeRefused
 	if errors.As(err, &notMergeable) || errors.As(err, &refused) {
 		t.Errorf("err = %v, want a plain forge error", err)
+	}
+}
+
+// cardCollector is the one thing mergeInboxCard reads of the collector: the
+// merge card the inbox is currently showing for an issue.
+type cardCollector struct {
+	card  cockpit.InboxCard
+	ok    bool
+	asked []string
+}
+
+func (c *cardCollector) MergeCard(owner, name string, number int) (cockpit.InboxCard, bool) {
+	c.asked = append(c.asked, ref(owner, name, number))
+	return c.card, c.ok
+}
+
+// shownCard is an inbox showing a merge card for issue 5 and the PR given.
+func shownCard(pr int) *cardCollector {
+	return &cardCollector{ok: true, card: cockpit.InboxCard{
+		Kind: cockpit.CardMerge, Repo: "o/a", Number: 5, Reason: "ready to merge",
+		Merge: &cockpit.MergeEvidence{PR: pr, HeadSHA: mergeHead, CanMerge: true},
+	}}
+}
+
+// mergeClient is a fakeMerger that also satisfies forge.Client, the way a
+// resolver hands out a GithubClient.
+type mergeClient struct {
+	baseClient
+	*fakeMerger
+}
+
+func mergeRepos() ([]core.Repo, error) {
+	return []core.Repo{{Forge: "github", Owner: "o", Name: "a", Path: "/r/a"}}, nil
+}
+
+func TestMergeInboxCard_ShownCard_MergesWithTheRepoOwnersClient(t *testing.T) {
+	m := greenMerger()
+	cards := shownCard(9)
+	var gotForge, gotOwner string
+	resolve := func(f, o string) forge.Client {
+		gotForge, gotOwner = f, o
+		return mergeClient{fakeMerger: m}
+	}
+
+	res, err := mergeInboxCard(context.Background(), cards, mergeRepos, resolve, mergeBots, mergeReq)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if gotForge != "github" || gotOwner != "o" {
+		t.Errorf("resolved %s/%s, want the repo owner's client", gotForge, gotOwner)
+	}
+	if strings.Join(cards.asked, "|") != "o/a#5" {
+		t.Errorf("asked = %q, want the card of the requested issue", cards.asked)
+	}
+	if want := "merge o/a#9 " + mergeHead + " squash"; !m.did(want) {
+		t.Errorf("calls = %q, want %q", m.calls, want)
+	}
+	if !res.Merged {
+		t.Errorf("result = %+v", res)
+	}
+}
+
+// The guard is what keeps an authenticated caller from asking bridge to merge
+// an arbitrary PR of a known repo: only the PR the inbox is showing right now.
+func TestMergeInboxCard_NotTheShownPR_RefusedBeforeAnyForgeCall(t *testing.T) {
+	humanCard := shownCard(9)
+	humanCard.card.Kind = "human"
+	noEvidence := shownCard(9)
+	noEvidence.card.Merge = nil
+	cases := []struct {
+		name  string
+		cards *cardCollector
+	}{
+		{"the issue has no card at all", &cardCollector{}},
+		{"the card is not a merge card", humanCard},
+		{"the card carries no PR evidence", noEvidence},
+		{"the card shows another PR", shownCard(10)},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := greenMerger()
+			resolved := false
+			resolve := func(string, string) forge.Client {
+				resolved = true
+				return mergeClient{fakeMerger: m}
+			}
+
+			_, err := mergeInboxCard(context.Background(), tc.cards, mergeRepos, resolve, mergeBots, mergeReq)
+			var notMergeable api.ErrNotMergeable
+			if !errors.As(err, &notMergeable) || notMergeable.Reason != "not on the inbox" {
+				t.Fatalf("err = %v, want not on the inbox", err)
+			}
+			if resolved || len(m.calls) > 0 {
+				t.Errorf("resolved = %v, calls = %q, want the request refused before the forge",
+					resolved, m.calls)
+			}
+		})
+	}
+}
+
+func TestMergeInboxCard_RepoAndClientFailures(t *testing.T) {
+	cases := []struct {
+		name   string
+		client forge.Client
+		repos  func() ([]core.Repo, error)
+		want   error
+	}{
+		{"repo not cloned", mergeClient{fakeMerger: greenMerger()},
+			func() ([]core.Repo, error) { return nil, nil }, api.ErrUnknownRepo},
+		{"repos listing fails", mergeClient{fakeMerger: greenMerger()},
+			func() ([]core.Repo, error) { return nil, errors.New("boom") }, nil},
+		{"no client for the owner", nil, mergeRepos, api.ErrNoToken},
+		{"client cannot merge", baseClient{}, mergeRepos, api.ErrUnsupportedForge},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolve := func(string, string) forge.Client { return tc.client }
+			_, err := mergeInboxCard(context.Background(), shownCard(9), tc.repos, resolve, mergeBots, mergeReq)
+			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+var mergeRepo1 = core.Repo{Forge: "github", Owner: "o", Name: "a", Path: "/r/a"}
+
+// The listing carries no mergeable_state, changed_files or head SHA worth
+// deciding on, so the evidence must come from a live single-PR read.
+func TestLiveEvidence_ReReadsThePRAndDecidesOnIt(t *testing.T) {
+	m := greenMerger()
+	resolve := func(string, string) forge.Client { return mergeClient{fakeMerger: m} }
+
+	ev, err := liveEvidence(context.Background(), resolve, mergeBots, mergeRepo1,
+		forge.PullRequest{Number: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !m.did("get o/a#9") || !m.did("checks "+mergeHead) {
+		t.Errorf("calls = %q, want the PR re-read and its checks read on the live head", m.calls)
+	}
+	if ev.PR != 9 || ev.HeadSHA != mergeHead || !ev.CanMerge {
+		t.Errorf("evidence = %+v", ev)
+	}
+	if m.didAny("merge ") || m.didAny("delete ") {
+		t.Errorf("calls = %q, reading evidence must write nothing", m.calls)
+	}
+}
+
+func TestLiveEvidence_Failures(t *testing.T) {
+	failing := greenMerger()
+	failing.prErr = errors.New("boom")
+	cases := []struct {
+		name   string
+		client forge.Client
+		want   error
+	}{
+		{"no client for the owner", nil, api.ErrNoToken},
+		{"client cannot merge", baseClient{}, api.ErrUnsupportedForge},
+		{"the PR read fails", mergeClient{fakeMerger: failing}, nil},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolve := func(string, string) forge.Client { return tc.client }
+			_, err := liveEvidence(context.Background(), resolve, mergeBots, mergeRepo1,
+				forge.PullRequest{Number: 9})
+			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
 	}
 }
 

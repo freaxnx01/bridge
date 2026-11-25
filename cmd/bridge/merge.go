@@ -36,6 +36,12 @@ type merger interface {
 	DeleteBranch(ctx context.Context, owner, repo, ref string) error
 }
 
+// mergeCards is what the merge endpoint needs from the collector: the merge
+// card the inbox is currently showing for one issue, if any.
+type mergeCards interface {
+	MergeCard(owner, name string, number int) (cockpit.InboxCard, bool)
+}
+
 // pipelineBots parses BRIDGE_PIPELINE_BOTS: a comma-separated list of the
 // GitHub logins whose PRs and review comments the merge card trusts. An unset
 // or blank value means the Actions bot alone.
@@ -86,11 +92,14 @@ func mergePR(ctx context.Context, m merger, bots []string, req api.MergeRequest)
 	return withBranch(deleteHeadBranch(ctx, m, owner, name, pr)), nil
 }
 
-// deleteHeadBranch removes the merged head branch, or says why it did not. A
-// head in another repo is a fork's branch and not ours to delete.
+// deleteHeadBranch removes the merged head branch, or says why it did not. The
+// delete needs positive evidence that the head lives in the base repo: GitHub
+// reports head.repo as null once a fork is deleted, and a blank head repo read
+// as "ours" would delete whatever base branch happens to share the head ref's
+// name.
 func deleteHeadBranch(ctx context.Context, m merger, owner, name string, pr forge.PullRequest) error {
-	if pr.HeadRepo != "" && pr.BaseRepo != "" && pr.HeadRepo != pr.BaseRepo {
-		return fmt.Errorf("head branch lives in %s", pr.HeadRepo)
+	if pr.HeadRepo == "" || pr.HeadRepo != pr.BaseRepo {
+		return fmt.Errorf("head branch is not known to live in %s/%s (head repo %q)", owner, name, pr.HeadRepo)
 	}
 	if err := m.DeleteBranch(ctx, owner, name, pr.HeadRef); err != nil {
 		return fmt.Errorf("delete %s: %w", pr.HeadRef, err)
@@ -160,11 +169,11 @@ func repoMerger(resolve clientResolver, r core.Repo) (merger, error) {
 // merge card of the current snapshot showing exactly this PR, then merges with
 // the repo owner's own token. refresh re-collects the repo so the card leaves
 // the inbox without waiting for the next issues tick.
-func mergeInboxCard(ctx context.Context, col *cockpit.Collector, repos func() ([]core.Repo, error),
+func mergeInboxCard(ctx context.Context, cards mergeCards, repos func() ([]core.Repo, error),
 	resolve clientResolver, bots []string, req api.MergeRequest) (api.MergeResult, error) {
 	owner, name, _ := strings.Cut(req.Repo, "/")
-	card, ok := col.MergeCard(owner, name, req.Number)
-	if !ok || card.Merge == nil || card.Merge.PR != req.PR {
+	card, ok := cards.MergeCard(owner, name, req.Number)
+	if !ok || card.Kind != cockpit.CardMerge || card.Merge == nil || card.Merge.PR != req.PR {
 		return api.MergeResult{}, api.ErrNotMergeable{Reason: "not on the inbox"}
 	}
 	r, err := mergeRepo(repos, owner, name)

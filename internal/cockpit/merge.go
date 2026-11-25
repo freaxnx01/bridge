@@ -36,6 +36,11 @@ const ReasonStale = "forge read failed (evidence stale)"
 // verdictApprove is the only verdict that allows a merge.
 const verdictApprove = "approve"
 
+// minSHAPrefix is the shortest commit reference a verdict may carry — the
+// fallback anchor's own lower bound. Anything shorter is not a SHA and never
+// matches a head.
+const minSHAPrefix = 7
+
 // passingConclusions are the check-run conclusions that count as passed. A run
 // GitHub skipped or marked neutral never ran against the code, so neither
 // blocks the merge the way a failure does.
@@ -110,7 +115,7 @@ func LatestVerdict(comments []forge.Comment, headSHA string, bots []string) *Rev
 	var onHead, latest *ReviewVerdict
 	var onHeadAt, latestAt time.Time
 	for _, c := range comments {
-		if !slices.Contains(bots, c.Author) {
+		if !isTrusted(bots, c.Author) {
 			continue
 		}
 		v := parseVerdict(c.Body)
@@ -120,7 +125,7 @@ func LatestVerdict(comments []forge.Comment, headSHA string, bots []string) *Rev
 		if latest == nil || !c.Created.Before(latestAt) {
 			latest, latestAt = v, c.Created
 		}
-		if strings.EqualFold(v.HeadSHA, headSHA) && (onHead == nil || !c.Created.Before(onHeadAt)) {
+		if sameCommit(v.HeadSHA, headSHA) && (onHead == nil || !c.Created.Before(onHeadAt)) {
 			onHead, onHeadAt = v, c.Created
 		}
 	}
@@ -129,6 +134,25 @@ func LatestVerdict(comments []forge.Comment, headSHA string, bots []string) *Rev
 		return onHead
 	}
 	return latest
+}
+
+// isTrusted reports whether login is one of the trusted pipeline identities.
+// GitHub logins are case-insensitive, so a BRIDGE_PIPELINE_BOTS entry cased
+// differently from the API's user.login still counts — otherwise the card
+// silently never appears, which is a hard failure to diagnose.
+func isTrusted(bots []string, login string) bool {
+	return slices.ContainsFunc(bots, func(b string) bool { return strings.EqualFold(b, login) })
+}
+
+// sameCommit reports whether a verdict's SHA names headSHA. The fallback anchor
+// may carry an abbreviated SHA, which matches on its prefix: compared whole it
+// would never equal the 40-hex head, leaving the card stuck on "review on older
+// commit" with no way to tell it from a genuinely stale verdict.
+func sameCommit(verdictSHA, headSHA string) bool {
+	if len(verdictSHA) < minSHAPrefix || len(verdictSHA) > len(headSHA) {
+		return false
+	}
+	return strings.EqualFold(verdictSHA, headSHA[:len(verdictSHA)])
 }
 
 // parseVerdict reads one comment body: ADR-022's marker when its last non-empty
@@ -264,7 +288,7 @@ func SummarySection(body string) string {
 func ClosingPipelinePRs(prs []forge.PullRequest, issue int, bots []string) []forge.PullRequest {
 	var out []forge.PullRequest
 	for _, p := range prs {
-		if slices.Contains(bots, p.Author) && dispatch.ClosesIssue(p.Body, issue) {
+		if isTrusted(bots, p.Author) && dispatch.ClosesIssue(p.Body, issue) {
 			out = append(out, p)
 		}
 	}

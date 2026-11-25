@@ -72,6 +72,18 @@ func TestReviewVerdict_Table(t *testing.T) {
 			[]forge.Comment{reviewFallback("96FAE5FD5D9AA4022A3B5A57A69B50510A563891", "approve",
 				"github-actions[bot]", mergeT0)},
 			"approve", true, "fallback", nil, nil},
+		{"a trusted bot login cased differently still counts",
+			[]forge.Comment{reviewFallback(mergeHead, "approve", "GitHub-Actions[bot]", mergeT0)},
+			"approve", true, "fallback", nil, nil},
+		{"an abbreviated anchor on the head is current",
+			[]forge.Comment{reviewFallback(mergeHead[:7], "approve", "github-actions[bot]", mergeT0)},
+			"approve", true, "fallback", nil, nil},
+		{"an abbreviated anchor on another commit is not current",
+			[]forge.Comment{reviewFallback(mergeOld[:12], "approve", "github-actions[bot]", mergeT0)},
+			"approve", false, "fallback", nil, nil},
+		{"a marker SHA too short to be a commit reference is not the head",
+			[]forge.Comment{reviewMarker(mergeHead[:6], "approve", "github-actions[bot]", mergeT0)},
+			"approve", false, "marker", intp(0), intp(2)},
 		{"the latest on the head wins over a newer one on another commit",
 			[]forge.Comment{
 				reviewFallback(mergeHead, "approve", "github-actions[bot]", mergeT0),
@@ -265,6 +277,15 @@ func TestClosingPipelinePRs_FiltersAuthorAndCloses(t *testing.T) {
 	got := ClosingPipelinePRs(prs, 5, mergeBots)
 	if len(got) != 2 || got[0].Number != 9 || got[1].Number != 13 {
 		t.Fatalf("got %+v, want PRs 9 and 13", got)
+	}
+}
+
+// GitHub logins are case-insensitive, so a BRIDGE_PIPELINE_BOTS entry whose
+// case differs from the API's user.login must not drop the PR.
+func TestClosingPipelinePRs_BotLoginCase_Ignored(t *testing.T) {
+	prs := []forge.PullRequest{{Number: 9, Body: "Closes #5", Author: "My-App[Bot]"}}
+	if got := ClosingPipelinePRs(prs, 5, mergeBots); len(got) != 1 {
+		t.Fatalf("got %+v, want PR 9", got)
 	}
 }
 

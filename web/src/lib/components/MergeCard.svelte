@@ -107,12 +107,15 @@
   <div class="actions">
     <!-- #383 adds the read-only diff next to Open PR. -->
     <a href={ev.prUrl} target="_blank" rel="noopener noreferrer">Open PR ↗</a>
-    {#if ev.canMerge}
+    <!-- Merge is gone once it landed: the result line below is all there is
+         left to say, and a second post would only earn the operator a 409 for
+         an action that in fact succeeded. -->
+    {#if !ev.canMerge}
+      <strong class="blocked">{ev.reason || card.reason}</strong>
+    {:else if state !== 'done'}
       <button type="button" class="action" disabled={state === 'working'} onclick={start}>
         {state === 'working' ? 'merging…' : 'Merge'}
       </button>
-    {:else}
-      <strong class="blocked">{ev.reason || card.reason}</strong>
     {/if}
   </div>
 

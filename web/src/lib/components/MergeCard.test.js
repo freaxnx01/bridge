@@ -151,6 +151,17 @@ describe('MergeCard', () => {
     expect(loadInbox).toHaveBeenCalled()
   })
 
+  it('takes Merge away once the merge landed, so it cannot be posted twice', async () => {
+    answers({ merged: true, branchDeleted: true })
+    show()
+    await fireEvent.click(screen.getByRole('button', { name: 'Merge' }))
+    await fireEvent.click(screen.getByRole('button', { name: /Squash & merge/ }))
+    await screen.findByText(/Merged PR #9/)
+
+    expect(screen.queryByRole('button', { name: 'Merge' })).toBeNull()
+    expect(calls.length).toBe(1)
+  })
+
   it('cancelling posts nothing', async () => {
     answers({ merged: true, branchDeleted: true })
     show()
