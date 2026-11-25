@@ -82,7 +82,9 @@ func mergePR(ctx context.Context, m merger, bots []string, req api.MergeRequest)
 	if !ev.CanMerge {
 		return api.MergeResult{}, api.ErrNotMergeable{Reason: ev.Reason}
 	}
-	if err := m.MergePullRequest(ctx, owner, name, req.PR, req.HeadSHA, mergeMethod); err != nil {
+	// pr.HeadSHA, not req.HeadSHA: they are equal ignoring case, and GitHub
+	// gets the SHA in the form it reported.
+	if err := m.MergePullRequest(ctx, owner, name, req.PR, pr.HeadSHA, mergeMethod); err != nil {
 		var apiErr *forge.APIError
 		if errors.As(err, &apiErr) {
 			return api.MergeResult{}, api.ErrForgeRefused{Status: apiErr.Status, Message: apiErr.Message}
@@ -160,7 +162,7 @@ func repoMerger(resolve clientResolver, r core.Repo) (merger, error) {
 	}
 	m, ok := client.(merger)
 	if !ok {
-		return nil, fmt.Errorf("%w: %s", api.ErrUnsupportedForge, r.Forge)
+		return nil, fmt.Errorf("%w: %s", api.ErrMergeUnsupported, r.Forge)
 	}
 	return m, nil
 }

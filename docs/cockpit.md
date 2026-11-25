@@ -384,7 +384,7 @@ merge: the answer is still `200`, with `"branchDeleted": false` and
 | 403 | Origin missing or not allowed — or GitHub refused with 403, with its message as the reason |
 | 405 | Wrong method (`Allow: POST`) |
 | 409 | Not mergeable, with the reason: `not on the inbox`, `head moved`, `PR is not open`, or any card reason above — also GitHub's own 405/409/422 refusal, with its message (e.g. a required status check branch protection wants) |
-| 422 | `no token for this owner`, or the repo's forge cannot merge (everything but GitHub) |
+| 422 | `no token for this owner`, or `merge is not supported for this forge` (everything but GitHub) |
 | 502 | The forge call failed; the detail is in the server log, never in the body |
 | 503 | `BRIDGE_API_TOKEN` is not set (writes fail closed) |
 

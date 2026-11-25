@@ -1,11 +1,14 @@
 package main
 
 import (
+	"context"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/api"
+	"github.com/freaxnx01/bridge/internal/cockpit"
 	imcp "github.com/freaxnx01/bridge/internal/mcp"
 )
 
@@ -242,4 +245,61 @@ func TestClearRoutes_GuardedLikeEnrich(t *testing.T) {
 			})
 		}
 	}
+}
+
+// The inbox routes as runServe registers them: the merge write is the only
+// guarded route under the open /api/inbox/ prefix, so this drives the real
+// mux, not a hand-built chain — it proves both that the guard wraps the merge
+// handler and that the exact /api/inbox/merge pattern wins over the subtree.
+func TestInboxRoutes_MergeGuarded_ReadsOpen(t *testing.T) {
+	merged := false
+	h := &api.InboxHandler{
+		Inbox: func() cockpit.Inbox { return cockpit.Inbox{} },
+		Merge: func(context.Context, api.MergeRequest) (api.MergeResult, error) {
+			merged = true
+			return api.MergeResult{Merged: true}, nil
+		},
+	}
+	body := `{"repo":"o/a","number":5,"pr":9,"headSha":"96fae5fd5d9aa4022a3b5a57a69b50510a563891"}`
+	cases := []struct {
+		name, token, origin, auth string
+		want                      int
+	}{
+		{"no token configured", "", "http://localhost:7777", "Bearer secret", http.StatusServiceUnavailable},
+		{"no bearer", "secret", "http://localhost:7777", "", http.StatusUnauthorized},
+		{"wrong bearer", "secret", "http://localhost:7777", "Bearer nope", http.StatusUnauthorized},
+		{"foreign origin", "secret", "http://evil.example", "Bearer secret", http.StatusForbidden},
+		{"allowed", "secret", "http://localhost:7777", "Bearer secret", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run("merge "+tc.name, func(t *testing.T) {
+			merged = false
+			mux := http.NewServeMux()
+			registerInboxRoutes(mux, h, tc.token, testAllowlist())
+			req := httptest.NewRequest(http.MethodPost, "http://localhost:7777/api/inbox/merge", strings.NewReader(body))
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.auth != "" {
+				req.Header.Set("Authorization", tc.auth)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d (%s)", w.Code, tc.want, w.Body)
+			}
+			if merged != (tc.want == http.StatusOK) {
+				t.Fatalf("merge reached = %v for status %d", merged, w.Code)
+			}
+		})
+	}
+	t.Run("inbox read stays open", func(t *testing.T) {
+		mux := http.NewServeMux()
+		registerInboxRoutes(mux, h, "secret", testAllowlist())
+		w := httptest.NewRecorder()
+		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://localhost:7777/api/inbox", nil))
+		if w.Code != http.StatusOK {
+			t.Fatalf("GET /api/inbox = %d, want 200 without a token", w.Code)
+		}
+	})
 }

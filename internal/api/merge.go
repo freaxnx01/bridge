@@ -107,8 +107,8 @@ func writeMergeError(w http.ResponseWriter, req MergeRequest, err error) {
 		writeError(w, http.StatusConflict, "not on the inbox")
 	case errors.Is(err, ErrNoToken):
 		writeError(w, http.StatusUnprocessableEntity, ErrNoToken.Error())
-	case errors.Is(err, ErrUnsupportedForge):
-		writeError(w, http.StatusUnprocessableEntity, ErrUnsupportedForge.Error())
+	case errors.Is(err, ErrMergeUnsupported):
+		writeError(w, http.StatusUnprocessableEntity, ErrMergeUnsupported.Error())
 	default:
 		slog.Error("inbox merge failed", "repo", req.Repo, "pr", req.PR, "error", err)
 		writeError(w, http.StatusBadGateway, "forge call failed")

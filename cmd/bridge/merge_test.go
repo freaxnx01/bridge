@@ -130,6 +130,21 @@ func TestMerge_AllGreen_SquashesWithSHAAndDeletesBranch(t *testing.T) {
 	}
 }
 
+// The request's SHA is only compared; GitHub gets the SHA it reported itself,
+// so a request in another case cannot be refused as "head branch was modified".
+func TestMerge_UppercaseRequestSHA_MergesWithTheForgesSHA(t *testing.T) {
+	m := greenMerger()
+	req := mergeReq
+	req.HeadSHA = strings.ToUpper(mergeHead)
+
+	if _, err := mergePR(context.Background(), m, mergeBots, req); err != nil {
+		t.Fatal(err)
+	}
+	if want := "merge o/a#9 " + mergeHead + " squash"; !m.did(want) {
+		t.Errorf("calls = %q, want %q", m.calls, want)
+	}
+}
+
 func TestMerge_HeadMoved_409NoMerge(t *testing.T) {
 	m := greenMerger()
 	m.pr.HeadSHA = "2222222222222222222222222222222222222222"
@@ -376,7 +391,7 @@ func TestMergeInboxCard_RepoAndClientFailures(t *testing.T) {
 		{"repos listing fails", mergeClient{fakeMerger: greenMerger()},
 			func() ([]core.Repo, error) { return nil, errors.New("boom") }, nil},
 		{"no client for the owner", nil, mergeRepos, api.ErrNoToken},
-		{"client cannot merge", baseClient{}, mergeRepos, api.ErrUnsupportedForge},
+		{"client cannot merge", baseClient{}, mergeRepos, api.ErrMergeUnsupported},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -422,7 +437,7 @@ func TestLiveEvidence_Failures(t *testing.T) {
 		want   error
 	}{
 		{"no client for the owner", nil, api.ErrNoToken},
-		{"client cannot merge", baseClient{}, api.ErrUnsupportedForge},
+		{"client cannot merge", baseClient{}, api.ErrMergeUnsupported},
 		{"the PR read fails", mergeClient{fakeMerger: failing}, nil},
 	}
 	for _, tc := range cases {

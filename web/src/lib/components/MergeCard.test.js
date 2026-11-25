@@ -151,6 +151,21 @@ describe('MergeCard', () => {
     expect(loadInbox).toHaveBeenCalled()
   })
 
+  it('posts the head the dialog showed even if the card moves while it is open', async () => {
+    answers({ merged: true, branchDeleted: true })
+    const NEW = '2222222222222222222222222222222222222222'
+    const { rerender } = show()
+    await fireEvent.click(screen.getByRole('button', { name: 'Merge' }))
+    await rerender({ card: card({}, { headSha: NEW, pr: 10 }), now: NOW, onopen: () => {} })
+
+    expect(screen.getByRole('dialog').textContent).toContain('96fae5f')
+    await fireEvent.click(screen.getByRole('button', { name: /Squash & merge/ }))
+
+    expect(calls).toEqual([
+      ['/api/inbox/merge', { repo: 'freaxnx01/bridge', number: 5, pr: 9, headSha: HEAD }, 'tok'],
+    ])
+  })
+
   it('takes Merge away once the merge landed, so it cannot be posted twice', async () => {
     answers({ merged: true, branchDeleted: true })
     show()

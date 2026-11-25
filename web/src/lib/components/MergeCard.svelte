@@ -27,17 +27,22 @@
   let outcome = $state('');
   let failure = $state('');
   let token = null;
+  // The evidence the confirm dialog showed, frozen when it opened: the inbox
+  // reloads underneath an open dialog, and the merge must post the head the
+  // operator confirmed, not whatever the card says by the time they click.
+  let pinned = $state(null);
 
   async function start() {
     token = await ensureToken();
     if (!token) return;
+    pinned = $state.snapshot(ev);
     state = 'confirm';
   }
 
   async function confirm() {
     state = 'working';
     try {
-      const body = { repo: card.repo, number: card.number, pr: ev.pr, headSha: ev.headSha };
+      const body = { repo: card.repo, number: card.number, pr: pinned.pr, headSha: pinned.headSha };
       const res = await authedPost('/api/inbox/merge', body, token);
       outcome = successText(res);
       state = 'done';
@@ -52,7 +57,7 @@
   }
 
   function successText(res) {
-    const merged = `Merged PR #${ev.pr}`;
+    const merged = `Merged PR #${pinned.pr}`;
     if (res.branchDeleted) return merged;
     return `${merged} · branch not deleted: ${res.branchError || 'unknown reason'}`;
   }
@@ -135,7 +140,7 @@
       repo={card.repo}
       number={card.number}
       action="merge"
-      detail={ev}
+      detail={pinned}
       onconfirm={confirm}
       oncancel={() => (state = 'idle')}
     />

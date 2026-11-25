@@ -261,17 +261,7 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return res, nil
 		},
 	}
-	apiMux.Handle("/api/inbox", inboxH) // read-only, open like GET /api/pipeline
-	// The issue detail. Open too, but it is the only open endpoint that can
-	// reach the forge, so the collector answers it from its comment cache
-	// within detailTTL and only for issues the inbox already lists — a page
-	// looping it cannot burn the token's REST quota or read anything else.
-	apiMux.Handle("/api/inbox/", inboxH)
-	// The one write the inbox owns. Registered as its own exact pattern, which
-	// wins over /api/inbox/ in ServeMux, and behind the same guard the pipeline
-	// actions use: token configured, bearer, same origin.
-	apiMux.Handle("/api/inbox/merge", requireTokenConfigured(apiToken,
-		requireBearer(apiToken, requireSameOrigin(origins, inboxH.MergeHandler()))))
+	registerInboxRoutes(apiMux, inboxH, apiToken, origins)
 	// The dispatcher's own history: read-only and open, like GET /api/pipeline.
 	// It reads the tick journal off disk — no forge call, no local state write.
 	apiMux.Handle("/api/dispatch/", &api.DispatchHandler{
@@ -328,4 +318,20 @@ func runServe(cmd *cobra.Command, _ []string) error {
 		return err
 	}
 	return nil
+}
+
+// registerInboxRoutes mounts the inbox: its reads are open, and its one write,
+// the merge, is guarded like the pipeline actions.
+func registerInboxRoutes(mux *http.ServeMux, h *api.InboxHandler, token string, origins originAllowlist) {
+	mux.Handle("/api/inbox", h) // read-only, open like GET /api/pipeline
+	// The issue detail. Open too, but it is the only open endpoint that can
+	// reach the forge, so the collector answers it from its comment cache
+	// within detailTTL and only for issues the inbox already lists — a page
+	// looping it cannot burn the token's REST quota or read anything else.
+	mux.Handle("/api/inbox/", h)
+	// The one write the inbox owns. Registered as its own exact pattern, which
+	// wins over /api/inbox/ in ServeMux, and behind the same guard the pipeline
+	// actions use: token configured, bearer, same origin.
+	mux.Handle("/api/inbox/merge", requireTokenConfigured(token,
+		requireBearer(token, requireSameOrigin(origins, h.MergeHandler()))))
 }

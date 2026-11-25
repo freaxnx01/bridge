@@ -62,8 +62,8 @@ func TestMergeHandler_StatusMapping_Table(t *testing.T) {
 			http.StatusBadGateway, "forge call failed"},
 		{"unknown repo", MergeResult{}, ErrUnknownRepo, http.StatusConflict, "not on the inbox"},
 		{"no token for the owner", MergeResult{}, ErrNoToken, http.StatusUnprocessableEntity, ErrNoToken.Error()},
-		{"unsupported forge", MergeResult{}, ErrUnsupportedForge,
-			http.StatusUnprocessableEntity, ErrUnsupportedForge.Error()},
+		{"forge cannot merge", MergeResult{}, ErrMergeUnsupported,
+			http.StatusUnprocessableEntity, "merge is not supported for this forge"},
 		{"anything else", MergeResult{}, errors.New("boom"), http.StatusBadGateway, "forge call failed"},
 	}
 	for _, tc := range tests {
