@@ -1,5 +1,6 @@
 <script>
   import InboxCard from '../lib/components/InboxCard.svelte';
+  import MergeCard from '../lib/components/MergeCard.svelte';
   import IssueDetail from '../lib/components/IssueDetail.svelte';
   import WaitLine from '../lib/components/WaitLine.svelte';
   import FilterEmpty from '../lib/components/FilterEmpty.svelte';
@@ -31,10 +32,15 @@
     return `${card.repo}#${card.number}`;
   }
 
-  // The payload keys a failed comment read "comments owner/name#5", like the
-  // board's source errors; the warning line already says what failed.
+  // The payload keys a failed read "comments owner/name#5" or
+  // "merge owner/name#5", like the board's source errors; the warning line
+  // says which of the two failed.
   function issueRef(key) {
-    return key.replace(/^comments /, '');
+    return key.replace(/^(comments|merge) /, '');
+  }
+
+  function errorLabel(key) {
+    return key.startsWith('merge ') ? 'Could not read the merge evidence' : 'Could not read comments';
   }
 </script>
 
@@ -52,7 +58,11 @@
     {:else}
       <ul class="cards">
         {#each cards as card (cardKey(card))}
-          <InboxCard {card} now={$now} onopen={(c) => (selected = c)} />
+          {#if card.kind === 'merge'}
+            <MergeCard {card} now={$now} onopen={(c) => (selected = c)} />
+          {:else}
+            <InboxCard {card} now={$now} onopen={(c) => (selected = c)} />
+          {/if}
         {/each}
       </ul>
     {/if}
@@ -88,7 +98,7 @@
   <!-- Outside the filter branch: a filter that hides every card must not also
        hide which comment reads failed. -->
   {#each errors as [key, message] (key)}
-    <p class="warn" role="status">⚠ Could not read comments: {issueRef(key)} — {message}</p>
+    <p class="warn" role="status">⚠ {errorLabel(key)}: {issueRef(key)} — {message}</p>
   {/each}
 
   {#if selected}

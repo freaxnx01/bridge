@@ -176,3 +176,42 @@ describe('Inbox', () => {
     expect(await screen.findByRole('dialog', { name: 'bridge#412' })).toBeTruthy()
   })
 })
+
+describe('Inbox merge cards', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    inbox.set(null)
+    inboxError.set(null)
+    clearFilter()
+  })
+
+  const mergeCard = () =>
+    card({
+      repo: 'o/a',
+      number: 5,
+      title: 'feat: merge me',
+      kind: 'merge',
+      reason: 'ready to merge',
+      merge: {
+        pr: 9, prUrl: 'https://github.com/o/a/pull/9', headSha: 'a'.repeat(40), headRef: 'ai/5',
+        baseRef: 'main', draft: false, mergeableState: 'clean', summary: 'Caps it.',
+        review: { verdict: 'approve', headSha: 'a'.repeat(40), current: true, source: 'marker' },
+        checks: { state: 'green', passed: 6, total: 6 }, files: [], filesTruncated: false,
+        stale: false, canMerge: true, reason: '',
+      },
+    })
+
+  it('renders a merge card with its PR and Merge button', async () => {
+    await renderInbox({ cards: [mergeCard()], waiting: [], parked: [] })
+
+    expect(screen.getByText('a#5 → PR #9')).toBeTruthy()
+    expect(screen.getByRole('button', { name: 'Merge' })).toBeTruthy()
+    expect(screen.getByRole('link', { name: /Open PR/ })).toBeTruthy()
+  })
+
+  it('names a failed merge-evidence read as its own warning', async () => {
+    await renderInbox({ cards: [], waiting: [], parked: [], errors: { 'merge o/a#5': 'boom' } })
+
+    expect(screen.getByText(/Could not read the merge evidence: o\/a#5 — boom/)).toBeTruthy()
+  })
+})

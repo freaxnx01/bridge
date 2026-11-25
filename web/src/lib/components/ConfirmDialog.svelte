@@ -1,12 +1,20 @@
 <script>
   import { onMount } from 'svelte';
 
-  let { repo, number, action, onconfirm, oncancel } = $props();
+  // detail carries the merge evidence of a merge confirmation, and is unset
+  // for every other action.
+  let { repo, number, action, detail, onconfirm, oncancel } = $props();
 
   let confirmButton;
 
-  const VERBS = { enrich: 'Enrich', dispatch: 'Dispatch', 'clear-lock': 'Clear lock', 'clear-reenrich': 'Clear & re-enrich' };
+  const VERBS = { enrich: 'Enrich', dispatch: 'Dispatch', 'clear-lock': 'Clear lock', 'clear-reenrich': 'Clear & re-enrich', merge: 'Squash & merge' };
   const verb = $derived(VERBS[action] ?? 'Dispatch');
+  // The merge title names the PR and its base branch, because that — not the
+  // issue — is what the click changes.
+  const title = $derived(
+    action === 'merge' ? `Merge PR #${detail?.pr} into ${detail?.baseRef}?` : `${verb} ${repo} #${number}?`,
+  );
+  const mergeEffect = $derived(mergeSentence());
   const slot = $derived(
     action === 'clear-lock' ? null : `${action === 'dispatch' ? 'dispatch' : 'enrich'}-${number}`,
   );
@@ -17,6 +25,15 @@
       'clear-reenrich': `that runs /enrich ${number} --headless after removing the enrichment-ongoing label and posting a comment.`,
     }[action],
   );
+
+  // mergeSentence spells out exactly what the merge does: which commit lands,
+  // on what evidence, and that the branch goes with it.
+  function mergeSentence() {
+    const checks = detail?.checks ?? { passed: 0, total: 0 };
+    const sha = (detail?.headSha ?? '').slice(0, 7);
+    const verdictPart = detail?.review ? `review ${detail.review.verdict} on ${sha} (head)` : 'no review';
+    return `${repo} · squash · checks ${checks.passed}/${checks.total} ✓ · ${verdictPart} · Closes #${number}. The branch is deleted after merge.`;
+  }
 
   onMount(() => confirmButton?.focus());
 
@@ -34,8 +51,10 @@
     tabindex="-1"
     {onkeydown}
   >
-    <h2 id="confirm-title">{verb} {repo} #{number}?</h2>
-    {#if action === 'clear-lock'}
+    <h2 id="confirm-title">{title}</h2>
+    {#if action === 'merge'}
+      <p>{mergeEffect}</p>
+    {:else if action === 'clear-lock'}
       <p>This removes the <code>enrichment-ongoing</code> label from the issue and posts a comment. No Claude session is started.</p>
     {:else}
       <p>
