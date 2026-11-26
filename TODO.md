@@ -193,3 +193,8 @@ session summaries, auto-labeling, WebUI panels — see issue tracker for these).
 - [x] Create a `backlog` milestone in bridge (`/milestone new backlog`) — bridge has none, so ADR-010's "every open issue has a milestone" can't be met; then assign #405 to it (2026-11-25).
 - [x] Run `/enrich 382` (merge from cockpit) — still `needs-enrichment`, so dispatch skips it; most direct lever against the review bottleneck (2026-11-25).
 - [x] Run `/enrich 383` (diff in the merge card) — same reason as #382 (2026-11-25).
+- [ ] Merge card nit (#406): the spec doesn't say whether a head SHA may be given as a prefix — `mergePR` compares case-insensitively against the full 40-hex SHA; write down the rule (2026-11-26).
+- [ ] Merge card nit (#406): a 5xx from `POST /api/inbox/merge` shows no toast — `MergeCard.svelte` surfaces 409/422 only (2026-11-26).
+- [ ] Merge card nit (#406): the labels snapshot the card decides on (`ai-review-ai-merge`) can lag a label change until the next issues tick; document or shorten the window (2026-11-26).
+- [ ] Merge card diff nit (#407): on a Forgejo card the diff error reads "merge is not supported for this forge" — it reuses `api.ErrMergeUnsupported`; give the diff its own wording (2026-11-26).
+- [ ] Merge card diff nit (#407): `MergeCard.svelte` silently drops a diff response whose `headSha` differs from the card's — show "card moved, reload" instead (2026-11-26).
