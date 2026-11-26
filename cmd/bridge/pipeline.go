@@ -106,9 +106,7 @@ const runsPerRepo = 30
 // state. Clients are resolved per owner, like the MCP server does, because the
 // service gets its tokens from each forge directory's .envrc, not GH_TOKEN.
 // bots are the trusted pipeline identities the merge cards are read against.
-// diffs is the cache the merge-evidence read hands its file list to, so the
-// cockpit's diff endpoint serves what that read already paid for.
-func cockpitSources(resolve clientResolver, bots []string, diffs *cockpit.DiffCache) cockpit.Sources {
+func cockpitSources(resolve clientResolver, bots []string) cockpit.Sources {
 	return cockpit.Sources{
 		Repos: reposWithMeta,
 		Wired: repoWired,
@@ -156,7 +154,7 @@ func cockpitSources(resolve clientResolver, bots []string, diffs *cockpit.DiffCa
 			return gh.GetIssue(ctx, r.Owner, r.Name, number)
 		},
 		MergeEvidence: func(ctx context.Context, r core.Repo, pr forge.PullRequest) (cockpit.MergeEvidence, error) {
-			return liveEvidence(ctx, resolve, bots, diffs, r, pr)
+			return liveEvidence(ctx, resolve, bots, r, pr)
 		},
 		Bots: bots,
 		Sessions: func(ctx context.Context) ([]agentview.Session, error) {

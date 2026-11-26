@@ -78,7 +78,7 @@ func mergePR(ctx context.Context, m merger, bots []string, req api.MergeRequest)
 	case pr.State != "open":
 		return api.MergeResult{}, api.ErrNotMergeable{Reason: "PR is not open"}
 	}
-	ev, _, err := prEvidence(ctx, m, bots, owner, name, pr)
+	ev, err := prEvidence(ctx, m, bots, owner, name, pr)
 	if err != nil {
 		return api.MergeResult{}, err
 	}
@@ -117,36 +117,31 @@ func deleteHeadBranch(ctx context.Context, m merger, owner, name string, pr forg
 // applies the shared eligibility rule. The collector's merge-evidence source
 // and the merge endpoint both go through here, so the card and the POST can
 // never diverge on what "mergeable" means.
-//
-// The file list comes back alongside the evidence with its patches intact — the
-// evidence's own copy drops them for the open inbox — so a caller that has to
-// pay for the patches anyway can hand them to the diff cache.
 func prEvidence(ctx context.Context, m merger, bots []string, owner, name string,
-	pr forge.PullRequest) (cockpit.MergeEvidence, []forge.PRFile, error) {
+	pr forge.PullRequest) (cockpit.MergeEvidence, error) {
 	comments, err := m.ListPRComments(ctx, owner, name, pr.Number)
 	if err != nil {
-		return cockpit.MergeEvidence{}, nil, fmt.Errorf("pr comments: %w", err)
+		return cockpit.MergeEvidence{}, fmt.Errorf("pr comments: %w", err)
 	}
 	runs, err := m.ListCheckRuns(ctx, owner, name, pr.HeadSHA)
 	if err != nil {
-		return cockpit.MergeEvidence{}, nil, fmt.Errorf("check runs: %w", err)
+		return cockpit.MergeEvidence{}, fmt.Errorf("check runs: %w", err)
 	}
 	statuses, err := m.ListCommitStatuses(ctx, owner, name, pr.HeadSHA)
 	if err != nil {
-		return cockpit.MergeEvidence{}, nil, fmt.Errorf("commit statuses: %w", err)
+		return cockpit.MergeEvidence{}, fmt.Errorf("commit statuses: %w", err)
 	}
 	files, err := m.ListPullRequestFiles(ctx, owner, name, pr.Number)
 	if err != nil {
-		return cockpit.MergeEvidence{}, nil, fmt.Errorf("pr files: %w", err)
+		return cockpit.MergeEvidence{}, fmt.Errorf("pr files: %w", err)
 	}
-	return cockpit.BuildEvidence(pr, comments, runs, statuses, files, bots), files, nil
+	return cockpit.BuildEvidence(pr, comments, runs, statuses, files, bots), nil
 }
 
 // liveEvidence is the collector's merge-evidence source: it re-reads the PR
 // through the single-PR endpoint (the listing carries no mergeable_state or
-// changed_files), gathers the rest, and seeds the diff cache with the patches
-// that read already paid for.
-func liveEvidence(ctx context.Context, resolve clientResolver, bots []string, cache *cockpit.DiffCache,
+// changed_files) and gathers the rest.
+func liveEvidence(ctx context.Context, resolve clientResolver, bots []string,
 	r core.Repo, listed forge.PullRequest) (cockpit.MergeEvidence, error) {
 	m, err := repoMerger(resolve, r)
 	if err != nil {
@@ -156,16 +151,7 @@ func liveEvidence(ctx context.Context, resolve clientResolver, bots []string, ca
 	if err != nil {
 		return cockpit.MergeEvidence{}, fmt.Errorf("read pr %s/%s#%d: %w", r.Owner, r.Name, listed.Number, err)
 	}
-	ev, files, err := prEvidence(ctx, m, bots, r.Owner, r.Name, pr)
-	if err != nil {
-		return cockpit.MergeEvidence{}, err
-	}
-	// The card shows this read's head SHA, so the diff of that head is the one
-	// the operator can ask for — and it is already in hand. Without this, every
-	// tap re-read a file list the collector had just downloaded and thrown away.
-	cache.Put(diffKey(r.Owner, r.Name, pr.Number, pr.HeadSHA),
-		cockpit.NewDiff(pr.Number, pr.HeadSHA, files, ev.FilesTruncated))
-	return ev, nil
+	return prEvidence(ctx, m, bots, r.Owner, r.Name, pr)
 }
 
 // repoMerger resolves the repo owner's own client as a merger, the same way
@@ -209,9 +195,8 @@ func mergeInboxCard(ctx context.Context, cards mergeCards, repos func() ([]core.
 }
 
 // inboxDiff is the DiffHandler's Diff: the per-file diff of the PR the issue's
-// merge card is currently showing, read through cache so a card the collector
-// already read the files of, or one reopened at the same head, costs no forge
-// call. An issue that is not a merge card is refused before anything is
+// merge card is currently showing, read through cache so a card reopened at the
+// same head costs no forge call. An issue that is not a merge card is refused before anything is
 // resolved — the diff reads no arbitrary PR.
 func inboxDiff(ctx context.Context, cards mergeCards, repos func() ([]core.Repo, error),
 	resolve clientResolver, cache *cockpit.DiffCache, owner, name string, number int) (cockpit.Diff, error) {
@@ -233,11 +218,13 @@ func diffKey(owner, name string, pr int, headSHA string) cockpit.DiffKey {
 // prDiff reads one PR's diff with the repo owner's own client, for the head the
 // card was collected at.
 //
-// The head is re-read first because the file listing answers for whatever the
-// PR's head is now: served under the card's older SHA it would show the
-// operator code the review verdict on the card was never given on, and cache it
-// under that SHA on top. A head that has moved is refused with ErrHeadMoved;
-// the next collection brings the card, and with it the diff, to the new commit.
+// The file listing answers for whatever the PR's head is now: served under the
+// card's older SHA it would show the operator code the review verdict on the
+// card was never given on, and cache it under that SHA on top. So the head is
+// checked before the files (a moved head is not worth the read) and again after
+// them (a push can land in between). A head that has moved is refused with
+// ErrHeadMoved; the next collection brings the card, and with it the diff, to
+// the new commit.
 func prDiff(ctx context.Context, repos func() ([]core.Repo, error), resolve clientResolver,
 	owner, name string, ev *cockpit.MergeEvidence) (cockpit.Diff, error) {
 	r, err := mergeRepo(repos, owner, name)
@@ -248,17 +235,15 @@ func prDiff(ctx context.Context, repos func() ([]core.Repo, error), resolve clie
 	if err != nil {
 		return cockpit.Diff{}, err
 	}
-	pr, err := m.GetPullRequest(ctx, owner, name, ev.PR)
-	if err != nil {
-		return cockpit.Diff{}, fmt.Errorf("read pr %s/%s#%d: %w", owner, name, ev.PR, err)
-	}
-	if !strings.EqualFold(pr.HeadSHA, ev.HeadSHA) {
-		return cockpit.Diff{}, fmt.Errorf("%w: %s/%s#%d is at %s, the card at %s",
-			cockpit.ErrHeadMoved, owner, name, ev.PR, pr.HeadSHA, ev.HeadSHA)
+	if err := requireCardHead(ctx, m, owner, name, ev); err != nil {
+		return cockpit.Diff{}, err
 	}
 	files, err := m.ListPullRequestFiles(ctx, owner, name, ev.PR)
 	if err != nil {
 		return cockpit.Diff{}, fmt.Errorf("pr files %s/%s#%d: %w", owner, name, ev.PR, err)
+	}
+	if err := requireCardHead(ctx, m, owner, name, ev); err != nil {
+		return cockpit.Diff{}, err
 	}
 	// ev.HeadSHA, not pr.HeadSHA: they name the same commit, and the client
 	// drops a diff whose headSha is not the one its card shows, character for
@@ -267,7 +252,20 @@ func prDiff(ctx context.Context, repos func() ([]core.Repo, error), resolve clie
 	return cockpit.NewDiff(ev.PR, ev.HeadSHA, files, ev.FilesTruncated), nil
 }
 
-// mergeRepo finds the clone the merge applies to.
+// requireCardHead re-reads the PR and refuses with ErrHeadMoved unless its head
+// is still the one the card was collected at.
+func requireCardHead(ctx context.Context, m merger, owner, name string, ev *cockpit.MergeEvidence) error {
+	pr, err := m.GetPullRequest(ctx, owner, name, ev.PR)
+	if err != nil {
+		return fmt.Errorf("read pr %s/%s#%d: %w", owner, name, ev.PR, err)
+	}
+	if !strings.EqualFold(pr.HeadSHA, ev.HeadSHA) {
+		return fmt.Errorf("%w: %s/%s#%d is at %s, the card at %s",
+			cockpit.ErrHeadMoved, owner, name, ev.PR, pr.HeadSHA, ev.HeadSHA)
+	}
+	return nil
+}
+
 func mergeRepo(repos func() ([]core.Repo, error), owner, name string) (core.Repo, error) {
 	all, err := repos()
 	if err != nil {

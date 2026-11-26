@@ -192,13 +192,10 @@ while the old data stays on the board. To spare the GitHub rate limit:
   it is answered from the collector's comment cache. The endpoint is open, so
   without the window any page the operator visits could loop it and exhaust the
   token's hourly REST quota.
-- The merge card's diff usually costs no call at all: the evidence read above
-  already downloaded the file list with its patches (the open `GET /api/inbox`
-  drops them), so it is put straight into the diff cache under the head SHA it
-  was read at — the one the card shows. A tap on `[diff ▸]` that misses the
-  cache re-reads the PR and its files (two calls), and only ever for a PR the
-  inbox is already showing. It is the single per-request forge read in the
-  cockpit.
+- The merge card's diff is read only when the operator taps `[diff ▸]`: the PR's
+  head, its files, and the head again (three calls), cached per
+  `(repo, pr, headSha)`, and only ever for a PR the inbox is already showing. It
+  is the single per-request forge read in the cockpit.
 
 ## API
 
@@ -424,9 +421,10 @@ for an arbitrary PR's code.
 
 The patch served is always the code the card describes. GitHub's file listing
 answers for the PR's *current* head, so a read that is not served from the cache
-re-reads the PR first and refuses with `409 head moved` when the head is no
-longer the card's — the diff of a commit the shown review verdict never covered
-is never served, nor cached under the old SHA. The next collection brings the
+checks the PR's head before and after the file listing and refuses with
+`409 head moved` when either is no longer the card's — the diff of a commit the
+shown review verdict never covered is never served, nor cached under the old
+SHA. The next collection brings the
 card, and with it the diff, to the new commit.
 
 ```json
@@ -442,12 +440,11 @@ apart from an empty file. `status` is GitHub's own (`added`, `modified`,
 `truncated` repeats the card's `filesTruncated`. Empty `files` is `[]`, never
 `null`.
 
-Answers are cached in memory keyed `(repo, pr, headSha)`, LRU of 32 entries, and
-the collector's merge-evidence read seeds it with the file list it paid for
-anyway: a card the collector has read, or one reopened at the same head, costs
-no forge call, a push changes the head SHA and therefore the key, and a failed
-read is never cached. This lazy per-click read is the one exception to the
-collector's "no per-request forge fan-out" rule.
+Answers are cached in memory keyed `(repo, pr, headSha)`, LRU of 32 entries: a
+card reopened at the same head costs no forge call, a push changes the head SHA
+and therefore the key, and a failed or refused read is never cached. This single
+lazy per-click read is the one exception to the collector's "no per-request
+forge fan-out" rule.
 
 | Status | Meaning |
 |---|---|

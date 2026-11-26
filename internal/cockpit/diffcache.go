@@ -59,8 +59,6 @@ type DiffKey struct {
 // DiffCache holds the diffs read so far, newest use first, dropping the least
 // recently used one past its capacity. Patches are the largest thing the
 // cockpit keeps in memory, and a diff nobody looked at twice is not worth it.
-// Entries come from a per-click read and from the collector's merge-evidence
-// read, which pays for the same patches anyway (see Put).
 type DiffCache struct {
 	mu       sync.Mutex
 	capacity int
@@ -98,7 +96,7 @@ func (c *DiffCache) Get(ctx context.Context, k DiffKey, load func(ctx context.Co
 	if err != nil {
 		return Diff{}, err
 	}
-	c.Put(k, d)
+	c.store(k, d)
 	return d, nil
 }
 
@@ -114,12 +112,9 @@ func (c *DiffCache) lookup(k DiffKey) (Diff, bool) {
 	return el.Value.(*diffEntry).diff, true
 }
 
-// Put adds the diff as the most recently used entry, evicting the least
-// recently used one when the cache is full. It is how the collector hands over
-// a file list it already read: the patches are paid for either way, and the
-// head SHA it read them at is the one the card shows, so the operator's click
-// serves exactly the code the card describes without another forge call.
-func (c *DiffCache) Put(k DiffKey, d Diff) {
+// store adds the diff as the most recently used entry, evicting the least
+// recently used one when the cache is full.
+func (c *DiffCache) store(k DiffKey, d Diff) {
 	if c.capacity <= 0 {
 		return
 	}

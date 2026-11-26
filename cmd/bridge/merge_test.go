@@ -34,6 +34,10 @@ type fakeMerger struct {
 	mergeErr error
 	delErr   error
 
+	// onFiles runs inside ListPullRequestFiles, to model a push that lands
+	// while the files are being read.
+	onFiles func(*fakeMerger)
+
 	calls []string
 }
 
@@ -57,6 +61,9 @@ func (f *fakeMerger) ListCommitStatuses(_ context.Context, _, _, _ string) ([]fo
 
 func (f *fakeMerger) ListPullRequestFiles(_ context.Context, owner, repo string, number int) ([]forge.PRFile, error) {
 	f.calls = append(f.calls, "files "+ref(owner, repo, number))
+	if f.onFiles != nil {
+		f.onFiles(f)
+	}
 	return f.files, f.filesErr
 }
 
@@ -449,7 +456,7 @@ func TestLiveEvidence_ReReadsThePRAndDecidesOnIt(t *testing.T) {
 	m := greenMerger()
 	resolve := func(string, string) forge.Client { return mergeClient{fakeMerger: m} }
 
-	ev, err := liveEvidence(context.Background(), resolve, mergeBots, cockpit.NewDiffCache(32), mergeRepo1,
+	ev, err := liveEvidence(context.Background(), resolve, mergeBots, mergeRepo1,
 		forge.PullRequest{Number: 9})
 	if err != nil {
 		t.Fatal(err)
@@ -480,7 +487,7 @@ func TestLiveEvidence_Failures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resolve := func(string, string) forge.Client { return tc.client }
-			_, err := liveEvidence(context.Background(), resolve, mergeBots, cockpit.NewDiffCache(32), mergeRepo1,
+			_, err := liveEvidence(context.Background(), resolve, mergeBots, mergeRepo1,
 				forge.PullRequest{Number: 9})
 			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
 				t.Fatalf("err = %v, want %v", err, tc.want)
