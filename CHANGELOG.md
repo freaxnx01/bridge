@@ -12,8 +12,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cockpit merge card: read-only per-file **diff** behind `[diff ▸]`, loaded on
   tap from the new `GET /api/inbox/diff` — the only token-guarded read, because
   it is the only one that serves source code. Answers only for an issue the
-  inbox currently shows as a merge card, cached per `(repo, pr, headSha)`. The
-  open `GET /api/inbox` carries no patches. (#383)
+  inbox currently shows as a merge card, cached per `(repo, pr, headSha)` and
+  seeded by the collector's merge-evidence read, so the usual tap costs no forge
+  call. A PR pushed since the card was collected is answered `409 head moved`
+  rather than served the new head's code under the old SHA. The open
+  `GET /api/inbox` carries no patches, and neither does the MCP `get_pr`. (#383)
 - Cockpit inbox: **merge card** for agent PRs awaiting a human merge — the PR's
   `## Summary`, the AI review verdict checked against the current head, the
   checks and the changed files — with a guarded `POST /api/inbox/merge` that

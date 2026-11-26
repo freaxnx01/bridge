@@ -34,9 +34,10 @@ func (h *DiffHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	d, err := h.Diff(r.Context(), owner, repo, number)
+	status, message, refused := diffRefusalStatus(err)
 	switch {
-	case errors.Is(err, cockpit.ErrNotCandidate), errors.Is(err, cockpit.ErrUnknownRepo):
-		writeError(w, http.StatusConflict, "not on the inbox")
+	case refused:
+		writeError(w, status, message)
 	case err != nil:
 		// The forge's own message can name a repo the reader may not see, so
 		// it goes to the log and never to the client.
@@ -45,6 +46,22 @@ func (h *DiffHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	default:
 		writeJSON(w, nonNilDiff(d))
 	}
+}
+
+// diffRefusalStatus maps a diff load's refusals onto a status and the wording
+// the card shows. The repo-level ones are the merge path's own: the diff
+// resolves the card's repo and the owner's client the same way, so a repo
+// unwired or a token gone since the card was collected cannot answer "forge
+// call failed" here and "no token for this owner" there. ok is false for
+// anything else, including a nil error.
+func diffRefusalStatus(err error) (status int, message string, ok bool) {
+	switch {
+	case errors.Is(err, cockpit.ErrNotCandidate):
+		return http.StatusConflict, "not on the inbox", true
+	case errors.Is(err, cockpit.ErrHeadMoved):
+		return http.StatusConflict, cockpit.ErrHeadMoved.Error(), true
+	}
+	return repoRefusalStatus(err)
 }
 
 // splitRepo parses an "owner/name" repo reference into its two non-empty

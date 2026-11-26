@@ -40,6 +40,27 @@ func TestDiffCache_HitDoesNotReload(t *testing.T) {
 	}
 }
 
+// The collector reads a merge candidate's files to build its evidence and the
+// open inbox drops the patches again; what it puts here is what the diff
+// endpoint then serves without a forge call of its own.
+func TestDiffCache_Put_ServesTheGetWithoutLoading(t *testing.T) {
+	load, calls := counting()
+	c := NewDiffCache(32)
+	seeded := Diff{PR: 9, HeadSHA: mergeHead, Files: []DiffFile{{Path: "a.go", Patch: "@@ -1 +1 @@\n+x"}}}
+
+	c.Put(diffKey, seeded)
+	got, err := c.Get(context.Background(), diffKey, load)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if *calls != 0 {
+		t.Errorf("loads = %d, want the put diff served as is", *calls)
+	}
+	if len(got.Files) != 1 || got.Files[0].Patch != seeded.Files[0].Patch {
+		t.Errorf("diff = %+v", got)
+	}
+}
+
 func TestDiffCache_NewHeadSHA_Refetches(t *testing.T) {
 	load, calls := counting()
 	c := NewDiffCache(32)

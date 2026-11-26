@@ -11,7 +11,7 @@ import (
 )
 
 func TestCockpitSources_Issues_UnsupportedForge_ReportsSkip(t *testing.T) {
-	src := cockpitSources(func(string, string) forge.Client { return nil }, nil)
+	src := cockpitSources(func(string, string) forge.Client { return nil }, nil, cockpit.NewDiffCache(0))
 	cases := []struct {
 		name  string
 		forge string
@@ -34,7 +34,7 @@ func TestCockpitSources_Issues_UnsupportedForge_ReportsSkip(t *testing.T) {
 
 func TestCockpitSources_NoClientForOwner_ReportsError(t *testing.T) {
 	noClient := func(string, string) forge.Client { return nil }
-	src := cockpitSources(noClient, nil)
+	src := cockpitSources(noClient, nil, cockpit.NewDiffCache(0))
 	r := core.Repo{Forge: "github", Owner: "freaxnx01", Name: "bridge"}
 	ctx := context.Background()
 
@@ -57,7 +57,7 @@ func TestCockpitSources_NoClientForOwner_ReportsError(t *testing.T) {
 }
 
 func TestCockpitSources_Issue_NoClientForOwner_ReportsError(t *testing.T) {
-	src := cockpitSources(func(string, string) forge.Client { return nil }, nil)
+	src := cockpitSources(func(string, string) forge.Client { return nil }, nil, cockpit.NewDiffCache(0))
 	ctx := context.Background()
 
 	repos := []struct {
@@ -77,7 +77,7 @@ func TestCockpitSources_Issue_NoClientForOwner_ReportsError(t *testing.T) {
 }
 
 func TestCockpitSources_NonGithubRepo_NoPRsWithoutError(t *testing.T) {
-	src := cockpitSources(func(string, string) forge.Client { return nil }, nil)
+	src := cockpitSources(func(string, string) forge.Client { return nil }, nil, cockpit.NewDiffCache(0))
 	r := core.Repo{Forge: "forgejo", Owner: "freax", Name: "org"}
 	prs, err := src.PRs(context.Background(), r)
 	if err != nil || prs != nil {
@@ -91,7 +91,7 @@ func TestCockpitSources_ResolvesPerOwner(t *testing.T) {
 		owners = append(owners, forgeName+":"+owner)
 		return nil
 	}
-	src := cockpitSources(resolve, nil)
+	src := cockpitSources(resolve, nil, cockpit.NewDiffCache(0))
 	if _, err := src.Issues(context.Background(), core.Repo{Forge: "github", Owner: "anim-bossinfo-ch", Name: "x"}); !errors.Is(err, errNoForgeClient) {
 		t.Fatalf("err = %v, want errNoForgeClient", err)
 	}

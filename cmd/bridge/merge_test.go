@@ -449,7 +449,7 @@ func TestLiveEvidence_ReReadsThePRAndDecidesOnIt(t *testing.T) {
 	m := greenMerger()
 	resolve := func(string, string) forge.Client { return mergeClient{fakeMerger: m} }
 
-	ev, err := liveEvidence(context.Background(), resolve, mergeBots, mergeRepo1,
+	ev, err := liveEvidence(context.Background(), resolve, mergeBots, cockpit.NewDiffCache(32), mergeRepo1,
 		forge.PullRequest{Number: 9})
 	if err != nil {
 		t.Fatal(err)
@@ -480,7 +480,7 @@ func TestLiveEvidence_Failures(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			resolve := func(string, string) forge.Client { return tc.client }
-			_, err := liveEvidence(context.Background(), resolve, mergeBots, mergeRepo1,
+			_, err := liveEvidence(context.Background(), resolve, mergeBots, cockpit.NewDiffCache(32), mergeRepo1,
 				forge.PullRequest{Number: 9})
 			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
 				t.Fatalf("err = %v, want %v", err, tc.want)

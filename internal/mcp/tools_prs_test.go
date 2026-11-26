@@ -267,6 +267,36 @@ func TestHandleGetPR_CapsFilesAndFlagsTruncation(t *testing.T) {
 	}
 }
 
+// forge.PRFile carries the unified diff for the cockpit's token-guarded diff
+// endpoint. get_pr says which files a PR touched; the patches of up to 100 of
+// them would be hundreds of kilobytes of an agent's context nobody asked for.
+func TestHandleGetPR_DropsThePatches(t *testing.T) {
+	c := newFakePRs()
+	c.pr = forge.PullRequest{Number: 1, HeadSHA: "abc", ChangedFiles: 2}
+	c.files = []forge.PRFile{
+		{Path: "a.go", Status: "modified", Additions: 3, Deletions: 1, Patch: "@@ -1 +1 @@\n+secret"},
+		{Path: "b.go", Status: "added", Patch: "@@ -0,0 +1 @@\n+more"},
+	}
+
+	_, out, err := depsFor(c).handleGetPR(context.Background(), nil, getPRInput{Forge: "github", Owner: "o", Repo: "r", Number: 1})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out.Files) != 2 {
+		t.Fatalf("files: %+v", out.Files)
+	}
+	for _, f := range out.Files {
+		if f.Patch != "" {
+			t.Errorf("file %s carries a patch: %q", f.Path, f.Patch)
+		}
+	}
+	// Everything else about the file survives.
+	if out.Files[0].Path != "a.go" || out.Files[0].Status != "modified" ||
+		out.Files[0].Additions != 3 || out.Files[0].Deletions != 1 {
+		t.Errorf("file = %+v", out.Files[0])
+	}
+}
+
 func TestHandleGetPR_ChecksFailureIsPartialResult(t *testing.T) {
 	c := newFakePRs()
 	c.pr = forge.PullRequest{Number: 1, HeadSHA: "abc", ChangedFiles: 1}

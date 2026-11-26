@@ -5,7 +5,9 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/freaxnx01/bridge/internal/api"
 	"github.com/freaxnx01/bridge/internal/cockpit"
+	"github.com/freaxnx01/bridge/internal/core"
 	"github.com/freaxnx01/bridge/internal/forge"
 )
 
@@ -36,6 +38,9 @@ func TestInboxDiff_ShownCard_ReadsThePRFiles(t *testing.T) {
 	}
 	if gotForge != "github" || gotOwner != "o" {
 		t.Errorf("resolved %s/%s, want the repo owner's client", gotForge, gotOwner)
+	}
+	if !m.did("get o/a#9") || !m.did("files o/a#9") {
+		t.Errorf("calls = %q, want the head verified before the files are read", m.calls)
 	}
 	if d.PR != 9 || d.HeadSHA != mergeHead || !d.Truncated {
 		t.Errorf("diff = %+v", d)
@@ -104,12 +109,95 @@ func TestInboxDiff_CachesPerHeadSHA(t *testing.T) {
 		t.Errorf("file reads = %d, want the second request served from the cache", reads())
 	}
 
+	// A push the collector has already seen: the card and the PR are both at
+	// the new head, so the diff of that head is read fresh.
 	cards.card.Merge.HeadSHA = mergeOld
+	m.pr.HeadSHA = mergeOld
 	if _, err := inboxDiff(context.Background(), cards, mergeRepos, resolve, cache, "o", "a", 5); err != nil {
 		t.Fatal(err)
 	}
 	if reads() != 2 {
 		t.Errorf("file reads = %d, want a pushed head to be re-read", reads())
+	}
+}
+
+// The file listing answers for the PR's current head, so a head that moved
+// since the card was collected would serve the operator code the card's review
+// verdict was never given on — labelled, and cached, under the old SHA.
+func TestInboxDiff_HeadMovedSinceTheCard_RefusedBeforeTheFiles(t *testing.T) {
+	m := greenMerger()
+	m.files = diffFiles()
+	m.pr.HeadSHA = "2222222222222222222222222222222222222222"
+	cards := shownCard(9)
+	resolve := func(string, string) forge.Client { return mergeClient{fakeMerger: m} }
+
+	_, err := inboxDiff(context.Background(), cards, mergeRepos, resolve,
+		cockpit.NewDiffCache(32), "o", "a", 5)
+	if !errors.Is(err, cockpit.ErrHeadMoved) {
+		t.Fatalf("err = %v, want ErrHeadMoved", err)
+	}
+	if m.didAny("files ") {
+		t.Errorf("calls = %q, a moved head is not worth the file read", m.calls)
+	}
+}
+
+// The repo-level refusals are the merge path's own sentinels, which the handler
+// maps to the card's 409/422 — not to a 502 "forge call failed".
+func TestInboxDiff_RepoAndClientFailures(t *testing.T) {
+	cases := []struct {
+		name   string
+		client forge.Client
+		repos  func() ([]core.Repo, error)
+		want   error
+	}{
+		{"repo no longer wired", mergeClient{fakeMerger: greenMerger()},
+			func() ([]core.Repo, error) { return nil, nil }, api.ErrUnknownRepo},
+		{"repos listing fails", mergeClient{fakeMerger: greenMerger()},
+			func() ([]core.Repo, error) { return nil, errors.New("boom") }, nil},
+		{"no client for the owner", nil, mergeRepos, api.ErrNoToken},
+		{"client cannot read PRs", baseClient{}, mergeRepos, api.ErrMergeUnsupported},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			resolve := func(string, string) forge.Client { return tc.client }
+			_, err := inboxDiff(context.Background(), shownCard(9), tc.repos, resolve,
+				cockpit.NewDiffCache(32), "o", "a", 5)
+			if err == nil || (tc.want != nil && !errors.Is(err, tc.want)) {
+				t.Fatalf("err = %v, want %v", err, tc.want)
+			}
+		})
+	}
+}
+
+// The collector's evidence read downloads the patches and the open inbox drops
+// them again, so it hands the file list to the diff cache: the operator's tap
+// on a card the collector just read costs no forge call at all.
+func TestInboxDiff_CollectedCard_ServedFromTheSeededCache(t *testing.T) {
+	m := greenMerger()
+	m.files = diffFiles()
+	cache := cockpit.NewDiffCache(32)
+	resolve := func(string, string) forge.Client { return mergeClient{fakeMerger: m} }
+
+	ev, err := liveEvidence(context.Background(), resolve, mergeBots, cache, mergeRepo1,
+		forge.PullRequest{Number: 9})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.calls = nil
+
+	d, err := inboxDiff(context.Background(), shownCard(9), mergeRepos, resolve, cache, "o", "a", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(m.calls) > 0 {
+		t.Errorf("calls = %q, want the diff served from the collected file list", m.calls)
+	}
+	if d.PR != 9 || d.HeadSHA != ev.HeadSHA || len(d.Files) != 2 || d.Files[0].Patch == "" {
+		t.Errorf("diff = %+v", d)
+	}
+	// The evidence itself still carries no patch: only the cache does.
+	if ev.Files[0].Patch != "" {
+		t.Errorf("evidence files = %+v, want the open inbox's copy patchless", ev.Files)
 	}
 }
 

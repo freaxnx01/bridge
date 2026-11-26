@@ -238,9 +238,14 @@ func runServe(cmd *cobra.Command, _ []string) error {
 
 	clients := cachedClients(clientForMCP(reposRoots()))
 	bots := pipelineBots(os.Getenv("BRIDGE_PIPELINE_BOTS"))
-	collector := cockpit.NewCollector(cockpitSources(clients, bots), cockpit.DefaultIntervals(), time.Now, func(ev string) {
-		hub.Broadcast(web.Event{Type: ev})
-	})
+	// One cache for the process: the collector's merge-evidence read fills it
+	// with the file list it pays for anyway, and a card reopened at the same
+	// head must not cost another forge call.
+	diffCache := cockpit.NewDiffCache(diffCacheSize)
+	collector := cockpit.NewCollector(cockpitSources(clients, bots, diffCache), cockpit.DefaultIntervals(), time.Now,
+		func(ev string) {
+			hub.Broadcast(web.Event{Type: ev})
+		})
 	go collector.Run(ctx)
 	pipelineH := pipelineHandler(ctx, collector, reposWithMeta, clients)
 	origins := newOriginAllowlist(servePort, os.Getenv("BRIDGE_COCKPIT_ORIGINS"))
@@ -261,9 +266,6 @@ func runServe(cmd *cobra.Command, _ []string) error {
 			return res, nil
 		},
 	}
-	// One cache for the process: the diff is read lazily per click, and a card
-	// reopened at the same head must not cost another forge call.
-	diffCache := cockpit.NewDiffCache(diffCacheSize)
 	diffH := &api.DiffHandler{
 		Diff: func(c context.Context, owner, name string, number int) (cockpit.Diff, error) {
 			return inboxDiff(c, collector, reposWithMeta, clients, diffCache, owner, name, number)
