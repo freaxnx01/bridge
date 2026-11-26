@@ -51,7 +51,26 @@ func TestGithubListPullRequestFiles_MapsFilenameToPath(t *testing.T) {
 	if uri != "/repos/o/r/pulls/90/files?per_page=100" {
 		t.Errorf("uri: %s", uri)
 	}
-	if len(files) != 1 || files[0] != (PRFile{Path: "a/b.go", Additions: 5, Deletions: 2}) {
+	if len(files) != 1 || files[0] != (PRFile{Path: "a/b.go", Status: "modified", Additions: 5, Deletions: 2}) {
+		t.Errorf("files: %+v", files)
+	}
+}
+
+func TestGithubListPullRequestFiles_StatusAndPatch(t *testing.T) {
+	var uri string
+	srv := serveJSON(t, `[{"filename":"a.go","status":"modified","additions":1,"deletions":0,
+	    "patch":"@@ -1 +1 @@\n+x"},
+	  {"filename":"img.png","status":"added","additions":0,"deletions":0}]`, &uri)
+
+	files, err := NewGithubClient("tok", srv.URL).ListPullRequestFiles(context.Background(), "o", "r", 90)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []PRFile{
+		{Path: "a.go", Status: "modified", Additions: 1, Patch: "@@ -1 +1 @@\n+x"},
+		{Path: "img.png", Status: "added"},
+	}
+	if len(files) != 2 || files[0] != want[0] || files[1] != want[1] {
 		t.Errorf("files: %+v", files)
 	}
 }

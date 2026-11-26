@@ -5,7 +5,12 @@ vi.mock('../stores/sse.js', () => ({
   sseEvent: { subscribe: (fn) => { fn(null); return () => {} } },
 }))
 const authedPost = vi.fn()
-vi.mock('../auth.js', () => ({ ensureToken: async () => 'tok', authedPost: (...a) => authedPost(...a) }))
+const authedGet = vi.fn()
+vi.mock('../auth.js', () => ({
+  ensureToken: async () => 'tok',
+  authedPost: (...a) => authedPost(...a),
+  authedGet: (...a) => authedGet(...a),
+}))
 const loadInbox = vi.fn()
 vi.mock('../stores/inbox.js', () => ({ loadInbox: (...a) => loadInbox(...a) }))
 
@@ -53,10 +58,36 @@ function show(over = {}, mergeOver = {}) {
 }
 
 let calls
+let diffCalls
 beforeEach(() => {
   calls = []
+  diffCalls = []
   loadInbox.mockReset()
+  authedGet.mockReset()
+  authedGet.mockImplementation(async (...args) => {
+    diffCalls.push(args)
+    return diffPayload()
+  })
 })
+
+// diffPayload is what GET /api/inbox/diff answers for the fixture's PR.
+const diffPayload = (over = {}) => ({
+  pr: 9,
+  headSha: HEAD,
+  truncated: false,
+  files: [{ path: 'a.go', status: 'modified', additions: 1, deletions: 0,
+            patch: '@@ -1 +1 @@\n+x', patchMissing: false }],
+  ...over,
+})
+
+function diffFails(status, message) {
+  authedGet.mockImplementation(async (...args) => {
+    diffCalls.push(args)
+    throw Object.assign(new Error(message), { status })
+  })
+}
+
+const diffButton = () => screen.getByRole('button', { name: /diff/ })
 
 function answers(result) {
   authedPost.mockImplementation(async (...args) => {
@@ -243,6 +274,56 @@ describe('MergeCard', () => {
 
     await fireEvent.click(screen.getByRole('link', { name: /Open PR/ }))
     expect(onopen).toHaveBeenCalledTimes(1)
+  })
+
+  it('loads the diff on tap with the token', async () => {
+    show()
+    await fireEvent.click(diffButton())
+
+    expect(diffCalls).toEqual([['/api/inbox/diff?repo=freaxnx01%2Fbridge&number=5', 'tok']])
+    expect(await screen.findByRole('button', { name: /a\.go/ })).toBeTruthy()
+  })
+
+  it('loads the diff once and toggles it closed again', async () => {
+    show()
+    await fireEvent.click(diffButton())
+    await screen.findByRole('button', { name: /a\.go/ })
+    await fireEvent.click(diffButton())
+    expect(screen.queryByRole('button', { name: /a\.go/ })).toBeNull()
+    await fireEvent.click(diffButton())
+    await screen.findByRole('button', { name: /a\.go/ })
+
+    expect(diffCalls.length).toBe(1)
+  })
+
+  it('drops the diff when the head SHA changes', async () => {
+    const NEW = '2222222222222222222222222222222222222222'
+    const { rerender } = show()
+    await fireEvent.click(diffButton())
+    await screen.findByRole('button', { name: /a\.go/ })
+
+    await rerender({ card: card({}, { headSha: NEW }), now: NOW, onopen: () => {} })
+    expect(screen.queryByRole('button', { name: /a\.go/ })).toBeNull()
+
+    await fireEvent.click(diffButton())
+    expect(diffCalls.length).toBe(2)
+  })
+
+  it('409 shows the reason', async () => {
+    diffFails(409, 'not on the inbox')
+    show()
+    await fireEvent.click(diffButton())
+    expect((await screen.findByRole('alert')).textContent).toMatch(/Diff unavailable: not on the inbox/)
+  })
+
+  it.each([
+    [401, 'unauthorized', /Token rejected/],
+    [502, 'forge call failed', /forge call failed/],
+  ])('diff failure for status %s', async (status, message, shown) => {
+    diffFails(status, message)
+    show()
+    await fireEvent.click(diffButton())
+    expect((await screen.findByRole('alert')).textContent).toMatch(shown)
   })
 
   it('renders a title containing markup as literal text', () => {

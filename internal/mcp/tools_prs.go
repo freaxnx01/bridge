@@ -182,16 +182,21 @@ func prDetails(ctx context.Context, reader prReader, in getPRInput, pr forge.Pul
 	return out
 }
 
-// capFiles keeps at most maxPRFiles and reports whether the PR changed more
-// files than are returned.
+// capFiles keeps at most maxPRFiles, drops their patches, and reports whether
+// the PR changed more files than are returned. get_pr answers "what did this PR
+// touch": the unified diff of up to 100 files is hundreds of kilobytes of an
+// agent's context nobody asked for, so the patches forge.PRFile carries for the
+// cockpit's diff endpoint stop here.
 func capFiles(files []forge.PRFile, changedFiles int) ([]forge.PRFile, bool) {
-	if files == nil {
-		files = []forge.PRFile{}
-	}
 	if len(files) > maxPRFiles {
 		files = files[:maxPRFiles]
 	}
-	return files, changedFiles > len(files)
+	out := make([]forge.PRFile, 0, len(files))
+	for _, f := range files {
+		f.Patch = ""
+		out = append(out, f)
+	}
+	return out, changedFiles > len(out)
 }
 
 const (

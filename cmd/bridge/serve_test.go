@@ -275,7 +275,7 @@ func TestInboxRoutes_MergeGuarded_ReadsOpen(t *testing.T) {
 		t.Run("merge "+tc.name, func(t *testing.T) {
 			merged = false
 			mux := http.NewServeMux()
-			registerInboxRoutes(mux, h, tc.token, testAllowlist())
+			registerInboxRoutes(mux, h, diffNoop(), tc.token, testAllowlist())
 			req := httptest.NewRequest(http.MethodPost, "http://localhost:7777/api/inbox/merge", strings.NewReader(body))
 			if tc.origin != "" {
 				req.Header.Set("Origin", tc.origin)
@@ -295,11 +295,65 @@ func TestInboxRoutes_MergeGuarded_ReadsOpen(t *testing.T) {
 	}
 	t.Run("inbox read stays open", func(t *testing.T) {
 		mux := http.NewServeMux()
-		registerInboxRoutes(mux, h, "secret", testAllowlist())
+		registerInboxRoutes(mux, h, diffNoop(), "secret", testAllowlist())
 		w := httptest.NewRecorder()
 		mux.ServeHTTP(w, httptest.NewRequest(http.MethodGet, "http://localhost:7777/api/inbox", nil))
 		if w.Code != http.StatusOK {
 			t.Fatalf("GET /api/inbox = %d, want 200 without a token", w.Code)
 		}
 	})
+}
+
+// diffNoop is a DiffHandler whose loader answers an empty diff.
+func diffNoop() *api.DiffHandler {
+	return &api.DiffHandler{
+		Diff: func(context.Context, string, string, int) (cockpit.Diff, error) { return cockpit.Diff{}, nil },
+	}
+}
+
+// The diff is the one read that serves source code, so it needs the bearer
+// token — but no Origin: a browser sends none on a same-origin GET, and a
+// bearer header is never attached cross-site.
+func TestInboxRoutes_DiffNeedsTheTokenButNoOrigin(t *testing.T) {
+	h := &api.InboxHandler{Inbox: func() cockpit.Inbox { return cockpit.Inbox{} }}
+	loaded := false
+	diffH := &api.DiffHandler{
+		Diff: func(context.Context, string, string, int) (cockpit.Diff, error) {
+			loaded = true
+			return cockpit.Diff{PR: 9}, nil
+		},
+	}
+	cases := []struct {
+		name, token, origin, auth string
+		want                      int
+	}{
+		{"no token configured", "", "http://localhost:7777", "Bearer secret", http.StatusServiceUnavailable},
+		{"no bearer", "secret", "http://localhost:7777", "", http.StatusUnauthorized},
+		{"wrong bearer", "secret", "http://localhost:7777", "Bearer nope", http.StatusUnauthorized},
+		{"no origin at all", "secret", "", "Bearer secret", http.StatusOK},
+		{"foreign origin", "secret", "http://evil.example", "Bearer secret", http.StatusOK},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			loaded = false
+			mux := http.NewServeMux()
+			registerInboxRoutes(mux, h, diffH, tc.token, testAllowlist())
+			req := httptest.NewRequest(http.MethodGet,
+				"http://localhost:7777/api/inbox/diff?repo=o/a&number=5", nil)
+			if tc.origin != "" {
+				req.Header.Set("Origin", tc.origin)
+			}
+			if tc.auth != "" {
+				req.Header.Set("Authorization", tc.auth)
+			}
+			w := httptest.NewRecorder()
+			mux.ServeHTTP(w, req)
+			if w.Code != tc.want {
+				t.Fatalf("status = %d, want %d (%s)", w.Code, tc.want, w.Body)
+			}
+			if loaded != (tc.want == http.StatusOK) {
+				t.Fatalf("diff loaded = %v for status %d", loaded, w.Code)
+			}
+		})
+	}
 }

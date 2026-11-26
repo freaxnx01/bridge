@@ -304,10 +304,25 @@ func BuildEvidence(pr forge.PullRequest, comments []forge.Comment, runs []forge.
 		Summary: SummarySection(pr.Body),
 		Review:  LatestVerdict(comments, pr.HeadSHA, bots),
 		Checks:  SummarizeChecks(runs, statuses),
-		Files:   files, FilesTruncated: pr.ChangedFiles > len(files),
+		Files:   withoutPatches(files), FilesTruncated: pr.ChangedFiles > len(files),
 	}
 	e.CanMerge, e.Reason = Eligibility(e)
 	return e
+}
+
+// withoutPatches copies the file list with every patch dropped. The evidence
+// travels in the open GET /api/inbox, which must carry no source code: the
+// patch is served only by the token-guarded diff endpoint.
+func withoutPatches(files []forge.PRFile) []forge.PRFile {
+	if files == nil {
+		return nil
+	}
+	out := make([]forge.PRFile, len(files))
+	for i, f := range files {
+		f.Patch = ""
+		out[i] = f
+	}
+	return out
 }
 
 // Eligibility is the single rule the card and the merge endpoint both apply:

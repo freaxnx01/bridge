@@ -1,9 +1,10 @@
 <script>
-  import { authedPost, ensureToken } from '../auth.js';
+  import { authedGet, authedPost, ensureToken } from '../auth.js';
   import { loadInbox } from '../stores/inbox.js';
   import { shortRef } from '../inbox.js';
   import { ageSeconds, formatAge } from '../freshness.js';
   import ConfirmDialog from './ConfirmDialog.svelte';
+  import DiffView from './DiffView.svelte';
 
   let { card, now, onopen } = $props();
 
@@ -31,6 +32,52 @@
   // reloads underneath an open dialog, and the merge must post the head the
   // operator confirmed, not whatever the card says by the time they click.
   let pinned = $state(null);
+
+  // The diff is loaded on demand, once per head SHA: it is the only read that
+  // costs a forge call, and it is the only one that needs the token.
+  let diff = $state(null);
+  let diffOpen = $state(false);
+  let diffLoading = $state(false);
+  let diffFailure = $state('');
+  // A loaded diff describes one commit, so a push makes it worthless: the card
+  // then shows [diff ▸] again and the next tap re-reads it.
+  const loadedDiff = $derived(diff && diff.headSha === ev.headSha ? diff : null);
+  const shownDiff = $derived(diffOpen ? loadedDiff : null);
+
+  async function toggleDiff() {
+    if (shownDiff) {
+      diffOpen = false;
+      return;
+    }
+    diffOpen = true;
+    diffFailure = '';
+    if (loadedDiff) return;
+    await loadDiff();
+  }
+
+  async function loadDiff() {
+    const diffToken = await ensureToken();
+    if (!diffToken) {
+      diffOpen = false;
+      return;
+    }
+    diffLoading = true;
+    try {
+      const query = `repo=${encodeURIComponent(card.repo)}&number=${card.number}`;
+      diff = await authedGet(`/api/inbox/diff?${query}`, diffToken);
+    } catch (err) {
+      diff = null;
+      diffFailure = diffFailureText(err);
+    } finally {
+      diffLoading = false;
+    }
+  }
+
+  function diffFailureText(err) {
+    if (err.status === 401) return 'Token rejected';
+    if (err.status === 409) return `Diff unavailable: ${err.message}`;
+    return err.message || 'request failed';
+  }
 
   async function start() {
     token = await ensureToken();
@@ -110,9 +157,19 @@
   {/if}
 
   <div class="actions">
-    <!-- #383 adds the read-only diff next to Open PR. -->
     {#if ev.prUrl}
       <a href={ev.prUrl} target="_blank" rel="noopener noreferrer">Open PR ↗</a>
+    {/if}
+    {#if ev.pr}
+      <button
+        type="button"
+        class="link diff-toggle"
+        aria-expanded={Boolean(shownDiff)}
+        disabled={diffLoading}
+        onclick={toggleDiff}
+      >
+        {diffLoading ? 'diff …' : `diff ${shownDiff ? '▾' : '▸'}`}
+      </button>
     {/if}
     <!-- Merge is gone once it landed: the result line below is all there is
          left to say, and a second post would only earn the operator a 409 for
@@ -125,6 +182,15 @@
       </button>
     {/if}
   </div>
+
+  {#if shownDiff}
+    <DiffView diff={shownDiff} />
+  {:else if diffFailure}
+    <p class="result error" role="alert">
+      ✗ {diffFailure}
+      <button type="button" class="link" onclick={() => (diffFailure = '')}>dismiss</button>
+    </p>
+  {/if}
 
   {#if state === 'done'}
     <p class="result ok">✓ {outcome}</p>
@@ -260,6 +326,12 @@
   }
   .result.error {
     color: var(--error);
+  }
+  .diff-toggle {
+    min-height: 44px;
+    font-size: 0.9em;
+    text-decoration: none;
+    color: var(--accent);
   }
   .link {
     min-height: 0;

@@ -30,8 +30,13 @@ type fakeMerger struct {
 	files    []forge.PRFile
 
 	prErr    error
+	filesErr error
 	mergeErr error
 	delErr   error
+
+	// onFiles runs inside ListPullRequestFiles, to model a push that lands
+	// while the files are being read.
+	onFiles func(*fakeMerger)
 
 	calls []string
 }
@@ -54,8 +59,12 @@ func (f *fakeMerger) ListCommitStatuses(_ context.Context, _, _, _ string) ([]fo
 	return f.statuses, nil
 }
 
-func (f *fakeMerger) ListPullRequestFiles(_ context.Context, _, _ string, _ int) ([]forge.PRFile, error) {
-	return f.files, nil
+func (f *fakeMerger) ListPullRequestFiles(_ context.Context, owner, repo string, number int) ([]forge.PRFile, error) {
+	f.calls = append(f.calls, "files "+ref(owner, repo, number))
+	if f.onFiles != nil {
+		f.onFiles(f)
+	}
+	return f.files, f.filesErr
 }
 
 func (f *fakeMerger) MergePullRequest(_ context.Context, owner, repo string, number int, sha, method string) error {

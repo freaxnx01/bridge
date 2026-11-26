@@ -6,7 +6,6 @@ import (
 	"log/slog"
 	"net/http"
 	"regexp"
-	"strings"
 )
 
 // MergeRequest asks for one agent PR to be merged. HeadSHA is the head the
@@ -81,7 +80,7 @@ func decodeMergeRequest(w http.ResponseWriter, r *http.Request) (MergeRequest, b
 		return req, false
 	}
 	switch {
-	case strings.Count(req.Repo, "/") != 1 || strings.HasPrefix(req.Repo, "/") || strings.HasSuffix(req.Repo, "/"):
+	case !repoIsOwnerName(req.Repo):
 		writeError(w, http.StatusBadRequest, "repo must be owner/name")
 	case req.Number <= 0:
 		writeError(w, http.StatusBadRequest, "number must be positive")
@@ -101,21 +100,35 @@ func decodeMergeRequest(w http.ResponseWriter, r *http.Request) (MergeRequest, b
 func writeMergeError(w http.ResponseWriter, req MergeRequest, err error) {
 	var notMergeable ErrNotMergeable
 	var refused ErrForgeRefused
+	status, message, repoRefused := repoRefusalStatus(err)
 	switch {
 	case errors.As(err, &notMergeable):
 		writeError(w, http.StatusConflict, notMergeable.Reason)
 	case errors.As(err, &refused):
 		writeForgeRefusal(w, req, refused)
-	case errors.Is(err, ErrUnknownRepo):
-		writeError(w, http.StatusConflict, "not on the inbox")
-	case errors.Is(err, ErrNoToken):
-		writeError(w, http.StatusUnprocessableEntity, ErrNoToken.Error())
-	case errors.Is(err, ErrMergeUnsupported):
-		writeError(w, http.StatusUnprocessableEntity, ErrMergeUnsupported.Error())
+	case repoRefused:
+		writeError(w, status, message)
 	default:
 		slog.Error("inbox merge failed", "repo", req.Repo, "pr", req.PR, "error", err)
 		writeError(w, http.StatusBadGateway, "forge call failed")
 	}
+}
+
+// repoRefusalStatus maps the refusals every card action shares — a repo that is
+// no longer wired, an owner whose token is gone, a forge that cannot be merged
+// — onto a status and the wording to show. Both the merge and the diff of a card
+// resolve the same repo and the same client, so they answer these the same way.
+// ok is false for anything else, including a nil error.
+func repoRefusalStatus(err error) (status int, message string, ok bool) {
+	switch {
+	case errors.Is(err, ErrUnknownRepo):
+		return http.StatusConflict, "not on the inbox", true
+	case errors.Is(err, ErrNoToken):
+		return http.StatusUnprocessableEntity, ErrNoToken.Error(), true
+	case errors.Is(err, ErrMergeUnsupported):
+		return http.StatusUnprocessableEntity, ErrMergeUnsupported.Error(), true
+	}
+	return 0, "", false
 }
 
 // writeForgeRefusal passes the forge's own refusal on: the statuses that mean

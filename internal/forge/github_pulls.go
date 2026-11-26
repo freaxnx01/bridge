@@ -101,15 +101,20 @@ func (c *GithubClient) GetPullRequest(ctx context.Context, owner, repo string, n
 func (c *GithubClient) ListPullRequestFiles(ctx context.Context, owner, repo string, number int) ([]PRFile, error) {
 	var raw []struct {
 		Filename  string `json:"filename"`
+		Status    string `json:"status"`
 		Additions int    `json:"additions"`
 		Deletions int    `json:"deletions"`
+		Patch     string `json:"patch"`
 	}
 	if err := c.get(ctx, fmt.Sprintf("%s/pulls/%d/files?per_page=100", repoPath(owner, repo), number), &raw); err != nil {
 		return nil, err
 	}
 	out := make([]PRFile, 0, len(raw))
 	for _, f := range raw {
-		out = append(out, PRFile{Path: f.Filename, Additions: f.Additions, Deletions: f.Deletions})
+		out = append(out, PRFile{
+			Path: f.Filename, Status: f.Status,
+			Additions: f.Additions, Deletions: f.Deletions, Patch: f.Patch,
+		})
 	}
 	return out, nil
 }

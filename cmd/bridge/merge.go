@@ -194,7 +194,78 @@ func mergeInboxCard(ctx context.Context, cards mergeCards, repos func() ([]core.
 	return mergePR(ctx, m, bots, req)
 }
 
-// mergeRepo finds the clone the merge applies to.
+// inboxDiff is the DiffHandler's Diff: the per-file diff of the PR the issue's
+// merge card is currently showing, read through cache so a card reopened at the
+// same head costs no forge call. An issue that is not a merge card is refused before anything is
+// resolved — the diff reads no arbitrary PR.
+func inboxDiff(ctx context.Context, cards mergeCards, repos func() ([]core.Repo, error),
+	resolve clientResolver, cache *cockpit.DiffCache, owner, name string, number int) (cockpit.Diff, error) {
+	card, ok := cards.MergeCard(owner, name, number)
+	if !ok || card.Kind != cockpit.CardMerge || card.Merge == nil {
+		return cockpit.Diff{}, fmt.Errorf("%w: %s/%s#%d", cockpit.ErrNotCandidate, owner, name, number)
+	}
+	ev := card.Merge
+	return cache.Get(ctx, diffKey(owner, name, ev.PR, ev.HeadSHA), func(ctx context.Context) (cockpit.Diff, error) {
+		return prDiff(ctx, repos, resolve, owner, name, ev)
+	})
+}
+
+// diffKey identifies one PR's cached diff.
+func diffKey(owner, name string, pr int, headSHA string) cockpit.DiffKey {
+	return cockpit.DiffKey{Repo: owner + "/" + name, PR: pr, HeadSHA: headSHA}
+}
+
+// prDiff reads one PR's diff with the repo owner's own client, for the head the
+// card was collected at.
+//
+// The file listing answers for whatever the PR's head is now: served under the
+// card's older SHA it would show the operator code the review verdict on the
+// card was never given on, and cache it under that SHA on top. So the head is
+// checked before the files (a moved head is not worth the read) and again after
+// them (a push can land in between). A head that has moved is refused with
+// ErrHeadMoved; the next collection brings the card, and with it the diff, to
+// the new commit.
+func prDiff(ctx context.Context, repos func() ([]core.Repo, error), resolve clientResolver,
+	owner, name string, ev *cockpit.MergeEvidence) (cockpit.Diff, error) {
+	r, err := mergeRepo(repos, owner, name)
+	if err != nil {
+		return cockpit.Diff{}, err
+	}
+	m, err := repoMerger(resolve, r)
+	if err != nil {
+		return cockpit.Diff{}, err
+	}
+	if err := requireCardHead(ctx, m, owner, name, ev); err != nil {
+		return cockpit.Diff{}, err
+	}
+	files, err := m.ListPullRequestFiles(ctx, owner, name, ev.PR)
+	if err != nil {
+		return cockpit.Diff{}, fmt.Errorf("pr files %s/%s#%d: %w", owner, name, ev.PR, err)
+	}
+	if err := requireCardHead(ctx, m, owner, name, ev); err != nil {
+		return cockpit.Diff{}, err
+	}
+	// ev.HeadSHA, not pr.HeadSHA: they name the same commit, and the client
+	// drops a diff whose headSha is not the one its card shows, character for
+	// character. The card's truncation flag is for that same head, so the diff
+	// repeats it rather than deciding it again.
+	return cockpit.NewDiff(ev.PR, ev.HeadSHA, files, ev.FilesTruncated), nil
+}
+
+// requireCardHead re-reads the PR and refuses with ErrHeadMoved unless its head
+// is still the one the card was collected at.
+func requireCardHead(ctx context.Context, m merger, owner, name string, ev *cockpit.MergeEvidence) error {
+	pr, err := m.GetPullRequest(ctx, owner, name, ev.PR)
+	if err != nil {
+		return fmt.Errorf("read pr %s/%s#%d: %w", owner, name, ev.PR, err)
+	}
+	if !strings.EqualFold(pr.HeadSHA, ev.HeadSHA) {
+		return fmt.Errorf("%w: %s/%s#%d is at %s, the card at %s",
+			cockpit.ErrHeadMoved, owner, name, ev.PR, pr.HeadSHA, ev.HeadSHA)
+	}
+	return nil
+}
+
 func mergeRepo(repos func() ([]core.Repo, error), owner, name string) (core.Repo, error) {
 	all, err := repos()
 	if err != nil {
